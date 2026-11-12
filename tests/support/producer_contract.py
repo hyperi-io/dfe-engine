@@ -304,7 +304,7 @@ def producer_file(
 
     Args:
         producer: The repo that ships the file.
-        relative: The file's path in that repo; must be listed in ``producer.files``.
+        relative: The file's path in that repo. Must be listed in ``producer.files``.
         checkouts: Directory holding a checkout of the producer beside this one.
         base_url: Where the raw file is fetched from.
 

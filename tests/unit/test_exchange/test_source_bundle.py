@@ -8,7 +8,7 @@
 
 """A bundle exported from one deployment, imported into a clean one.
 
-alpha carries the operator's schema and source; beta carries only the
+alpha carries the operator's schema and source. Beta carries only the
 pre-supplied schema dfe-schemas ships, as a fresh deployment does.
 """
 
@@ -140,7 +140,7 @@ class TestRoundTripIntoACleanDeployment:
             )
 
         assert actions == {"meta/cisco_ios": "created", "meta/core_tpl": "resolved"}
-        # A fork would show up as a per-source copy of the core path; neither exists.
+        # A fork would show up as a per-source copy of the core path. Neither exists.
         assert {"meta/cisco_ios", "meta/core_tpl"} <= paths
         assert not [path for path in paths if path.startswith("meta/cisco-ios_")]
         assert columns.status_code == 200

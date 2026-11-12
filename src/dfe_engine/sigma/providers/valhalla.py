@@ -67,7 +67,7 @@ def _retry_after_seconds(response: Any) -> float | None:
 class ValhallaProvider(SigmaProvider):
     """Fetch sigma rules from the Valhalla JSON feed over HTTP.
 
-    `_fetch_raw` is the network seam - it POSTs to Valhalla and returns the raw
+    `_fetch_raw` is the network call - it POSTs to Valhalla and returns the raw
     list of rule dicts. Tests subclass/override it to exercise normalisation +
     incremental filtering with canned data and NO live network.
     """
@@ -109,12 +109,12 @@ class ValhallaProvider(SigmaProvider):
         return []
 
     async def _fetch_raw(self) -> list[dict[str, Any]]:
-        """POST getsigma; return the raw rule dicts. Network seam.
+        """POST getsigma. Return the raw rule dicts. Network call.
 
         ``scalo.http`` already retries transport + 5xx errors (stamina) and raises
         for status, so the ONLY thing left to add here is the 429/Retry-After
         handler valhalla's aggressive rate limiting needs - scalo never retries a
-        4xx. A non-429 4xx (e.g. a bad apikey -> 401) surfaces immediately; any
+        4xx. A non-429 4xx (e.g. a bad apikey -> 401) surfaces immediately. Any
         other error propagates un-retried (scalo already spent its budget - no
         double retry).
         """

@@ -78,7 +78,7 @@ dependencies = [
     "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.7,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
-    # importlib.resources; the Dockerfile bakes its seed from the installed
+    # importlib.resources. The Dockerfile bakes its seed from the installed
     # wheel. Floor is the first release that ships the source catalogue under
     # catalogue/. uv.lock pins the hash.
     # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
@@ -225,8 +225,8 @@ asyncio_default_fixture_loop_scope = "function"
 timeout = 300
 timeout_method = "thread"
 filterwarnings = [
-    # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2; the
-    # httpx2 migration is a separate follow-up (test-infra only; prod unaffected).
+    # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2. The
+    # httpx2 migration is a separate follow-up (test-infra only, prod unaffected).
     "ignore:Using .httpx. with .starlette.testclient",
     # pytest-benchmark can't run under xdist and the suite runs under it, so
     # benchmarks are intentionally disabled here (run them with -p no:xdist).
@@ -358,7 +358,7 @@ dfe-keda-shim = "dfe_engine.keda_shim.cli:main"
 # Skip B608 (hardcoded SQL) - This is a database library that generates SQL queries.
 # All queries use internal data from configuration/templates, not user input.
 # Skip B701 (jinja2_autoescape_false) - We generate YAML/SQL configs, not HTML.
-# XSS is not applicable; autoescape would break template output.
+# XSS is not applicable. Autoescape would break template output.
 skips = [
     "B104",  # B104=hardcoded_bind_all_interfaces — 0.0.0.0 is intentional for containerised service
     "B608",  # B608=hardcoded_sql — queries use internal config/template data, not user input

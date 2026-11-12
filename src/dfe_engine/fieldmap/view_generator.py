@@ -1,6 +1,6 @@
 """View generator -- produces ClickHouse view DDL from resolved field maps.
 
-Generates CREATE VIEW statements for each standard × source combination.
+Generates CREATE VIEW statements for each standard x source combination.
 View naming convention: ``{table_name}_{standard}``
 (e.g. ``windows_audit_sigma``, ``windows_audit_ecs``).
 
@@ -41,7 +41,7 @@ def usable_view_mappings(
         view_name: The view the mappings are for, named in the log line.
 
     Returns:
-        The usable mappings; empty when none of them target a column on the table.
+        The usable mappings. Empty when none of them target a column on the table.
     """
     if columns is None:
         return mappings
@@ -104,7 +104,7 @@ class ViewGenerator:
         config: DDLConfig | None = None,
         columns: Collection[str] | None = None,
     ) -> str | None:
-        """Generate a single view DDL for a standard × source.
+        """Generate a single view DDL for a standard x source.
 
         Args:
             standard: Standard name (e.g. "sigma", "ecs", "cim").
@@ -144,7 +144,7 @@ class ViewGenerator:
                 from registry (all standards with either a default or
                 source-specific map).
             config: DDL configuration.
-            columns: Column names on *table_name*; see :meth:`generate_view`.
+            columns: Column names on *table_name*. See :meth:`generate_view`.
 
         Returns:
             Dict of standard -> view DDL string.

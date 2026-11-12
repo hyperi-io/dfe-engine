@@ -1,11 +1,11 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_secrets_seam.py
-#  Purpose:      The scalo.secrets seam - real file backend, no mocks
+#  Purpose:      The scalo.secrets interface - real file backend, no mocks
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The minted-secret seam against a real scalo.secrets file backend, and a scripted AWS answer.
+"""The minted-secret interface against a real scalo.secrets file backend, and a scripted AWS answer.
 
 The scripted manager stands in only where AWS behaves in a way moto does not: a forced
 delete that finishes in the background, a refused read and a throttled one.

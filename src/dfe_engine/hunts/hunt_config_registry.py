@@ -185,7 +185,7 @@ class HuntConfigRegistry:
     def _put_raw(
         self, name: str, doc: dict[str, Any], *, created_by: str | None
     ) -> WriteOutcome | None:
-        """Write one hunt doc and log where it landed; returns the git outcome.
+        """Write one hunt doc and log where it landed. Returns the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's spec_loader parses this exact file. Directory backend: plain YAML
@@ -208,7 +208,7 @@ class HuntConfigRegistry:
         return None
 
     def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:
-        """Remove one hunt doc; False when it did not exist, plus the git outcome."""
+        """Remove one hunt doc. False when it did not exist, plus the git outcome."""
         if self._deploy is not None:
             outcome = self._deploy.delete(name, actor=created_by or "engine")
             return outcome is not None, outcome
@@ -256,7 +256,7 @@ class HuntConfigRegistry:
         *,
         created_by: str | None = None,
     ) -> WriteOutcome | None:
-        """Persist one hunt config; returns the git routing outcome, None off gitops.
+        """Persist one hunt config. Returns the git routing outcome, None off gitops.
 
         A production+team write lands on a review branch rather than the branch the
         runner git-syncs, so the caller has to be able to say so.
@@ -362,7 +362,7 @@ class HuntConfigRegistry:
         return held
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
-        """Remove one hunt config; returns the git routing outcome, None off gitops."""
+        """Remove one hunt config. Returns the git routing outcome, None off gitops."""
         found, outcome = self._delete_raw(name, created_by=created_by)
         if not found:
             raise HuntConfigNotFoundError(f"Hunt not found: '{name}'")

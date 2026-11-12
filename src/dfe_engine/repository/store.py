@@ -14,7 +14,7 @@ Storage model (the table spec lives in
 - One ReplacingMergeTree(updated_at, is_deleted) table keyed by
   ``(scope, scope_id, namespace, key)``.
 - Every write is an INSERT of a full new row - latest ``updated_at`` wins.
-- Deletes are tombstone INSERTs (``is_deleted=1``); reads filter them out
+- Deletes are tombstone INSERTs (``is_deleted=1``). Reads filter them out
   with ``FINAL ... AND is_deleted = 0``. Never ALTER UPDATE/DELETE.
 - The etag is the row's ``updated_at`` rendered as an opaque string.
   Timestamps are truncated to millisecond precision client-side so the
@@ -41,7 +41,7 @@ from dfe_engine.settings import default_data_database
 DEFAULT_DATABASE = default_data_database()
 
 # The small-object store's table, by manifest id. The engine's schema phase
-# creates it; nothing here does.
+# creates it. Nothing here does.
 _REPOSITORY_ID = "data.repository"
 
 # Record/metadata shapes returned by the store. Named because the
@@ -91,7 +91,7 @@ class ConflictError(Exception):
 def json_merge_patch(target: Any, patch: Any) -> Any:
     """RFC 7396 JSON Merge Patch.
 
-    Recursive object merge; ``null`` deletes a key; arrays and scalars
+    Recursive object merge. ``null`` deletes a key. Arrays and scalars
     replace wholesale. Implemented locally - no extra dependency.
     """
     if not isinstance(patch, dict):

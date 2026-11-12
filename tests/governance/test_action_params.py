@@ -264,7 +264,7 @@ class TestInvokeWithParams:
 
 class TestPreviewWithParams:
     def test_preview_uses_defaults_and_representatives(self, store):
-        # level has a default (2x); ceiling has none -> representative = min bound
+        # level has a default (2x). Ceiling has none -> representative = min bound
         action = _surge_action(
             params={
                 "level": {"type": "enum", "values": ["2x", "max"], "default": "2x"},

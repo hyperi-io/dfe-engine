@@ -615,7 +615,7 @@ class TestSyncProvider:
     """POST /api/v1/auth/oidc-providers/{name}/sync"""
 
     def test_sync_generic_provider(self, client, admin_headers):
-        """Generic adapter returns empty — sync reports skipped (mode is token_claim)."""
+        """Generic adapter returns empty -- sync reports skipped (mode is token_claim)."""
         _create_provider(client, admin_headers, name="sync-test")
         resp = client.post("/api/v1/auth/oidc-providers/sync-test/sync", headers=admin_headers)
         assert resp.status_code == 200
@@ -1064,7 +1064,7 @@ class TestRelyingPartyStaysInSync:
 
 
 class TestCredentialsGoToTheSecretStore:
-    """A credential sent to the API is written to the store; config keeps a path.
+    """A credential sent to the API is written to the store. Config keeps a path.
 
     The old shape only accepted the NAME of an env var, so a provider created in
     a running engine had no credentials until someone edited the deployment env
@@ -1340,7 +1340,7 @@ class TestScopes:
 
 
 class TestEnvNameFieldsRejectPastedSecrets:
-    """A ``*_env`` field takes the NAME of an env var; anything else is a 422.
+    """A ``*_env`` field takes the NAME of an env var. Anything else is a 422.
 
     The form invited pasting the secret itself, and the API used to accept it and
     write the literal into the provider YAML.
@@ -1415,7 +1415,7 @@ class TestEnvNameFieldsRejectPastedSecrets:
 class TestProviderFieldRules:
     """Create and update refuse fields a provider's type and mode cannot use, before anything is written.
 
-    The rules themselves are covered in test_auth/test_oidc/test_field_rules.py; these check the wiring.
+    The rules themselves are covered in test_auth/test_oidc/test_field_rules.py. These check the wiring.
     """
 
     @pytest.mark.parametrize(

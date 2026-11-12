@@ -8,7 +8,7 @@
 """Start / stop / pause any DFE service through the gitops state dial.
 
 GET  /api/v1/lifecycle             -> list services + tier + current state
-POST /api/v1/lifecycle/{name}      -> set state (per-service RBAC; pinned -> 404)
+POST /api/v1/lifecycle/{name}      -> set state (per-service RBAC, pinned -> 404)
 
 Per-service RBAC: dfe-* apps need ``lifecycle:app:<name>`` (operator-grantable);
 backing services need ``lifecycle:backing:<name>`` (admin/infra roles only);
@@ -95,7 +95,7 @@ def list_services(query: ListParams, user: CurrentUser, request: Request) -> Pag
 def set_lifecycle(
     name: str, body: LifecycleRequest, user: CurrentUser, request: Request
 ) -> LifecycleResponse:
-    """Set a service's lifecycle state - per-service RBAC; pinned services are 404."""
+    """Set a service's lifecycle state - per-service RBAC. Pinned services are 404."""
     try:
         svc = resolve(name)
     except KeyError as exc:

@@ -5,7 +5,7 @@ Run after any model/route changes::
     uv run python scripts/generate_openapi.py
 
 Writes:
-- ``openapi.json`` -- product API (committed; frontend types, CLI, Prism)
+- ``openapi.json`` -- product API (committed, frontend types, CLI, Prism)
 - ``openapi.e2e.json`` -- Playwright helpers for ``make e2e-server``
 - ``docs/reference/api-route-map.md`` -- where each operation moves (``route_map.py``)
 """
@@ -74,7 +74,7 @@ def product_spec() -> dict:
     app = create_app(settings=settings)
 
     # Health probes are excluded from the schema at their include
-    # (include_in_schema=False in app.py); nothing to strip here. Clear any
+    # (include_in_schema=False in app.py). Nothing to strip here. Clear any
     # cached schema so it regenerates.
     app.openapi_schema = None
 

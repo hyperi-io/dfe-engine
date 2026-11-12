@@ -13,9 +13,9 @@ Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
 Every data-plane op runs through scalo's
 :class:`~scalo.resilience.ReconnectingResilience`, which the manager binds to
 ClickHouse: a CONNECTION outage (transport error or a CH connection code) backs
-off AND rebuilds the pooled client between attempts; a RATE_LIMITED (202) error
-backs off WITHOUT reconnecting (the connection is fine, the server is busy); a
-genuine query error (syntax / memory / access / exec-timeout) surfaces
+off AND rebuilds the pooled client between attempts. A RATE_LIMITED (202) error
+backs off WITHOUT reconnecting (the connection is fine, the server is busy). A
+real query error (syntax / memory / access / exec-timeout) surfaces
 immediately un-retried. When ``clickhouse.cloud.autowake`` is on, a connection
 outage additionally fires the CH Cloud resume hook (START a stopped/idle
 service) and extends the budget to the cold-start window. The CH error
@@ -59,7 +59,7 @@ class ClickHouseClientWrapper:
 
     Every op runs through the manager's resilience layer
     (:meth:`ClickHouseManager.run_resilient`), so a transient CH outage reconnects
-    and recovers transparently; the ``_client`` property always resolves the LIVE
+    and recovers transparently. The ``_client`` property always resolves the LIVE
     pooled client, so an op re-run after a reconnect uses the rebuilt one and
     external admin paths (RBAC reconcile, the sampler unwrap) that reach for the
     raw driver client still work.
@@ -72,11 +72,11 @@ class ClickHouseClientWrapper:
         run: Callable[[Callable[[], Any]], Any] | None = None,
     ):
         self._manager = manager
-        # The resilience every op runs through; the manager's own unless a bounded one is given.
+        # The resilience every op runs through. The manager's own unless a bounded one is given.
         self._run_resilient = run or manager.run_resilient
 
     def __enter__(self) -> ClickHouseClientWrapper:
-        # The ClickHouseManager singleton owns the underlying client's lifecycle;
+        # The ClickHouseManager singleton owns the underlying client's lifecycle.
         # `with get_clickhouse_client() as ch` is scoping sugar only, so __exit__
         # must NOT close the shared client out from under other callers.
         return self
@@ -91,7 +91,7 @@ class ClickHouseClientWrapper:
         A property, not a stored reference, so (a) an op re-run inside the
         resilience loop after ``reconnect`` picks up the freshly rebuilt pooled
         client, and (b) the admin paths that reach for the raw driver client
-        (``.get_clickhouse_client()._client`` for the RBAC reconcile; the sampler's
+        (``.get_clickhouse_client()._client`` for the RBAC reconcile. The sampler's
         ``_raw_client`` unwrap) keep resolving.
         """
         return self._manager._live_client()
@@ -115,7 +115,7 @@ class ClickHouseClientWrapper:
         """Row insert through the resilience layer, to clickhouse-connect's ``insert``.
 
         The call is ``insert(table, rows, column_names=, database=)``. A retry can insert the same row twice, which is safe only where the table
-        collapses duplicates; every hunt coordination table this is used for is
+        collapses duplicates. Every hunt coordination table this is used for is
         ReplacingMergeTree.
         """
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
@@ -262,11 +262,11 @@ class ClickHouseManager:
         # classifiers + config are read once the settings are in place.
         self._resilience: ReconnectingResilience | None = None
         # Injectable clock -> the resilience layer (tests pass fakes so they never
-        # really sleep and never race a wall clock).
+        # really sleep and never race a real clock).
         self._sleep = sleep
         self._now = now
-        # Injectable CH Cloud lifecycle seam for the autowake resume hook. Tests
-        # inject a DOUBLE so no paid Cloud instance is ever touched; production
+        # Injectable CH Cloud lifecycle hook for the autowake resume hook. Tests
+        # inject a DOUBLE so no paid Cloud instance is ever touched. Production
         # builds one from the clickhouse.cloud control-plane settings.
         self._cloud_service = cloud_service
 
@@ -285,13 +285,13 @@ class ClickHouseManager:
             cls._instance = None
 
     def close(self) -> None:
-        """Close this manager's pooled client and pool; the next op builds a fresh one."""
+        """Close this manager's pooled client and pool. The next op builds a fresh one."""
         self._cleanup()
 
     def get_clickhouse_client(self) -> ClickHouseClientWrapper:
         """Get a ClickHouse client wrapper with connection pooling + resilience.
 
-        Returns a wrapper whose ops run through the resilience layer; the client
+        Returns a wrapper whose ops run through the resilience layer. The client
         itself is built lazily on first use (so an INITIAL connect to a stopped CH
         Cloud service is covered by the same reconnect/auto-wake path as a
         mid-session drop). Returns a wrapper that provides the backward-compatible
@@ -335,8 +335,8 @@ class ClickHouseManager:
         """Run *op* through the reconnect-and-retry engine.
 
         A transient CH outage backs off and recovers on the next success (a
-        connection outage also rebuilds the pooled client + may auto-wake); a
-        genuine query error surfaces immediately; budget exhaustion raises
+        connection outage also rebuilds the pooled client + may auto-wake). A
+        real query error surfaces immediately. Budget exhaustion raises
         :class:`~scalo.resilience.ServiceUnavailable` (API -> 503).
         """
         return self._get_resilience().run(op)
@@ -375,7 +375,7 @@ class ClickHouseManager:
     def _get_resilience(self) -> ReconnectingResilience:
         """Build (once) the CH-bound reconnect-and-retry engine from settings.
 
-        Injects the CH error classifiers (connection vs rate-limit vs genuine
+        Injects the CH error classifiers (connection vs rate-limit vs real
         query error), the reconnect, and - only when ``clickhouse.cloud.autowake``
         is on - the Cloud resume hook. Config is the ``clickhouse.resilience``
         block (config-cascade), passed straight into scalo's ``ResilienceConfig``.
@@ -405,7 +405,7 @@ class ClickHouseManager:
 
         A CH connection outage may be a stopped/idle CH Cloud service, so START it
         (billable) and report a wake so the resilience budget extends to the
-        cold-start window; the reconnect loop then recovers the INSTANT the woken
+        cold-start window. The reconnect loop then recovers the INSTANT the woken
         service accepts connections. Returns False (a plain transient outage) when
         the service is already running/starting or the wake could not be initiated
         - never lets a lifecycle error escape into the retry loop.
@@ -426,7 +426,7 @@ class ClickHouseManager:
         """The CH Cloud lifecycle driver for the autowake hook.
 
         Tests inject a double via the constructor's ``cloud_service`` so no paid
-        instance is touched; production builds one from the control-plane settings.
+        instance is touched. Production builds one from the control-plane settings.
         """
         if self._cloud_service is not None:
             return self._cloud_service
@@ -467,7 +467,7 @@ class ClickHouseManager:
 
             # Custom pool manager for connection pooling (clickhouse-connect uses
             # urllib3). TLS verification + CA are configured HERE so pooled
-            # connections carry the posture; cert_reqs/ca_certs only bite on the
+            # connections carry the posture. cert_reqs/ca_certs only bite on the
             # HTTPS (secure) path.
             self._pool_manager = httputil.get_pool_manager(
                 maxsize=self.connections_max,

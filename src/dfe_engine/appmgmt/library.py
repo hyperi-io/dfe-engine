@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """A versioned library of authored files, generic over what the file IS.
 
-Anything needing an authored file under version control uses this; a transform is
+Anything needing an authored file under version control uses this. A transform is
 only its first consumer. An artefact is a named series of immutable versions plus
 mutable metadata, and its ``kind`` says what sort of file it holds. Kinds are
 declared in the app manifest, so supporting a new authored language is an edit
@@ -102,7 +102,7 @@ class LifecycleState(StrEnum):
     """Linkable, and re-resolving advances it."""
 
     DISABLED = "disabled"
-    """Not linkable; existing links stay where they are."""
+    """Not linkable. Existing links stay where they are."""
 
     DEPRECATED = "deprecated"
     """Still linkable, and reported as on the way out."""
@@ -243,7 +243,7 @@ def as_text(artifact_kind: ArtifactKind, raw: bytes) -> str:
 def stored_content(artifact_kind: ArtifactKind, content: str) -> str | bytes:
     """Content in the exact form it is written to disk.
 
-    A text kind is stored as its newline-terminated text; a base64 kind is decoded
+    A text kind is stored as its newline-terminated text. A base64 kind is decoded
     first, so a wasm module on disk is wasm rather than an encoding of it.
     """
     if artifact_kind.encoding is Encoding.BASE64:
@@ -360,7 +360,7 @@ def set_metadata(
     """Edit the classification metadata. Mutates ``env``. Returns whether it changed.
 
     Metadata is not content, so this never touches the version series. An omitted
-    field is left alone; an empty group or an empty label map clears one.
+    field is left alone. An empty group or an empty label map clears one.
     """
     changed = False
     if description is not None and description != str(env.get(_DESCRIPTION_FIELD, "")):

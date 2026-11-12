@@ -136,6 +136,6 @@ def test_a_programming_fault_is_a_500_not_an_outage_claim(
 ):
     install_driver(_BrokenDriver())
     resp = client.post(f"/api/v1/hunts/{created_hunt}/run", headers=admin_headers)
-    # ClickHouse answered the socket; saying it is unreachable would be a lie.
+    # ClickHouse answered the socket. Saying it is unreachable would be a lie.
     assert resp.status_code == 500
     assert resp.json()["code"] == "queue_failed"

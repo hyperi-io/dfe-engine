@@ -75,7 +75,7 @@ def _run(req, ch, reg, org_ids=None):
     return asyncio.run(_sampler().run(req, ch, reg, org_ids=org_ids))
 
 
-# ── fast modes ─────────────────────────────────────────────────
+# -- fast modes -------------------------------------------------
 
 
 def test_recent_clickhouse_parses_rows_and_keys():
@@ -122,7 +122,7 @@ def test_every_clickhouse_read_is_read_only(mode):
     assert settings == {"max_execution_time": SamplerSettings().max_execution_time, "readonly": 1}
 
 
-# ── filter: one condition over the sampled row ─────────────────
+# -- filter: one condition over the sampled row -----------------
 
 REFUSED_FILTERS = {
     "unbalanced paren escapes the _source fence": "1) OR (1",
@@ -187,7 +187,7 @@ REFUSED_FILTERS.update(
     {f"{name} names a table": f"{name}(_source, system.users)" for name in IN_FUNCTIONS}
 )
 
-# Every AI function in ClickHouse 26.9.4 and its alias; each posts its arguments to an LLM provider.
+# Every AI function in ClickHouse 26.9.4 and its alias. Each posts its arguments to an LLM provider.
 AI_FUNCTIONS = [
     "aiClassify",
     "aiEmbed",
@@ -327,7 +327,7 @@ def test_the_rendered_condition_is_what_reaches_the_query():
     assert sql.endswith("LIMIT {lim:UInt64}")
 
 
-# ── target resolution ──────────────────────────────────────────
+# -- target resolution ------------------------------------------
 
 
 def test_registered_source_resolves_to_qualified_table():
@@ -373,7 +373,7 @@ def test_kafka_target_is_land_topic():
     )
 
 
-# ── gated modes (logreducer) ───────────────────────────────────
+# -- gated modes (logreducer) -----------------------------------
 
 
 def _scan_lines() -> list[str]:
@@ -433,7 +433,7 @@ def test_the_kafka_scan_is_a_bounded_logreducer_source():
     assert "dfe-sampler-ab12" in repr(source)
 
 
-# ── helpers ────────────────────────────────────────────────────
+# -- helpers ----------------------------------------------------
 
 
 def test_reservoir_is_seeded_and_deterministic():

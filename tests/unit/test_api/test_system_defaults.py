@@ -10,7 +10,7 @@
 
 Header type, header version and engine are stored for the next deploy. Only a
 patch that names ttl_days reconciles live TTL, the same way PUT /retention does.
-No source here is deployed, so apply and drift never need a table; what they do
+No source here is deployed, so apply and drift never need a table. What they do
 to a deployed one is proven in tests/integration/test_system_defaults_apply_ch.py.
 """
 

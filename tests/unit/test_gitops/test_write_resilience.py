@@ -61,7 +61,7 @@ class _ThreadingServer(ThreadingMixIn, WSGIServer):
     daemon_threads = True
 
     def handle_error(self, request: object, client_address: object) -> None:
-        # The client gave up on a held answer and closed its end; that is the test.
+        # The client gave up on a held answer and closed its end. That is the test.
         return None
 
 
@@ -423,7 +423,7 @@ def test_a_hard_failure_on_a_retry_is_not_retried(tmp_path: Path, monkeypatch) -
     """The first fetch times out and the second finds no repo: fail at once, not 503.
 
     A retry runs inside the handler for the first failure, so its error carries that
-    timeout as context; read as its cause, it made the missing repo look transient.
+    timeout as context. Read as its cause, it made the missing repo look transient.
     """
     repo = _faked_fetch_clone(tmp_path)
     timeouts: list[float] = []
@@ -532,7 +532,7 @@ def black_hole(no_proxy: None) -> Iterator[CountingListener]:
 def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
     tmp_path: Path, black_hole: CountingListener
 ) -> None:
-    """Two writes spend their budget on a wedged forge; the third is a 503 at once.
+    """Two writes spend their budget on a wedged forge. The third is a 503 at once.
 
     Without the breaker every write against a forge that is down for minutes costs
     its full timeout and budget, with the writer lock held and later writes queued.

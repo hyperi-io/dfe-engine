@@ -168,12 +168,12 @@ class SchemaEventFactory:
 
     Args:
         columns: Schema columns (``SchemaLoader.load_columns`` output).
-        seed: Determinism seed; identical seed => identical events.
+        seed: Determinism seed. Identical seed => identical events.
         pool: Entity pool to draw from (built from ``seed`` when omitted).
         provider: Cloud provider vocabulary hint (``aws``/``azure``/``gcp``).
         hints: Per-column ``synthetic:`` hints (``load_synthetic_hints`` output).
         scenarios: Schema-level coherent shapes (``load_synthetic_scenarios``
-            output); one is drawn per event and overrides hints for the
+            output). One is drawn per event and overrides hints for the
             columns it names.
         tags: Extra tags merged into the event's ``tags`` object. A pack whose
             ``tags`` is a string or list cannot take them and refuses.

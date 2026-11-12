@@ -119,7 +119,7 @@ class TestCredentialCheck:
         assert "nothing stored at oidc/acme/client_secret" in detail
 
     def test_a_store_that_did_not_answer_is_named_and_the_env_still_serves(self, monkeypatch):
-        """The check reports the outage; a login falls through to the env var, so the check does too."""
+        """The check reports the outage. A login falls through to the env var, so the check does too."""
         monkeypatch.delenv("OIDC_RP_SECRET", raising=False)
 
         ok, detail = credential_check(

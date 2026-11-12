@@ -171,7 +171,7 @@ class TestRolesCrud:
     ):
         """Guard: the name rule binds create alone, so a role an older engine stored keeps working.
 
-        Role update has no name field, so this passes today. It fails if the rule is
+        Role update has no name field, so this passes. It fails if the rule is
         ever applied to the path name of a read or an update.
         """
         app.state.role_store.create("_legacy-ops", description="Old", permissions=["query:execute"])

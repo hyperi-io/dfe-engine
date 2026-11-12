@@ -29,7 +29,7 @@ from dfe_engine.clickhouse.quoting import column_reference
 from dfe_engine.source.type_registry import current_use_case
 
 # The use cases dfe-schemas renders as a ClickHouse text index, so a LIKE over
-# the indexed expression prunes granules; the templates are in schema_ddl
+# the indexed expression prunes granules. The templates are in schema_ddl
 # _INDEX_TEMPLATES, and the other use cases render index types LIKE cannot read.
 TEXT_INDEX_USE_CASES: frozenset[str] = frozenset({"word_search", "substring_search"})
 
@@ -77,7 +77,7 @@ class SqlBackend(ClickhouseBackend):
 
         Args:
             processing_pipeline: A pySigma processing pipeline, if any.
-            schema_metadata: Column metadata keyed by column name; a column whose
+            schema_metadata: Column metadata keyed by column name. A column whose
                 use case renders a text index is matched through ``lower()``.
         """
         # No full-text column exists to search, so a keyword-only rule is refused.

@@ -48,7 +48,7 @@ class _Recorder:
 
 @pytest.fixture
 def reconciles(app, client):
-    """The app's trigger, reconciling into a recorder; settles long enough for a burst."""
+    """The app's trigger, reconciling into a recorder. Settles long enough for a burst."""
     recorder = _Recorder()
     swap_in_trigger(app, recorder, settle_seconds=1.0, retry_initial_seconds=0.2)
     return recorder
@@ -94,7 +94,7 @@ class TestOrgs:
     def test_an_org_created_while_clickhouse_is_down_is_provisioned_when_it_is_back(
         self, app, client, admin_headers, reconciles
     ):
-        """The create answers 201 at once; the reconcile retries on its own, no second write."""
+        """The create answers 201 at once. The reconcile retries on its own, no second write."""
         reconciles.failures = 2
 
         resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
@@ -209,7 +209,7 @@ def _failed_runs(manager) -> float:
 
 
 def test_a_unit_test_app_never_reconciles_against_a_listening_clickhouse(api_settings):
-    """Startup and an org write both reconcile; neither may dial the configured ClickHouse.
+    """Startup and an org write both reconcile. Neither may dial the configured ClickHouse.
 
     A developer's local stack publishes its ClickHouse on the default address, and
     the reconcile drops users there. The conftest guard is what keeps a unit run

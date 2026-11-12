@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Hunt seeding. Public methods are the scripts; privates are reusable.
+"""Hunt seeding. Public methods are the scripts. Privates are reusable.
 
 A seeded hunt is a stored config the list can search. It is not run: the
 customer is the org ``seed_organisation`` writes, and each hunt names the

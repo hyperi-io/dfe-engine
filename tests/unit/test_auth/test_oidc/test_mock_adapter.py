@@ -44,7 +44,7 @@ def _mock_provider(claim_name="groups"):
     )
 
 
-# ── factory selection ────────────────────────────────────────────
+# -- factory selection --------------------------------------------
 
 
 def test_get_adapter_returns_mock_when_backend_mock():
@@ -53,7 +53,7 @@ def test_get_adapter_returns_mock_when_backend_mock():
     assert isinstance(adapter, MockDirectoryAdapter)
 
 
-# ── loading + fail-open ───────────────────────────────────────────
+# -- loading + fail-open -------------------------------------------
 
 
 async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
@@ -166,7 +166,7 @@ async def test_a_sync_over_a_fixture_that_is_not_an_object_is_an_error(tmp_path,
     assert (result["status"], stored.last_sync_status) == ("error", "error")
 
 
-# ── the RP overage enrichment path, at >200 scale ────────────────
+# -- the RP overage enrichment path, at >200 scale ----------------
 
 
 async def test_rp_enriches_overflowed_groups_at_scale(tmp_path, monkeypatch):

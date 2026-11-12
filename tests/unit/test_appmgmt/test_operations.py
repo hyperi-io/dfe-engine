@@ -218,7 +218,7 @@ def test_the_retention_is_the_gauge_tables_ttl(rows, expected):
     assert reader.retention_seconds() == expected
 
 
-# ── liveness: max() over no rows is the epoch, not NULL ─────────
+# -- liveness: max() over no rows is the epoch, not NULL ---------
 
 
 class PerQueryClickHouse:
@@ -335,7 +335,7 @@ def test_uptime_reads_the_start_time_every_dfe_app_emits():
     assert status.started_epoch == 1757000000.0
 
 
-# ── HTTP readings from the request-duration histogram ───────────
+# -- HTTP readings from the request-duration histogram -----------
 
 BOUNDS = [0.1, 0.5, 1.0]
 
@@ -436,7 +436,7 @@ def test_http_totals_count_requests_over_the_window(rows, expected):
 
 
 def test_a_series_born_in_the_window_counts_its_first_export():
-    # A first 5xx on a route is its own new series; its only export must still count.
+    # A first 5xx on a route is its own new series. Its only export must still count.
     rows = [
         _series(first=[0, 0, 0, 0], last=[40, 0, 0, 0]),
         _series(first=[1, 0, 0, 0], last=[1, 0, 0, 0], server_error=True, started_in_window=True),

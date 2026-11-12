@@ -8,7 +8,7 @@
 """``split_statements`` and ``ddl_settings``, and the wrapper's ``execute`` over them.
 
 The wrapper cases run on a recording stand-in for the clickhouse-connect driver,
-the one boundary a unit test cannot cross; every assertion reads what the driver
+the one boundary a unit test cannot cross. Every assertion reads what the driver
 was actually handed.
 """
 

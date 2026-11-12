@@ -1,4 +1,4 @@
-"""Tests for AI Module Interface — ABCs, models, and registry."""
+"""Tests for AI Module Interface -- ABCs, models, and registry."""
 
 import pytest
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ from dfe_engine.ai import (
     SchemaOptimiser,
 )
 
-# ── Concrete test implementations ──────────────────────────
+# -- Concrete test implementations --------------------------
 
 
 class StubQueryOptimiser(QueryOptimiser):
@@ -78,7 +78,7 @@ class StubLogParser(LogParser):
         )
 
 
-# ── Enums ──────────────────────────────────────────────────
+# -- Enums --------------------------------------------------
 
 
 class TestEnums:
@@ -94,7 +94,7 @@ class TestEnums:
         assert AIModuleStatus.FAILED == "failed"
 
 
-# ── AIModuleResult ─────────────────────────────────────────
+# -- AIModuleResult -----------------------------------------
 
 
 class TestAIModuleResult:
@@ -145,7 +145,7 @@ class TestAIModuleResult:
         assert r2.output == r.output
 
 
-# ── Typed module ABCs ──────────────────────────────────────
+# -- Typed module ABCs --------------------------------------
 
 
 class TestQueryOptimiser:
@@ -237,7 +237,7 @@ class TestLogParser:
         assert out.field_mappings["msg"] == "message"
 
 
-# ── Registry ───────────────────────────────────────────────
+# -- Registry -----------------------------------------------
 
 
 class TestAIModuleRegistry:

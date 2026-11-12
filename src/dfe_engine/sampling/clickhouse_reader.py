@@ -186,7 +186,7 @@ def _raw_client(ch: Any) -> Any:
     """Unwrap the engine's ClickHouseClientWrapper to the clickhouse-connect Client.
 
     logreducer's ``ClickHouseSource`` wants the native driver client (block
-    streaming); the wrapper stores it on ``_client``. A bare client passes through.
+    streaming). The wrapper stores it on ``_client``. A bare client passes through.
     """
     return getattr(ch, "_client", ch)
 
@@ -213,9 +213,9 @@ def build_where(
 ) -> tuple[str, dict[str, Any]]:
     """Assemble a WHERE clause + bound parameters.
 
-    ``source_label`` filters the shared landing table by ``_source``; leave it
+    ``source_label`` filters the shared landing table by ``_source``. Leave it
     None when sampling a per-source table (already scoped). ``org_ids`` holds the
-    read to rows whose ``_org_id`` is one of them, bound server-side; None reads
+    read to rows whose ``_org_id`` is one of them, bound server-side. None reads
     every org. Time bounds bind server-side. ``filter_sql`` goes through
     :func:`filter_predicate`, and only the condition it renders is interpolated.
 
@@ -258,7 +258,7 @@ def read_recent(
 ) -> list[str]:
     """Newest ``limit`` ``_json`` rows, ordered by ``timestamp_field`` DESC."""
     sql = (
-        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter rendered by filter_predicate
+        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target, filter rendered by filter_predicate
         f"ORDER BY {column_reference(timestamp_field)} DESC LIMIT {{lim:UInt64}}"
     )
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
@@ -282,7 +282,7 @@ def read_random(
     time window.
     """
     rand = f"rand({seed})" if seed is not None else "rand()"
-    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"  # noqa: S608 - quoted target; filter rendered by filter_predicate
+    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"  # noqa: S608 - quoted target, filter rendered by filter_predicate
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
 
 
@@ -300,7 +300,7 @@ def scan_query(
     ``LIMIT`` would return different rows per pass.
     """
     return (
-        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target; filter rendered by filter_predicate
+        f"SELECT toString(_json) FROM {target} {where} "  # noqa: S608 - quoted target, filter rendered by filter_predicate
         f"ORDER BY cityHash64(toString(_json)) LIMIT {int(scan_rows)}"
     )
 

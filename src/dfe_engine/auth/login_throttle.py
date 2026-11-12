@@ -17,7 +17,7 @@ A success clears the username's count. The address keeps its count, or one accou
 the caller owns would clear the address between guesses at another.
 
 Counts live in memory, bounded to a fixed number of keys with the least recently
-failed dropped first; a restart or another replica starts from none. The event loop
+failed dropped first. A restart or another replica starts from none. The event loop
 is the only caller, so there is no lock.
 """
 
@@ -29,10 +29,10 @@ from dataclasses import dataclass
 
 from dfe_engine.settings import LoginThrottleSettings
 
-# The first wait past the threshold, in seconds; each further failure doubles it.
+# The first wait past the threshold, in seconds. Each further failure doubles it.
 _BASE_DELAY_SECONDS = 2.0
 
-# Keys held at once; attacker-chosen usernames must not grow memory without bound.
+# Keys held at once. Attacker-chosen usernames must not grow memory without bound.
 _MAX_KEYS = 10_000
 
 

@@ -675,7 +675,7 @@ def publish_version(
     """Publish content as a version.
 
     Re-sending identical content is a no-op naming the version that already holds
-    it; sending different content at an existing version number is refused.
+    it. Sending different content at an existing version number is refused.
     """
     name = _check_name(artifact)
     doc = _envelope(_gitcrud(request), name)

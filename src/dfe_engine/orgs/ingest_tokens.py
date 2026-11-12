@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Ingest credential tokens, minted through the engine's secrets seam.
+"""Ingest credential tokens, minted through the engine's secrets interface.
 
 Each credential's token is its own secret at ``ingest/credentials/<id>@<token_id>``,
 with a new ``token_id`` for every mint, so a write never replaces or drops a token
@@ -168,7 +168,7 @@ def bearer_entries(credentials: Iterable[IngestCredential], secrets: DfeSecrets)
 
     Args:
         credentials: Every ingest credential.
-        secrets: The secrets seam holding the tokens.
+        secrets: The secrets interface holding the tokens.
 
     Returns:
         Content by listener, every listener present, lines sorted by id and ending
@@ -229,7 +229,7 @@ def sync_bearer_tokens(
 
     Args:
         registry: The org registry holding the credentials.
-        secrets: The secrets seam.
+        secrets: The secrets interface.
         mirror: The mirror Secret's manager, None when no mirror is configured.
 
     Returns:

@@ -58,7 +58,7 @@ def crud(tmp_path: Path) -> GitCrud:
     return GitCrud(repo, default_registry())
 
 
-# ── The posture gate ─────────────────────────────────────────
+# -- The posture gate -----------------------------------------
 
 
 class TestPostureGate:
@@ -126,7 +126,7 @@ class TestHashablePasswords:
         assert long not in str(exc.value)
 
 
-# ── One seed path, reconciled on every boot ──────────────────
+# -- One seed path, reconciled on every boot ------------------
 
 
 class TestAdminSeed:
@@ -261,7 +261,7 @@ class TestAdminSeed:
     def test_the_hash_is_stable_across_boots_after_a_rotation(self, tmp_path: Path, crud):
         """The reconciled hash reaches the deploy repo, so hydration stops re-minting.
 
-        Unpublished, the deploy repo keeps the pre-rotation hash; hydration puts it
+        Unpublished, the deploy repo keeps the pre-rotation hash. Hydration puts it
         back on the next boot and the reconcile resets it again, minting a fresh
         bcrypt hash every boot and leaving the durable copy permanently superseded.
         """
@@ -290,7 +290,7 @@ class TestAdminSeed:
         assert "admin" in present(groups.get("dfe-admins")).members
 
 
-# ── The break-glass hash, round-tripped through gitcrud ──────
+# -- The break-glass hash, round-tripped through gitcrud ------
 
 
 class TestBreakGlassHash:
@@ -459,7 +459,7 @@ class TestBreakGlassHash:
         assert breakglass.stored_hash(crud) == ""
 
 
-# ── Two replicas, one deploy repo ────────────────────────────
+# -- Two replicas, one deploy repo ----------------------------
 
 
 def _shared_deploy_repo(tmp_path: Path) -> tuple[str, str]:
@@ -510,7 +510,7 @@ class TestTwoReplicas:
         assert doc["breakglass"]["password_hash"] == minted
 
 
-# ── Retiring the bootstrap admin ─────────────────────────────
+# -- Retiring the bootstrap admin -----------------------------
 
 
 class TestRetireTheBootstrapAdmin:
@@ -783,7 +783,7 @@ class TestAnotherAdminExists:
         assert admin_retirement.another_admin_exists(store, groups, "admin", bindings={}) is False
 
 
-# ── Deployment hints ─────────────────────────────────────────
+# -- Deployment hints -----------------------------------------
 
 
 class TestDeploymentHints:

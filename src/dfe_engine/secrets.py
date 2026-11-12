@@ -1,14 +1,14 @@
 #  Project:      dfe-engine
 #  File:         secrets.py
-#  Purpose:      The one seam for secrets the engine mints (scalo.secrets)
+#  Purpose:      The one entry point for secrets the engine mints (scalo.secrets)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The single seam for secrets the engine MINTS - backend chosen by config.
+"""The single entry point for secrets the engine MINTS - backend chosen by config.
 
 The engine reads runtime config secrets from env (ESO or compose fills it). This module
-is the WRITE seam for secrets the engine generates (the JWT signing key, the ClickHouse
+is the WRITE interface for secrets the engine generates (the JWT signing key, the ClickHouse
 service, org and group passwords, OIDC client secrets): they go to ``scalo.secrets``,
 provider selected by ``settings.secrets``. ``file`` is the default, a directory on the
 engine's volume, ``openbao``/``vault`` a
@@ -150,8 +150,8 @@ class DfeSecrets:
         full = self._full(path)
         data = value.encode("utf-8")
         self._write(full, lambda: self._upsert(full, data))
-        # scalo keeps an in-memory read cache that writes do not invalidate;
-        # clear it so a rotated secret is read fresh.
+        # scalo keeps an in-memory read cache that writes do not invalidate.
+        # Clear it so a rotated secret is read fresh.
         self._mgr.clear_cache()
 
     def create(self, path: str, value: str) -> None:
@@ -170,7 +170,7 @@ class DfeSecrets:
 
     def get(self, path: str) -> str:
         """Fetch a secret as a string. Raises SecretNotFoundError if absent."""
-        # openbao KV v2 wraps the value under a "value" field; file stores it raw.
+        # openbao KV v2 wraps the value under a "value" field. file stores it raw.
         key = "value" if self._provider in ("openbao", "vault") else None
         full = self._full(path)
         try:
@@ -291,7 +291,7 @@ def _to_scalo_config(cfg: SecretsSettings) -> dict[str, Any]:
     # Every read goes to the store, so a rotation or an outage shows on the next read.
     scfg: dict[str, Any] = {"cache": {"enabled": False}}
     if cfg.provider in ("openbao", "vault"):
-        # AppRole in prod (role_id in config; the secret_id is itself a secret and
+        # AppRole in prod (role_id in config, the secret_id is itself a secret and
         # comes from the VAULT_SECRET_ID env, injected by ESO/infra - never config).
         # cfg.mount is the KV secrets mount (prefixes the path), NOT the auth mount.
         auth: dict[str, Any] = {"method": "approle" if cfg.role else "token"}

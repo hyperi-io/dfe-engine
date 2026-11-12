@@ -148,7 +148,7 @@ def test_committed_spec_matches_the_app_contract(committed, generated):
 
 @pytest.mark.parametrize("spec_file", [SPEC_FILE, E2E_SPEC_FILE], ids=["product", "e2e"])
 def test_committed_spec_carries_a_real_version(spec_file):
-    """dfe-ui and Prism read this number; the placeholder tells them nothing."""
+    """dfe-ui and Prism read this number. The placeholder tells them nothing."""
     version = json.loads(spec_file.read_text())["info"]["version"]
 
     assert version not in PLACEHOLDER_VERSIONS, (

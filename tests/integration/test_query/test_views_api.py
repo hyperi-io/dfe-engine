@@ -9,7 +9,7 @@
 
 The app starts with tenant isolation off, so the reader it runs views as exists
 only because startup reconciles the service roles anyway. The first request builds
-the executor from the password that reconcile stored; the view reports the user it
+the executor from the password that reconcile stored. The view reports the user it
 ran as, and a view over url() is refused by the reader's grants.
 """
 

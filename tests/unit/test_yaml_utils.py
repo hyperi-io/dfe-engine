@@ -1,4 +1,4 @@
-"""Tests for yaml_utils — deep_merge and YAML operations."""
+"""Tests for yaml_utils -- deep_merge and YAML operations."""
 
 import os
 import subprocess
@@ -94,7 +94,7 @@ class TestConcurrentYaml:
             try:
                 while not stop.is_set():
                     data = yaml_load(path)
-                    # A corrupt/doubled file would raise; a partial write would
+                    # A corrupt/doubled file would raise. A partial write would
                     # yield a non-dict. Either is a failure.
                     assert isinstance(data, dict)
                     assert "n" in data
@@ -171,7 +171,7 @@ _UNREADABLE = [
 
 @pytest.fixture
 def reported():
-    """A real metrics backend bound to the writer; tests/unit/conftest.py unbinds it after."""
+    """A real metrics backend bound to the writer. tests/unit/conftest.py unbinds it after."""
     manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
     write_health().bind(YamlWriteMetrics(manager))
     return manager
@@ -234,7 +234,7 @@ class TestAWriteIsReadBackBeforeItLands:
         assert refused.value.reason == "verify"
 
     def test_values_that_read_back_as_equal_data_still_write(self, tmp_path):
-        """A tuple reads back as a list and NaN never equals itself; neither is a refusal."""
+        """A tuple reads back as a list and NaN never equals itself. Neither is a refusal."""
         path = tmp_path / "doc.yaml"
 
         yaml_dump({"pair": (1, 2), "ratio": float("nan"), "tags": {"a"}}, path)

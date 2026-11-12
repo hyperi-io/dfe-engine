@@ -8,7 +8,7 @@
 
 """Apply the DDL a source deploy generates to a live server, and check it lands.
 
-The manifest bootstrap has its own integration test; the per-source path did not,
+The manifest bootstrap has its own integration test. The per-source path did not,
 and that is the half that broke. A column's declared ``index`` is rendered into
 the CREATE verbatim, so a tokenizer the server has retired is a string this
 generator will happily emit and only a real server will reject -- every new

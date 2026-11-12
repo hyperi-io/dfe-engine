@@ -66,7 +66,7 @@ _GOOGLE_GROUP_LABEL = "cloudidentity.googleapis.com/groups.discussion_forum"
 
 
 def _cel_string(value: str) -> str:
-    """*value* as a single-quoted CEL string literal; an email may legally hold a quote."""
+    """*value* as a single-quoted CEL string literal. An email may legally hold a quote."""
     escaped = value.replace("\\", "\\\\").replace("'", "\\'")
     return f"'{escaped}'"
 

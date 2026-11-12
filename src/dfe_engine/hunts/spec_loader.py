@@ -7,11 +7,11 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Load hunt definitions from the gitops config dir into HuntSpec objects.
 
-The pull-based hunt runner ticks over HuntSpec objects; this is the file->model
+The pull-based hunt runner ticks over HuntSpec objects. This is the file->model
 bridge. Each *.yaml in the hunt dir becomes ONE HuntSpec keyed by its filename stem
 (the hunt_id) - filenames are the identity, never an in-file id field (the YAML-1.1
 gotcha: 'off'/'yes'/'no' inside YAML coerce to booleans, so identity must not live
-there). v1 handles the "rate" schedule mode only; "anchored" hunts are recognised
+there). v1 handles the "rate" schedule mode only. "anchored" hunts are recognised
 and skipped (a later phase adds them). One bad file never sinks the whole load.
 
 A hunt states what it runs one of two ways: a direct `query` (pre-compiled, one
@@ -25,7 +25,7 @@ resolved to when the engine wrote it. One naming none fails every fire as
 A direct `query` is trusted deploy-repo SQL: it is not held to any customer.
 
 Only a compiled rule carries the per-run detection cap. A direct `query` is SQL the
-author wrote whole, so no LIMIT can be put into it safely; it runs uncapped, and
+author wrote whole, so no LIMIT can be put into it safely. It runs uncapped, and
 the load says so.
 
 A direct `query` is put through the same refusal as a rule's condition: one that
@@ -58,7 +58,7 @@ def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int 
 
     Returns the value to feed parse_interval (a duration/cron string, an int, or a
     list-min already reduced to seconds), or None if the hunt must be skipped (an
-    anchored schedule - logged here). Prefers the new `schedule` block; falls back to
+    anchored schedule - logged here). Prefers the new `schedule` block. Falls back to
     the legacy flat `cron` field (string or list of cron strings -> take the MIN gap
     so we fire at least as often as the tightest schedule).
     """
@@ -68,7 +68,7 @@ def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int 
         if mode != "rate":
             logger.info(f"anchored hunt {stem} skipped (rate-only in v1)")
             return None
-        # rate: an explicit interval wins; else the cron alias.
+        # rate: an explicit interval wins. Else the cron alias.
         if schedule.get("interval") is not None:
             return schedule["interval"]
         return schedule.get("cron")
@@ -117,7 +117,7 @@ def _build_spec(
 ) -> HuntSpec | None:
     """Build one HuntSpec from a parsed hunt def, or None if it must be skipped.
 
-    Skips (returns None) for anchored schedules and non-positive intervals; a
+    Skips (returns None) for anchored schedules and non-positive intervals. A
     non-positive interval would divide-by-zero in the phase-offset spread maths.
     Skips a direct ``query`` that calls a function reading outside the row, or
     that is not one SELECT or one INSERT INTO a table from a SELECT.

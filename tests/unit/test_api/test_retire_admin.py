@@ -76,7 +76,7 @@ def _deploy_repo_crud(tmp_path: Path) -> GitCrud:
 
 
 def _token(app, settings: DFESettings, username: str) -> dict[str, str]:
-    """Headers for *username*; roles resolve live from group membership."""
+    """Headers for *username*. Roles resolve live from group membership."""
     token = session_token(app, settings, {"sub": username, "org_id": "acme", "roles": []})
     return {"Authorization": f"Bearer {token}"}
 

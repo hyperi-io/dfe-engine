@@ -19,7 +19,7 @@ GET    /api/v1/auth/oidc-providers/{name}/verify-login      -> Verify login conf
 
 All endpoints require admin role (org:write).
 
-Credentials go IN as values and are written straight to the DfeSecrets seam; the
+Credentials go IN as values and are written straight to the DfeSecrets interface. The
 provider YAML keeps only the store PATH. A response carries the client id, the
 secret paths and the env var names, never a secret value.
 """
@@ -126,7 +126,7 @@ def _reject_non_env_name(value: str) -> str:
 
 
 def _scopes_from_string(value: object) -> object:
-    """A space-separated scope string as its list of scopes, or None when blank; anything else unchanged.
+    """A space-separated scope string as its list of scopes, or None when blank. Anything else unchanged.
 
     The provider model and the setup status carry scopes as one string, so a form
     filled from either sends that shape back.
@@ -496,7 +496,7 @@ def _get_registry(request: Request):
 
 
 def _store_secret(*, field: str, name: str, request: Request, value: str) -> None:
-    """Write one provider secret through the seam, at the path the provider records."""
+    """Write one provider secret through the secrets interface, at the path the provider records."""
     secrets_store(request).put(provider_secret_path(field=field, provider_name=name), value)
 
 
@@ -549,7 +549,7 @@ def _sent_group_fields(*, groups: GroupResolutionRequest | None) -> frozenset[st
 
 
 def _store_group_secrets(*, groups: GroupResolutionRequest, name: str, request: Request) -> None:
-    """Write whichever directory-API secrets the groups block carries; a secret it omits keeps the one already stored."""
+    """Write whichever directory-API secrets the groups block carries. A secret it omits keeps the one already stored."""
     for value_field, store_field, _path_field in _GROUP_SECRETS:
         if getattr(groups, value_field):
             _store_secret(
@@ -558,9 +558,9 @@ def _store_group_secrets(*, groups: GroupResolutionRequest, name: str, request: 
 
 
 def _delete_secrets(*, paths: Iterable[str], request: Request) -> None:
-    """Remove the secret at each non-empty store path; with no secrets backend nothing was stored.
+    """Remove the secret at each non-empty store path. With no secrets backend nothing was stored.
 
-    It runs once the provider is saved, which no longer reads these paths, so a delete the store fails is logged by its path and left for an operator; the saved change still answers.
+    It runs once the provider is saved, which no longer reads these paths, so a delete the store fails is logged by its path and left for an operator. The saved change still answers.
     """
     store = getattr(request.app.state, "dfe_secrets", None)
     if store is None:
@@ -629,7 +629,7 @@ def _group_env_moves(
 def _moves_to_env(*, env: str, stored_env: str, stored_path: str, value: str) -> bool:
     """Whether a write naming env var *env* for a secret and sending *value* for it moves the secret onto that env var.
 
-    It does when no value is sent and either the name is new or a stored copy would still be read before the env var; resending the name already held with nothing stored changes nothing.
+    It does when no value is sent and either the name is new or a stored copy would still be read before the env var. Resending the name already held with nothing stored changes nothing.
     """
     if (value) or not (env):
         return False
@@ -796,7 +796,7 @@ async def update_provider(
 ):
     """Update an OIDC provider configuration (admin only).
 
-    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
+    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
     """
     registry = _get_registry(request)
     current = registry.get(name)
@@ -947,7 +947,7 @@ async def delete_provider(
         try:
             updated = soft_delete_account(account_store, previous)
         except ProtectedAccountError:
-            # Recovery credentials stay usable; the detached IdP can no longer mint them.
+            # Recovery credentials stay usable. The detached IdP can no longer mint them.
             continue
         disabled_accounts.append(
             DisabledAccountInfo(

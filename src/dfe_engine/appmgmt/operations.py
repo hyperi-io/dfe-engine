@@ -43,7 +43,7 @@ MEMORY_LIMIT = "container_memory_limit_bytes"
 SATURATION = "worker_pool_saturation"
 ACTIVE_THREADS = "worker_pool_active_threads"
 OPEN_FDS = "process_open_fds"
-# The app metrics group's start time, which scalo-py emits too; the process_ one is scalo-rs only.
+# The app metrics group's start time, which scalo-py emits too. The process_ one is scalo-rs only.
 START_TIME = "start_time_seconds"
 # The canonical bare name. An app may emit the composite under its own namespace,
 # so the query matches by rule and reports every spelling under this one name.
@@ -378,7 +378,7 @@ class OperationalReader:
 def _percentile(
     *, bounds: Sequence[float], counts: Sequence[float], quantile: float
 ) -> float | None:
-    """Linear interpolation of *quantile* across histogram buckets; None when empty.
+    """Linear interpolation of *quantile* across histogram buckets. None when empty.
 
     ``counts`` has one more entry than ``bounds``: the last bucket is everything
     above the top bound, which can only be reported as that bound.

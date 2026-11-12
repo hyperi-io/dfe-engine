@@ -21,7 +21,7 @@ def test_offsets_fan_evenly_across_the_window():
 
     assert all(0 <= o < window for o in offsets)
 
-    # Bucket into 10 bins. A thundering herd would spike one bin; an even fan keeps
+    # Bucket into 10 bins. A thundering herd would spike one bin. An even fan keeps
     # every bin near the mean (n/bins = 20).
     bins = 10
     counts = [0] * bins

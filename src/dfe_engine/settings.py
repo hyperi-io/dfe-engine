@@ -45,7 +45,7 @@ def _inherited_header_version() -> str:
 
 
 class ClickHouseCloudSettings(BaseModel):
-    """ClickHouse Cloud service-lifecycle config (CONTROL PLANE; opt-in).
+    """ClickHouse Cloud service-lifecycle config (CONTROL PLANE, opt-in).
 
     Separate from the SQL connection (the regular ``clickhouse.*`` block pointed
     at a ``*.clickhouse.cloud`` host). This block is the CONTROL-PLANE management
@@ -90,7 +90,7 @@ class ClickHouseResilienceSettings(BaseModel):
     Feeds scalo's :class:`~scalo.resilience.ResilienceConfig` (config-cascade - an
     operator widens the budget for a slow cold start without a code change, never a
     hardcoded call-site value). A CONNECTION outage backs off AND rebuilds the
-    pooled client; a rate-limit (202) backs off WITHOUT reconnecting; a genuine
+    pooled client. A rate-limit (202) backs off WITHOUT reconnecting. A real
     query error surfaces immediately. Field names mirror ``ResilienceConfig`` so it
     is passed straight through. Off (``enabled=false``) restores the pre-resilience
     behaviour - every op runs once and raises on the first failure.
@@ -197,10 +197,10 @@ class ClickHouseSettings(BaseModel):
     # (e.g. "ReplacingMergeTree(version)").
     default_engine: str = Field(default="MergeTree")
     # Retention every time-series table gets unless dfe-schemas or a source
-    # declares its own; 0 disables the default.
+    # declares its own. 0 disables the default.
     default_ttl_days: int = Field(default=90, ge=0)
     # What an unauthored source header inherits. A deploy-repo override replaces
-    # these; the defaults are SourceHeader's, the version being the profile's ``current``.
+    # these. The defaults are SourceHeader's, the version being the profile's ``current``.
     default_header_type: str = Field(default_factory=_inherited_header_type)
     default_header_version: str = Field(default_factory=_inherited_header_version)
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
@@ -628,7 +628,7 @@ class TransportSettings(BaseModel):
     def available(self) -> set[str]:
         """The transports a source may name here: the one the deployment carries.
 
-        What an app CAN carry is a capability in apps.yaml; this is what this
+        What an app CAN carry is a capability in apps.yaml. This is what this
         deployment DOES carry, and only that reaches a running stage.
         """
         return {self.default}
@@ -663,7 +663,7 @@ class KafkaSettings(BaseModel):
     today that is the sampler's Kafka consumer (recent-tail + logreducer
     KafkaSource). Per the credential contract (dfe-engine#98) the mechanism is
     DERIVED from ``provider``, never hand-set: set ``provider`` (+ username +
-    password) for a real cluster; leave it ``plaintext`` for a local dev broker
+    password) for a real cluster. Leave it ``plaintext`` for a local dev broker
     with no auth. See ``dfe_engine.kafka.contract``. An empty provider keeps any
     hand-set protocol/mechanism (transition) but the security floor still applies.
     """
@@ -912,7 +912,7 @@ class SyntheticDataSettings(BaseModel):
 
     Synthetic data is a demo/test stream, never a load generator: every knob here is a
     ceiling that keeps a fat-fingered request modest. Rates are Poisson-paced
-    events per second; streams are bounded by count and/or duration.
+    events per second. Streams are bounded by count and/or duration.
 
     A standing demo stream (the sales-demo live tail) is the AUTOSTART knobs:
     name reference packs and a receiver URL and the engine keeps those streams
@@ -1694,7 +1694,7 @@ class GitopsSettings(BaseModel):
 # posture when auth is on (see DFESettings._reject_insecure_production_posture).
 _DEV_JWT_SECRET = "dev-secret-key-change-in-production"  # noqa: S105, RUF100 - dev placeholder
 
-# Postures that are NOT production; anything else (incl. the default
+# Postures that are NOT production. Anything else (incl. the default
 # "production") is treated as production for the placeholder-secret guard.
 _NON_PROD_ENVS = frozenset({"dev", "development", "local", "test", "ci"})
 
@@ -1711,7 +1711,7 @@ def e2e_routes_enabled(settings: DFESettings) -> bool:
     """True when the unauthenticated /api/e2e/* group may be mounted.
 
     Requires both the explicit DFE_ENGINE_E2E_SERVER flag and a non-production posture.
-    ``make e2e-server`` sets the flag; a production DFE_ENGINE_ENV refuses it at load.
+    ``make e2e-server`` sets the flag. A production DFE_ENGINE_ENV refuses it at load.
     """
     return bool(settings.e2e_server) and is_dev_posture(settings.env)
 
@@ -1859,9 +1859,9 @@ _NAME_PREFIX_MAX = _AWS_SECRET_NAME_MAX - len("/") - _LONGEST_ENGINE_PATH
 
 
 class SecretsSettings(BaseModel):
-    """Backing-service seam for secrets the engine MINTS - backend by config.
+    """Backing-service interface for secrets the engine MINTS - backend by config.
 
-    The engine reads runtime config secrets from env; this is the WRITE seam for
+    The engine reads runtime config secrets from env. This is the WRITE interface for
     secrets it generates (the JWT signing key, ClickHouse passwords, OIDC client
     secrets). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
     product: 'file' by default (a directory on the engine's volume), 'openbao'/'vault'
@@ -2132,7 +2132,7 @@ class DFESettings(BaseModel):
 
     @model_validator(mode="after")
     def _dev_cors_origins(self) -> DFESettings:
-        # A production console's origin is the deployment's own; localhost is a dev server.
+        # A production console's origin is the deployment's own. Localhost is a dev server.
         if is_dev_posture(self.env) and "cors_origins" not in self.api.model_fields_set:
             self.api.cors_origins = list(_DEV_CORS_ORIGINS)
         return self
@@ -2188,7 +2188,7 @@ def _load_defaults() -> dict:
 def backing_from_environment() -> BackingSettings:
     """The backing-service facts the environment states, parsed as ``load_settings`` parses them.
 
-    Reads the environment alone, which is where a deployer injects these facts; a
+    Reads the environment alone, which is where a deployer injects these facts. A
     config-file value is not seen here.
     """
     deployment = _get_env_overrides().get("deployment") or {}
@@ -2589,7 +2589,7 @@ def load_clickhouse_settings(config_file: str | None = None) -> ClickHouseSettin
     has no API surface to secure.
 
     Narrowing the load is the fix rather than relaxing the validators, which
-    exist because the insecure pairing used to be the DEFAULT one. Anything that
+    exist to refuse the insecure pairing outside dev. Anything that
     only touches ClickHouse should come through here.
     """
     from dfe_engine.env_files import load_env_files

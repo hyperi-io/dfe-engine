@@ -27,7 +27,7 @@ import ssl
 import traceback
 from pathlib import Path
 
-# A provider error code is a short token; anything longer in a code slot may be prose naming the user.
+# A provider error code is a short token. Anything longer in a code slot may be prose naming the user.
 # ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
 _CODE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}\Z")
 
@@ -150,7 +150,7 @@ def _transport_failure(exc: BaseException) -> str:
         # A reset is not an SSLError: mid-handshake it points at a TLS mismatch or a middlebox, so it gets its own class.
         if isinstance(link, ConnectionResetError):
             return "connection_reset"
-        # httpx and httpcore name their timeouts TimeoutException; the pool timeout has no socket error under it.
+        # httpx and httpcore name their timeouts TimeoutException. The pool timeout has no socket error under it.
         if isinstance(link, TimeoutError) or any(
             cls.__name__ == "TimeoutException" for cls in type(link).__mro__
         ):

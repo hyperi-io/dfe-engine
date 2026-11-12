@@ -125,7 +125,7 @@ def _record_built_and_deployed(source: Source, settings: Any, *, tables_bootstra
 def seed_core_sources(
     registry: SourceRegistry, settings: Any, *, tables_bootstrapped: bool = False
 ) -> list[str]:
-    """Adopt the seeded engine-owned definitions into the registry; return what changed.
+    """Adopt the seeded engine-owned definitions into the registry. Return what changed.
 
     The shipped file is the truth on every start, so a definition updated by an
     engine upgrade reaches a deployment that already stored the old one. Nothing is
@@ -134,7 +134,7 @@ def seed_core_sources(
     overwriting safe here and refused everywhere else.
 
     ``tables_bootstrapped`` says whether the ClickHouse bootstrap confirmed the
-    core tables; without it the source is recorded as built but not as deployed.
+    core tables. Without it the source is recorded as built but not as deployed.
     """
     definition = _landing_definition(settings)
     if definition is None:

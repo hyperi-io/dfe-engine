@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """End-to-end sigma catalogue API via TestClient - real gitcrud, real local provider.
 
-The provider is a local-files provider pointed at a tmp import dir (no network); the
+The provider is a local-files provider pointed at a tmp import dir (no network). The
 sync runs through the real task manager into the real id-keyed gitcrud store.
 """
 
@@ -122,8 +122,8 @@ def test_register_get_enable_disable_provider(client, app, admin_headers, tmp_pa
 def test_provider_reach_rejects_ssrf_host(client, app, admin_headers, tmp_path):
     # M1: a valhalla base_url / git url at a loopback or link-local host (the cloud
     # metadata endpoint 169.254.169.254 is link-local) is rejected even for an admin
-    # - defence in depth on the SSRF surface (the valhalla base_url was previously
-    # unvalidated, bypassing the allow-list entirely).
+    # - defence in depth on the SSRF surface (the valhalla base_url must not bypass
+    # the allow-list).
     _wire_gitcrud(app, tmp_path)
     for kind, opts in (
         ("valhalla", {"base_url": "http://169.254.169.254"}),
@@ -213,7 +213,7 @@ def test_edit_then_resync_preserves_local_edit(client, app, admin_headers, tmp_p
     assert resync.json()["report"]["merged"] == 1
 
     final = client.get(f"/api/v1/sigma/catalogue/{_UUID}", headers=admin_headers).json()
-    # local edit survived; drift recorded against the new upstream date
+    # local edit survived. Drift recorded against the new upstream date
     assert final["rule"]["level"] == "informational"
     assert final["title"] == "Renamed"
     assert final["provenance"]["local_edited"] is True

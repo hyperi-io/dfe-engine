@@ -104,7 +104,7 @@ class SigmaViewWriteRequest(BaseModel):
     """Create/replace body for a source's Sigma view definition (source_name is the path).
 
     Each column maps a Sigma field to a real source column OR a path inside the
-    source's ``_json`` payload (a JSON-derived column); the ``SigmaViewColumn``
+    source's ``_json`` payload (a JSON-derived column). The ``SigmaViewColumn``
     validator enforces exactly one per column.
     """
 
@@ -241,7 +241,7 @@ async def get_field_mappings(
 # inside the source's _json payload - the meta schema only knows the fixed
 # _timestamp_load / _org_id / _source / _raw / _json columns. The definition is
 # the SSoT the generate action (POST below) renders DDL from. All governed by
-# sigma:read (reads) / sigma:write (mutations); gitops must be enabled (else 503).
+# sigma:read (reads) / sigma:write (mutations). Gitops must be enabled (else 503).
 
 
 @router.get("/views", response_model=Page[SigmaViewSummary], dependencies=[_READ])
@@ -319,12 +319,12 @@ async def generate_sigma_view(
     """Generate (preview) Sigma view DDL for a source.
 
     A stored view definition drives generation - including its JSON-derived
-    columns - when one exists; otherwise falls back to the static field maps via
+    columns - when one exists. Otherwise falls back to the static field maps via
     the source mapper, keeping only the mappings whose column the source's table
-    carries. Returns the DDL string; does NOT execute it against ClickHouse.
+    carries. Returns the DDL string. Does NOT execute it against ClickHouse.
 
     Defaults to the data database, since that is where a propagated hunt reads
-    the view from (``{source}_sigma``); an explicit ``database`` still overrides it.
+    the view from (``{source}_sigma``). An explicit ``database`` still overrides it.
     """
     target_db = database or request.app.state.settings.clickhouse.effective_data_database
     store = _view_store_or_none(request)
@@ -359,7 +359,7 @@ async def generate_all_sigma_views(
     """Generate Sigma view DDL for all sources (stored definitions win over field maps).
 
     Defaults to the data database, since that is where a propagated hunt reads
-    the view from (``{source}_sigma``); an explicit ``database`` still overrides it.
+    the view from (``{source}_sigma``). An explicit ``database`` still overrides it.
     """
     target_db = database or request.app.state.settings.clickhouse.effective_data_database
     mapper = _get_source_mapper(request, with_columns=True)
@@ -412,7 +412,7 @@ async def find_sources_for_logsource(
 #
 # A pluggable provider fetches external sigma rules (SigmaHQ git repo default,
 # Valhalla, a local import dir) which UPSERT by id into ONE gitcrud-backed
-# catalogue; a separate selection list is the meta-level "which rules to
+# catalogue. A separate selection list is the meta-level "which rules to
 # implement". All governed by sigma:read (reads) / sigma:write (mutations).
 
 
@@ -525,7 +525,7 @@ def _confine_provider_url(url: str, field: str) -> None:
     http(s) only. A LITERAL-IP host is checked directly (blocks loopback,
     link-local incl. the 169.254.169.254 metadata endpoint, unspecified, multicast,
     reserved - even the trailing-dot form, no DNS needed). A HOSTNAME is resolved
-    BEST-EFFORT and rejected if it resolves to such an address; if resolution is
+    BEST-EFFORT and rejected if it resolves to such an address. If resolution is
     UNAVAILABLE (a network-restricted runner / CI) it is NOT hard-failed - the
     ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` allowlist + pin-at-connect (follow-up) are the
     backstop. Private RFC1918 hosts are NOT blocked (internal feeds are legitimate).
@@ -720,7 +720,7 @@ async def enable_provider(
 async def disable_provider(
     name: str, request: Request, response: Response, user: CurrentUser
 ) -> ProviderConfig:
-    """Disable a provider (blocks scheduled polling; a manual sync is refused)."""
+    """Disable a provider (blocks scheduled polling, a manual sync is refused)."""
     store = _provider_store(request)
     try:
         saved = await asyncio.to_thread(store.set_enabled, name, False, user.user_id)
@@ -758,7 +758,7 @@ async def sync_provider_endpoint(
 ) -> SyncResponse:
     """Trigger a provider sync into the catalogue.
 
-    Submitted to the task manager (a git-repo clone is long-running); blocks up to
+    Submitted to the task manager (a git-repo clone is long-running). Blocks up to
     ``wait`` seconds for inline completion, else returns ``pending`` - poll via
     GET /sigma/syncs/{task_id}.
     """
@@ -853,7 +853,7 @@ async def edit_catalogue_rule(
 async def adopt_catalogue_rule(
     rule_id: str, request: Request, response: Response, user: CurrentUser
 ) -> CatalogRuleDetail:
-    """Detach a rule from upstream (pin its content; a re-import records drift only)."""
+    """Detach a rule from upstream (pin its content, a re-import records drift only)."""
     catalog = _catalog(request)
     try:
         doc = await asyncio.to_thread(catalog.adopt_rule, rule_id, user.user_id)
@@ -924,7 +924,7 @@ async def deselect_rule(
 # hunt registries (never a second CRUD). Drift is honoured: a binding derived from
 # a locally-edited/drifted sigma rule - or one hand-edited since generation - is
 # reported skipped, not clobbered, unless force=true. Governed by sigma:read
-# (reads) / sigma:write (propagate + delete); gitops must be enabled (else 503).
+# (reads) / sigma:write (propagate + delete). Gitops must be enabled (else 503).
 
 
 # -- Models --------------------------------------------------
@@ -1110,11 +1110,11 @@ async def propagate(
     the matching source's ``{source}_sigma`` view and stores a DFE rule (with a
     ``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted
     or hand-edited bindings are reported ``skipped_drifted`` unless ``force``.
-    Submitted to the task manager; blocks up to ``wait`` seconds for inline
+    Submitted to the task manager. Blocks up to ``wait`` seconds for inline
     completion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.
 
     A production+team run commits each generated rule and hunt to its own review
-    branch rather than the branch the hunt runner syncs; the report carries every
+    branch rather than the branch the hunt runner syncs. The report carries every
     branch and PR, and ``X-DFE-Review-Required`` says so on a run that completed
     inline. 422 ``unknown_org`` when ``hunt_customers`` names no registered org.
     """

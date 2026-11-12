@@ -165,7 +165,7 @@ class TestUnrestrictedGroups:
         assert [(b.group, b.org) for b in bindings] == [("platform-data", "")]
 
     def test_admin_groups_compose_the_otel_reader(self):
-        """Admins and infra admins read platform telemetry; nobody else does."""
+        """Admins and infra admins read platform telemetry. Nobody else does."""
         groups = [
             _group("admins", roles=["admin"]),
             _group("infra", roles=["infra_admin"]),

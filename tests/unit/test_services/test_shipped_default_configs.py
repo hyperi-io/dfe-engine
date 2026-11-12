@@ -90,14 +90,14 @@ def test_every_shipped_archiver_template_uses_a_placeholder_the_archiver_substit
 
 @pytest.mark.parametrize(("name", "text"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
 def test_no_shipped_archiver_config_pins_the_roll_interval(name: str, text: str):
-    # dfe-archiver #98 picks the interval from whether it holds offsets; a pin overrides that.
+    # dfe-archiver #98 picks the interval from whether it holds offsets. A pin overrides that.
     archive = (yaml_load_string(text) or {})["archive"]
     assert "roll_interval_secs" not in archive, f"{name} pins archive.roll_interval_secs"
 
 
 @pytest.mark.parametrize(("name", "text"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
 def test_no_shipped_archiver_config_pins_the_expression_fields(name: str, text: str):
-    # dfe-archiver #127 picks the fields from the transport; a pin overrides that.
+    # dfe-archiver #127 picks the fields from the transport. A pin overrides that.
     routing = (yaml_load_string(text) or {}).get("routing", {})
     assert "expression_fields" not in routing, f"{name} pins routing.expression_fields"
 
@@ -141,7 +141,7 @@ def test_every_shipped_receiver_dials_the_loader_the_app_manifest_places(name: s
 
 def test_no_shipped_fetcher_config_authors_a_dlq_topic():
     # dfe-fetcher embeds scalo's DlqConfig (dlq.kafka.common_topic), so a
-    # dlq.topic written here was read by nothing; the deploy layer's env owns it.
+    # dlq.topic written here was read by nothing. The deploy layer's env owns it.
     for name, text in _SHIPPED:
         if not name.startswith("fetcher-"):
             continue

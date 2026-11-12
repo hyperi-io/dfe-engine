@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 def docs_served(settings: DFESettings) -> bool:
     """True when Swagger UI (/docs) and ReDoc (/redoc) are mounted.
 
-    ``api.docs_enabled`` decides when set; unset, only a dev posture serves them.
+    ``api.docs_enabled`` decides when set. Unset, only a dev posture serves them.
     """
     if settings.api.docs_enabled is not None:
         return settings.api.docs_enabled
@@ -153,7 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     ensure_storage(settings=settings)
 
-    # Fire-and-forget startup version check; on by default, any
+    # Fire-and-forget startup version check. On by default, any
     # version_check.* cascade key overrides (enabled: false kills it).
     # Must never break startup.
     try:
@@ -429,7 +429,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     app.state.jwt_authority = jwt_authority_for(settings)
 
-    # The one seam for secrets the engine mints - OIDC provider credentials and
+    # The one entry point for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
     app.state.dfe_secrets = build_secrets(settings.secrets)
     app.state.bearer_mirror = build_secret_mirror(settings.ingest.bearer_secret)
@@ -580,7 +580,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
 
-    # Synthetic data service (synthetic reference streams; ceilings from settings)
+    # Synthetic data service (synthetic reference streams, ceilings from settings)
     from dfe_engine.synthetic_data.autostart import start_autostart
     from dfe_engine.synthetic_data.service import SyntheticDataService
 
@@ -614,7 +614,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # The schema half of readiness: ready means the last bootstrap pass converged,
     # so every app downstream has ONE thing to wait on. A failed apply leaves the
-    # pod up and NotReady with the cause on GET /api/v1/system/schema; liveness is
+    # pod up and NotReady with the cause on GET /api/v1/system/schema. Liveness is
     # untouched, so it is never restarted out from under an operator reading it.
     from dfe_engine.schema.phase import schema_ready
 
@@ -738,7 +738,7 @@ def create_app(
         docs_url="/docs" if docs and not e2e_docs else None,
         redoc_url="/redoc" if docs else None,
         openapi_tags=openapi_tags,
-        # The request histogram is scalo's middleware below; FastAPI's own would count each twice.
+        # The request histogram is scalo's middleware below. FastAPI's own would count each twice.
         telemetry={**FASTAPI_TELEMETRY, "metrics": False},
         # Every operation id comes from its path, so the UI, CLI and MCP share one name for it.
         generate_unique_id_function=HIERARCHY.unique_id,
@@ -796,7 +796,7 @@ def create_app(
 
     install_core_resource_guard(app)
 
-    # Outside the guard, which reads every write body whole; inside CORS, so a 413 has its headers.
+    # Outside the guard, which reads every write body whole. Inside CORS, so a 413 has its headers.
     from dfe_engine.api.body_limits import RequestBodyCapMiddleware
 
     app.add_middleware(RequestBodyCapMiddleware)
@@ -847,7 +847,7 @@ def create_app(
 
     app.add_middleware(AccessLogMiddleware)
 
-    # Outermost of all, so a request's duration covers the whole stack; the app
+    # Outermost of all, so a request's duration covers the whole stack. The app
     # status page reads its rate, error rate and p95 from this one histogram.
     if metrics_manager is not None:
         from scalo.metrics.http_server import HttpServerMetricsMiddleware
@@ -881,7 +881,7 @@ def create_app(
     app.include_router(create_health_router(health_manager), include_in_schema=False)
 
     # /metrics is NOT mounted here (#106). It was unauthenticated on the
-    # public API port; scalo's ServiceApp now serves it on the dedicated
+    # public API port. scalo's ServiceApp now serves it on the dedicated
     # observability port (9090), off the ingress-exposed 8000. The scrape and
     # the kubelet probes both target 9090 (see the chart). Health stays mounted
     # here too, on the SAME shared HealthManager, so 8000 and 9090 never

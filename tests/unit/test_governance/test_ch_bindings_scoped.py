@@ -36,7 +36,7 @@ def _group(name: str, roles: list[str], org_ids: list[str]) -> SimpleNamespace:
 
 
 class _AdminClient:
-    """Records executed DDL; every discovery query returns no rows."""
+    """Records executed DDL. Every discovery query returns no rows."""
 
     def __init__(self) -> None:
         self.executed: list[str] = []

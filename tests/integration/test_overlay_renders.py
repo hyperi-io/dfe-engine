@@ -129,7 +129,7 @@ def charts(tmp_path_factory) -> Iterator[Callable[[str], Path]]:
     shutil.rmtree(dest, ignore_errors=True)
 
 
-# ── helpers ───────────────────────────────────────────────────
+# -- helpers ---------------------------------------------------
 
 
 def label_value_ok(value: Any) -> bool:
@@ -213,14 +213,14 @@ def _files_in(*, configmap: dict) -> dict[str, str]:
     return {**(configmap.get("data") or {}), **decoded}
 
 
-# ── the contract ──────────────────────────────────────────────
+# -- the contract ----------------------------------------------
 
 
 @pytest.mark.parametrize("service", TRANSFORM_SERVICES)
 class TestOverlayRendersThroughTheChart:
     def test_the_chart_renders_at_all(self, charts, service, tmp_path):
         # The engine writing a key the chart does not expect is not caught by any
-        # unit test on either side; a rendering failure here is the only signal.
+        # unit test on either side. A rendering failure here is the only signal.
         doc = overlay_with_files(service, "edge", {})
         objects = render(charts, service, doc, "edge", tmp_path)
         kinds = {o["kind"] for o in objects}

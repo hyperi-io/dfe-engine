@@ -1,4 +1,4 @@
-"""Tests for SchemaManager — schema version management write operations."""
+"""Tests for SchemaManager -- schema version management write operations."""
 
 import pytest
 
@@ -11,7 +11,7 @@ from dfe_engine.schema.schema_manager import (
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
-# ── Fixtures ───────────────────────────────────────────────────────
+# -- Fixtures -------------------------------------------------------
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def multi_version_schema(tmp_path):
     return path
 
 
-# ── TestAddVersion ─────────────────────────────────────────────────
+# -- TestAddVersion -------------------------------------------------
 
 
 class TestNextVersionForType:
@@ -276,7 +276,7 @@ class TestAddVersion:
             )
 
 
-# ── TestCloneVersion ───────────────────────────────────────────────
+# -- TestCloneVersion -----------------------------------------------
 
 
 class TestCloneVersion:
@@ -360,7 +360,7 @@ class TestCloneVersion:
             ],
         )
         msg_col = next(c for c in result if c.name == "message")
-        assert msg_col.type == "string"  # Changed from text
+        assert msg_col.type == "string"
 
     def test_modification_remove_nonexistent_raises(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="not found for removal"):
@@ -382,7 +382,7 @@ class TestCloneVersion:
         assert all(isinstance(c, SchemaColumn) for c in result)
 
 
-# ── TestValidateMetaSchemaColumns ──────────────────────────────────
+# -- TestValidateMetaSchemaColumns ----------------------------------
 
 
 class TestValidateMetaSchemaColumns:
@@ -422,7 +422,7 @@ class TestValidateMetaSchemaColumns:
             SchemaManager.validate_meta_schema_columns(meta)
 
 
-# ── TestCreateMetaSchema ───────────────────────────────────────────
+# -- TestCreateMetaSchema -------------------------------------------
 
 
 class TestCreateMetaSchema:
@@ -483,7 +483,7 @@ class TestCreateMetaSchema:
         assert len(ver["columns"]) == 1
 
 
-# ── TestCloneMetaSchema ────────────────────────────────────────────
+# -- TestCloneMetaSchema --------------------------------------------
 
 
 class TestCloneMetaSchema:
@@ -535,7 +535,7 @@ class TestCloneMetaSchema:
         assert "Cloned from" in data["versions"]["1.0.0"]["summary"]
 
 
-# ── Integration ────────────────────────────────────────────────────
+# -- Integration ----------------------------------------------------
 
 
 class TestIntegration:

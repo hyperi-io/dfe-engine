@@ -41,7 +41,7 @@ from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.http_errors import describe_http_error
 from dfe_engine.names import VALID_NAME
 
-# Platform teams, broadest first; only a role granted at SYSTEM scope earns one.
+# Platform teams, broadest first. Only a role granted at SYSTEM scope earns one.
 _ROLE_TO_TEAM = {
     "admin": "dfe-admin",
     "infra_admin": "dfe-admin",
@@ -159,7 +159,7 @@ class JitProvisioner:
     def sanitise_username(user_id: str) -> str:
         """Convert email/OIDC subject to safe filename stem.
 
-        Case and punctuation fold, so several subjects can share one stem; the
+        Case and punctuation fold, so several subjects can share one stem. The
         account's recorded ``subject`` is what tells them apart.
         """
         return re.sub(r"[^a-z0-9-]", "-", user_id.lower()).strip("-")
@@ -179,7 +179,7 @@ class JitProvisioner:
         ``email`` is the IdP-asserted address (OIDC ``email`` claim / ``X-Oidc-Email``)
         and ``name`` the IdP-asserted display name. Each is written on first create
         and reconciled on later logins when present. ``groups`` is every stored group
-        when the caller has listed them for this request; otherwise the login lists
+        when the caller has listed them for this request. Otherwise the login lists
         them once, since each listing reads every group file.
 
         ``keep_stored_groups`` is set when the IdP's directory gave no answer and the
@@ -390,7 +390,7 @@ class JitProvisioner:
         """
         if not source_provider or not existing.source_provider:
             # An account carrying no stamp is a local credential that belongs to no
-            # IdP, so no binding can name it; a caller asserting no provider name
+            # IdP, so no binding can name it. A caller asserting no provider name
             # owns nothing. Both are refused before any comparison runs.
             return False
         if existing.external and existing.source_provider == source_provider:
@@ -481,7 +481,7 @@ class JitProvisioner:
         An org-scoped group's roles cover its org alone, so its member gets that org's
         team whatever roles the group holds. Only groups linked to *source_provider*
         count (:func:`~dfe_engine.auth.membership.linked_groups`). ``groups`` is every
-        stored group when the caller has listed them; otherwise they are listed here.
+        stored group when the caller has listed them. Otherwise they are listed here.
         """
         listed = self._groups.list() if groups is None else groups
         grants, org_ids = self._resolve_grants(oidc_groups, source_provider, listed)
@@ -498,7 +498,7 @@ class JitProvisioner:
     # ------------------------------------------------------------------
 
     async def _invite_to_hdx(self, user_id: str, team_name: str) -> None:
-        """Invite the user to the fork's team; a refusal or failure is logged, never raised."""
+        """Invite the user to the fork's team. A refusal or failure is logged, never raised."""
         hdx = self._hdx
         # ensure_account schedules the invite only once a client is bound.
         if hdx is None:

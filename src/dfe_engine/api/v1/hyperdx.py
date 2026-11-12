@@ -31,7 +31,7 @@ by the same function (:func:`hyperdx_identity`) and without the password.
 GET /api/v1/hyperdx/sources - every HyperDX team and the DFE sources on it.
 
 A deploy writes its source to every team over that team's own connection, so this
-is the read that says where it landed; ``source:read`` gates it.
+is the read that says where it landed. ``source:read`` gates it.
 """
 
 from dataclasses import dataclass
@@ -109,7 +109,7 @@ def _reads_every_org(request: Request, user) -> bool:
     """Whether a platform role grants ``query:execute`` at SYSTEM scope.
 
     ``platform_grants`` decides which grants may read across orgs, the same filter
-    the CH group bindings use; this adds the ``query:execute`` check on top.
+    the CH group bindings use. This adds the ``query:execute`` check on top.
     """
     return reads_every_org(request, user, scopes_dict["query_execute"])
 

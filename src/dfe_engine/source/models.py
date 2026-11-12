@@ -121,7 +121,7 @@ SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 # Tri-state source lifecycle:
 # - active   - schema materialised + receiver redirect + transform all ON.
 # - dormant  - schema RETAINED (pre-positioned), redirect + transform OFF.
-# - disabled - all off, table reclaimed (== the old enabled=False).
+# - disabled - all off, table reclaimed.
 SourceState = Literal["active", "dormant", "disabled"]
 
 
@@ -275,26 +275,24 @@ class SchemaColumn(BaseModel):
             except Exception as e:
                 errors.append(f"Column {self.name!r}: {e}")
 
-        # Validate primitive
         if self.type not in registry.primitives and not self.ch_override:
             errors.append(f"Column {self.name!r}: unknown primitive {self.type!r}")
             return errors  # Can't validate further
 
-        # Validate use_case↔primitive
+        # Validate use_case<->primitive
         if self.use_case:
             try:
                 registry.validate_use_case(self.type, self.use_case)
             except Exception as e:
                 errors.append(f"Column {self.name!r}: {e}")
 
-        # Validate attribute↔primitive
+        # Validate attribute<->primitive
         for attr in self.attribute:
             try:
                 registry.validate_attribute(self.type, attr)
             except Exception as e:
                 errors.append(f"Column {self.name!r}: {e}")
 
-        # Validate ch_override
         if self.ch_override:
             try:
                 registry.validate_ch_override(self.ch_override)
@@ -348,7 +346,7 @@ def inherited_header_version() -> str:
 class SourceHeader(BaseModel):
     """Common schema header configuration."""
 
-    # Must name a file in dfe-schemas common-header/; nothing normalises it.
+    # Must name a file in dfe-schemas common-header/. Nothing normalises it.
     type: str = Field(
         default=DEFAULT_HEADER_TYPE,
         description="Profile name (timeseries, minimal, passthrough)",
@@ -624,7 +622,7 @@ class SourceSchema(BaseModel):
     @field_validator("engine")
     @classmethod
     def _validate_engine(cls, v: str) -> str:
-        # Empty = inherit the deployment default (resolved at DDL-build time); do
+        # Empty = inherit the deployment default (resolved at DDL-build time). Do
         # not gate it. Otherwise gate the VARIANT (the token before any "(") against
         # the single engine registry - the same allow-list the DDL generator uses,
         # so config and DDL cannot drift. Params inside the parens are the caller's.
@@ -1014,13 +1012,13 @@ that tests which source a record is has this as its field.
 # receiver's default_source and the loader's default_table, so a rule would only
 # shadow every rule after it.
 
-# Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
+# Keys the engine sets on the compiled fetcher stanza. A source may not carry them.
 _FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
 
 # Contact details the logger masks are personal data, not secrets, so a source may commit them.
 _PERSONAL_WORDS = frozenset({"email", "phone"})
 
-# dfe-fetcher's GCP-family sources hold the PATH to a key file here; under `auth` it is the key.
+# dfe-fetcher's GCP-family sources hold the PATH to a key file here. Under `auth` it is the key.
 _KEY_FILE_PATH = ("service", "account", "key")
 
 
@@ -1049,7 +1047,7 @@ def _find_plaintext_credential(value: Any, path: str = "", parent: str = "") -> 
     in it. A list's entries are judged on their own fields: dfe-fetcher's
     ``auth.credentials`` placements name credentials in a ``value`` and hold none. A
     mapping named :data:`~dfe_engine.masking.CREDENTIAL_MAP` and nothing more holds a
-    credential under every name; ``oauth2_client_credentials`` holds settings.
+    credential under every name. ``oauth2_client_credentials`` holds settings.
     """
     if isinstance(value, dict):
         by_name = words(parent) == CREDENTIAL_MAP
@@ -1152,8 +1150,8 @@ class SourceFetcher(BaseModel):
     @field_validator("source_type")
     @classmethod
     def _validate_source_type(cls, v: str) -> str:
-        # The manifest (dfe-infra apps.yaml) lists the fetcher's source families;
-        # a manifest that declares none leaves the value unchecked. Imported at call
+        # The manifest (dfe-infra apps.yaml) lists the fetcher's source families.
+        # A manifest that declares none leaves the value unchecked. Imported at call
         # time: appmgmt reaches this module through appmgmt.routing -> dfe_engine.source.
         from dfe_engine.appmgmt.catalogue import source_types
 
@@ -1217,7 +1215,7 @@ class SourceView(BaseModel):
     )
     # Sigma-only logsource binding for rule->source propagation. When set,
     # propagation only binds a rule to this source if the rule's category/service
-    # also match; None matches ANY (so a bare-taxonomy source keeps the
+    # also match. None matches ANY (so a bare-taxonomy source keeps the
     # product-only behaviour). Ignored for non-sigma standards.
     taxonomy: str | None = Field(
         default=None, description="Sigma logsource product this source serves (sigma views only)"
@@ -1282,7 +1280,7 @@ _TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {
     "allowed_sources",
 }
 
-# Named alike on SourceWriteRequest and SourceVersion; an update omitting one keeps the stored value.
+# Named alike on SourceWriteRequest and SourceVersion. An update omitting one keeps the stored value.
 _INHERITED_ON_ABSENCE = (
     "header",
     "schema_config",
@@ -1441,7 +1439,7 @@ class SourceVersion(BaseModel):
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence under ``versions.<id>``."""
-        # origin is derived for the API; writing it back would duplicate match/fetcher.
+        # origin is derived for the API. Writing it back would duplicate match/fetcher.
         raw = self.model_dump(mode="json", by_alias=True, exclude_none=True, exclude={"origin"})
         # Prune empty per-view containers (e.g. custom_mappings: {}) for clean YAML.
         for entry in [*(raw.get("views") or []), *(raw.get("compat_profiles") or [])]:
@@ -1694,7 +1692,7 @@ def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
 
 
 def _header_pin_for_bump(header: SourceHeader | None) -> tuple[str | None, str | None]:
-    """Common-header type and version; absent header is a distinct pin from a defaulted one."""
+    """Common-header type and version. Absent header is a distinct pin from a defaulted one."""
     if header is None:
         return (None, None)
     return (header.type, header.version)
@@ -1773,7 +1771,7 @@ def _reject_origin_or_table_paradigm_change(
 
     Origin (receiver vs fetcher) is fixed for the life of a source: the apps and
     routing compiled around it assume one intake. A pinned ``meta_schema`` means
-    the source owns its own ClickHouse table; clearing it would move records onto
+    the source owns its own ClickHouse table. Clearing it would move records onto
     ``main``, which an update is not allowed to do.
     """
     if previous.origin != updated.origin:
@@ -2014,12 +2012,12 @@ class Source(BaseModel):
 
     @property
     def header(self) -> SourceHeader:
-        """Deployed version header (legacy accessor; defaults the profile when unauthored)."""
+        """Deployed version header (legacy accessor, defaults the profile when unauthored)."""
         return self.version().effective_header()
 
     @property
     def schema_config(self) -> SourceSchema:
-        """Deployed version schema config (legacy accessor; empty default when unauthored)."""
+        """Deployed version schema config (legacy accessor, empty default when unauthored)."""
         return self.version().effective_schema()
 
     @property
@@ -2145,7 +2143,7 @@ class Source(BaseModel):
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize to a dict suitable for YAML output.
 
-        Top-level identity and routing; versioned config under ``versions``.
+        Top-level identity and routing. Versioned config under ``versions``.
         """
         data: dict[str, Any] = {
             "source": self.source,

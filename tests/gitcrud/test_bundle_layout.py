@@ -116,7 +116,7 @@ class TestBinary:
         assert crud.read_payload_bytes("blobs", "mod", "versions/0001.wasm") == payload
 
     def test_crlf_in_bytes_is_not_rewritten(self, crud):
-        # Text writes normalise to LF; a binary payload must not be touched.
+        # Text writes normalise to LF. A binary payload must not be touched.
         crud.put_bundle(
             "blobs",
             "mod",

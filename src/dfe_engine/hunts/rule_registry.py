@@ -124,7 +124,7 @@ class RuleRegistry:
     def _put_raw(
         self, name: str, doc: dict[str, Any], *, created_by: str | None
     ) -> WriteOutcome | None:
-        """Write one rule doc and log where it landed; returns the git outcome.
+        """Write one rule doc and log where it landed. Returns the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's rule_compiler parses this exact file. Directory backend: plain YAML
@@ -143,7 +143,7 @@ class RuleRegistry:
         return None
 
     def _delete_raw(self, name: str, *, created_by: str | None) -> tuple[bool, WriteOutcome | None]:
-        """Remove one rule doc; False when it did not exist, plus the git outcome."""
+        """Remove one rule doc. False when it did not exist, plus the git outcome."""
         if self._deploy is not None:
             outcome = self._deploy.delete(name, actor=created_by or "engine")
             return outcome is not None, outcome
@@ -184,7 +184,7 @@ class RuleRegistry:
         return _rule_from_stored(name, dict(config_data))
 
     def save(self, rule: Rule, *, created_by: str | None = None) -> WriteOutcome | None:
-        """Persist one rule; returns the git routing outcome, None off gitops.
+        """Persist one rule. Returns the git routing outcome, None off gitops.
 
         A production+team write lands on a review branch rather than the branch the
         runner git-syncs, so the caller has to be able to say so.
@@ -192,7 +192,7 @@ class RuleRegistry:
         return self._put_raw(rule.rule_id, _rule_to_yaml_dict(rule), created_by=created_by)
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
-        """Remove one rule; returns the git routing outcome, None off gitops."""
+        """Remove one rule. Returns the git routing outcome, None off gitops."""
         found, outcome = self._delete_raw(name, created_by=created_by)
         if not found:
             raise RuleNotFoundError(f"Rule not found: '{name}'")

@@ -30,7 +30,7 @@ def _wire_gitcrud(app, tmp_path):
 
 
 class _RecordingForge:
-    """ForgeProvider seam double: records the PR the endpoint opens."""
+    """ForgeProvider double: records the PR the endpoint opens."""
 
     def __init__(self, url: str = "http://forge/pr/9") -> None:
         self.calls: list[dict] = []
@@ -271,7 +271,7 @@ class TestProdTeamPrRouting:
         assert forge.calls[0]["base"] == "main"
         assert branch.startswith("dfe/helmvars/")
 
-        # main untouched; the review branch really landed on the remote
+        # main untouched. The review branch really landed on the remote
         assert self._remote_main(bare) == main_before
         assert f"refs/heads/{branch}" in self._remote_refs(bare)
 
@@ -299,7 +299,7 @@ class TestProdTeamPrRouting:
     def test_a_credential_is_named_not_shown_in_the_pr(
         self, client, app, admin_headers, tmp_path, path, credential
     ):
-        # The PR text leaves the deploy repo for the forge; the branch does not.
+        # The PR text leaves the deploy repo for the forge. The branch does not.
         forge = _RecordingForge()
         gc, bare = _wire_gitcrud_remote(app, tmp_path, forge)
         resp = client.put(
@@ -342,7 +342,7 @@ class TestProdTeamPrRouting:
                 }
             ],
         }
-        # defining the action is a governance-class write -> routed to a PR; the
+        # defining the action is a governance-class write -> routed to a PR. The
         # 201 body is unchanged but the review PR is signalled via response headers
         created = client.post(
             "/api/v1/governance/admin/actions", json=action, headers=admin_headers

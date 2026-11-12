@@ -180,7 +180,7 @@ class SchemaLock:
         """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
-            f"SELECT holder, expires_at, released, acquired_at FROM {target} FINAL "  # noqa: S608 - quoted database and manifest table; values bound
+            f"SELECT holder, expires_at, released, acquired_at FROM {target} FINAL "  # noqa: S608 - quoted database and manifest table, values bound
             "WHERE lock_name = {lock:String}"
         )
         try:
@@ -357,12 +357,12 @@ class SchemaLock:
         """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         claims = (
-            f"SELECT holder, acquired_at FROM {target} "  # noqa: S608 - quoted database and manifest table; values bound
+            f"SELECT holder, acquired_at FROM {target} "  # noqa: S608 - quoted database and manifest table, values bound
             "WHERE lock_name = {lock:String} GROUP BY holder, acquired_at "
             "HAVING max(released) = 0 AND max(expires_at) > {now:DateTime}"
         )
         markers = (
-            f"SELECT holder, acquired_at, max(released), max(expires_at) > {{now:DateTime}} FROM {target} "  # noqa: S608 - quoted database and manifest table; values bound
+            f"SELECT holder, acquired_at, max(released), max(expires_at) > {{now:DateTime}} FROM {target} "  # noqa: S608 - quoted database and manifest table, values bound
             "WHERE startsWith(lock_name, {prefix:String}) GROUP BY holder, acquired_at"
         )
         parameters = {

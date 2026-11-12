@@ -119,7 +119,7 @@ def test_versioned_doc_refuses_unversioned_class(tmp_path):
 
 
 def test_each_op_is_a_commit(vc):
-    # head_revision() is git's own commit id (we only read it); each op advances it
+    # head_revision() is git's own commit id (we only read it). Each op advances it
     vc.save_draft("rules", "r", {"sql": "a"}, actor="x")
     rev_after_draft = vc._crud.head_revision()
     vc.publish("rules", "r", actor="x")

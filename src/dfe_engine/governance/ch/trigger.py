@@ -168,7 +168,7 @@ class ReconcileTrigger:
     carried is still unapplied, and nothing else would ask again.
 
     Args:
-        run: the reconcile, returning its result; it runs on the trigger's thread.
+        run: the reconcile, returning its result. It runs on the trigger's thread.
         metrics: where each run's outcome, and each retry, is counted.
         reconcile: which reconcile ``run`` is, for the retry counter and the logs.
         settle_seconds: how long a run waits for the rest of a burst.
@@ -209,7 +209,7 @@ class ReconcileTrigger:
         self._active = False
 
     def request(self) -> None:
-        """Ask for a reconcile; never raises and never waits for one."""
+        """Ask for a reconcile. Never raises and never waits for one."""
         with self._lock:
             if self._closed.is_set():
                 return
@@ -264,12 +264,12 @@ class ReconcileTrigger:
         self._wake.set()
 
     def wait_idle(self, timeout: float) -> bool:
-        """Wait until no reconcile is settling or running; returns whether that happened."""
+        """Wait until no reconcile is settling or running. Returns whether that happened."""
         with self._idle:
             return self._idle.wait_for(lambda: not self._active, timeout)
 
     def close(self, timeout: float) -> bool:
-        """Start no more runs and wait for one in flight; returns whether it finished.
+        """Start no more runs and wait for one in flight. Returns whether it finished.
 
         A run reads the org and group stores, so the app closes this before it closes
         them. Startup reconciles everything again, so a run dropped here is not lost.
@@ -282,7 +282,7 @@ class ReconcileTrigger:
         return self.wait_idle(timeout)
 
     def _start(self, wait: float) -> None:
-        """Start the worker, which first waits ``wait``; the caller has set ``_active``."""
+        """Start the worker, which first waits ``wait``. The caller has set ``_active``."""
         try:
             threading.Thread(
                 target=self._work, args=(wait,), name=WORKER_THREAD_NAME, daemon=True
@@ -370,7 +370,7 @@ class ReconcileTrigger:
 
 
 def request_ch_rbac_reconcile(state: Any) -> None:
-    """Ask the app's trigger for a reconcile; a no-op where tenant isolation is off.
+    """Ask the app's trigger for a reconcile. A no-op where tenant isolation is off.
 
     Args:
         state: the FastAPI ``app.state`` the lifespan put the trigger on.

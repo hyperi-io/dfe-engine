@@ -91,7 +91,7 @@ class TestVectorYaml:
 
 class TestVrl:
     def test_an_absent_backend_is_unavailable_never_valid(self, monkeypatch):
-        # The soft seam: a missing checker must not read as a passing check.
+        # The soft case: a missing checker must not read as a passing check.
         monkeypatch.setitem(sys.modules, "vectordotdev", None)
         result = validation.validate_language("vrl", ".a = 1", enabled=True)
         assert result.status is validation.ValidationStatus.UNAVAILABLE

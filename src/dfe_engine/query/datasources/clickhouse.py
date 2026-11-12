@@ -32,7 +32,7 @@ def restricted_password(settings: Any) -> str:
 
 
 def _estimated_rows(estimate: Any) -> int | None:
-    """Rows EXPLAIN ESTIMATE expects the query to read; None when it lists no MergeTree read."""
+    """Rows EXPLAIN ESTIMATE expects the query to read. None when it lists no MergeTree read."""
     if not estimate.result_rows:
         return None
     rows_at = list(estimate.column_names).index("rows")
@@ -69,7 +69,7 @@ class ClickHouseAdapter(DatasourceAdapter):
         """Get a restricted clickhouse-connect client for parameterized view execution.
 
         Args:
-            settings: The engine settings; None reads the process-wide ones.
+            settings: The engine settings. None reads the process-wide ones.
 
         Returns:
             A clickhouse-connect client authenticated as ``query_views.restricted_user``.
@@ -147,7 +147,7 @@ class ClickHouseAdapter(DatasourceAdapter):
         """Column names of a query that returned no rows, from ClickHouse's analysis of it.
 
         ClickHouse sends no Native block for an empty result, so the names are not in the
-        response. DESCRIBE analyses the query without running it; a statement it cannot
+        response. DESCRIBE analyses the query without running it. A statement it cannot
         wrap, such as SHOW or one with a FORMAT clause, has no names to give.
         """
         # The newline ends a trailing line comment before the closing parenthesis.

@@ -30,7 +30,7 @@ from tests.support.deploy_remote import seeded_remote
 
 
 def _refuse_commits(repo: GitopsRepo) -> Path:
-    """Install a pre-commit hook that fails every commit; returns it for removal."""
+    """Install a pre-commit hook that fails every commit. Returns it for removal."""
     hook = repo.path / ".git" / "hooks" / "pre-commit"
     hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
@@ -42,7 +42,7 @@ def _refuse_a_blob(repo: GitopsRepo, tmp_path: Path) -> tuple[bytes, Path]:
     """File content the object store will refuse, and the directory pointed nowhere.
 
     Commit ids vary with the clock, so the content is chosen to land in an object
-    directory the clone does not use yet; pointing that one nowhere refuses the blob
+    directory the clone does not use yet. Pointing that one nowhere refuses the blob
     for root as well, and touches no object already stored.
     """
     objects = repo.path / ".git" / "objects"

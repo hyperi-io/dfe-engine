@@ -203,7 +203,7 @@ async def list_orgs(
 ):
     """List organisations visible to the caller, paginated.
 
-    System-scope org:read holders see every org; org-scope holders see
+    System-scope org:read holders see every org. Org-scope holders see
     only the orgs their grants cover.
     """
     registry: OrgRegistry = request.app.state.org_registry

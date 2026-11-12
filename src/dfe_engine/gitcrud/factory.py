@@ -28,7 +28,7 @@ def build_gitcrud(gs: GitopsSettings, metrics_manager: Any | None = None) -> Git
     """Build a GitCrud over the deploy repo, or None if gitops is off/unconfigured.
 
     ``metrics_manager`` is the process's scalo manager, so the clone's counters are
-    served where every other engine metric is; None records nothing.
+    served where every other engine metric is. None records nothing.
     """
     if not gs.enabled or not gs.local_path:
         return None

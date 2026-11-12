@@ -8,7 +8,7 @@
 
 """Ensure the schemas and config storage directories exist, seeding schemas once.
 
-Schemas are seeded from the image-baked ``dfe-schemas`` tree when the schemas directory's ``.seeded`` marker is absent or names a different engine version, so an upgrade refreshes the shipped defaults over a tree an older image seeded while leaving files the deployment added; config is only ensured to exist. The config directory falls back to a baked default when unset; the schemas directory is bootstrapped only when configured (the container image sets ``DFE_ENGINE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
+Schemas are seeded from the image-baked ``dfe-schemas`` tree when the schemas directory's ``.seeded`` marker is absent or names a different engine version, so an upgrade refreshes the shipped defaults over a tree an older image seeded while leaving files the deployment added. Config is only ensured to exist. The config directory falls back to a baked default when unset. The schemas directory is bootstrapped only when configured (the container image sets ``DFE_ENGINE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def _copy_seed(*, schemas_dir: Path, seed_dir: Path) -> None:
 
 
 def _ensure_dir(*, path: Path) -> None:
-    """Create the directory and any missing parents; a no-op if it already exists."""
+    """Create the directory and any missing parents. A no-op if it already exists."""
     path.mkdir(exist_ok=True, parents=True)
 
 
@@ -61,7 +61,7 @@ def _resolve_dir(*, configured: str, default: str) -> Path:
 def ensure_storage(*, settings: DFESettings) -> None:
     """Ensure the config directory exists and, when configured, seed schemas on first run.
 
-    The config directory is filled with its baked default when unset. The schemas directory is bootstrapped only when ``schemas.schemas_dir`` is set; when it is unset the schemas bootstrap is skipped entirely, so the downstream registry bootstrap (which is itself gated on a configured directory) simply observes no schemas rather than an invented absolute default path.
+    The config directory is filled with its baked default when unset. The schemas directory is bootstrapped only when ``schemas.schemas_dir`` is set. When it is unset the schemas bootstrap is skipped entirely, so the downstream registry bootstrap (which is itself gated on a configured directory) simply observes no schemas rather than an invented absolute default path.
     """
     config_dir = _resolve_dir(configured=settings.config_dir, default=DEFAULT_CONFIG_DIR)
     _ensure_dir(path=config_dir)

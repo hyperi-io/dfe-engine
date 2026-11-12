@@ -158,7 +158,7 @@ class TestReadingTheMount:
         )
 
     def test_no_source_file_is_not_a_failure(self):
-        # dfe-infra writes it in the emit wrapper; a mount made another way has none.
+        # dfe-infra writes it in the emit wrapper. A mount made another way has none.
         assert _contract("dfe-loader").pinned_ref is None
 
     def test_a_schema_that_is_not_json_is_reported_rather_than_ignored(self, tmp_path):
@@ -195,7 +195,7 @@ class TestFlattening:
         assert "config.clickhouse.protocol" in paths
 
     def test_an_optional_block_expands_to_its_own_options(self):
-        # `tls` is anyOf[TlsConfig, null]; one box holding an object is no use to
+        # `tls` is anyOf[TlsConfig, null]. One box holding an object is no use to
         # the console, and nothing else would ever show skip_verify.
         paths = {f.path for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
         assert "config.clickhouse.tls.skip_verify" in paths
@@ -208,7 +208,7 @@ class TestFlattening:
     def test_a_leaf_default_beats_the_parent_object_default(self):
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
         # ClickHouseConfig sets protocol, and the $ref site repeats it in a whole
-        # object default. They agree here; the rule has to pick one regardless.
+        # object default. They agree here. The rule has to pick one regardless.
         assert by_path["config.clickhouse.protocol"].default == "http"
         assert by_path["config.batch_processing.max_chunk_size"].default == 10000
 
@@ -219,7 +219,7 @@ class TestFlattening:
 
     def test_the_capability_catalogue_supplies_an_enum_the_schema_omits(self):
         by_path = {f.path: f for f in contract.resolve_config(_contract("dfe-loader"), {}).fields}
-        # The schema calls protocol a plain string; only the catalogue says native
+        # The schema calls protocol a plain string. Only the catalogue says native
         # is refused at startup.
         assert by_path["config.clickhouse.protocol"].enum == ["native", "http"]
 
@@ -266,7 +266,7 @@ class TestSecrets:
         assert by_path[path].secret is True
 
     def test_a_marked_field_of_a_listed_object_is_masked_and_the_rest_shown(self):
-        # Each accepted header carries a name and its marked values; the name is a
+        # Each accepted header carries a name and its marked values. The name is a
         # setting an operator needs, the values are the credential.
         found = contract.load_contract("dfe-receiver", HELD)
         overlay = {
@@ -367,7 +367,7 @@ class TestSecrets:
         )
         overlay = {"config": {"tree": [{"label": "l-1", "children": [{"label": "l-2"}]}]}}
         (tree,) = contract.resolve_config(found, overlay).fields
-        # The tree itself is not a credential; only a marked label inside it is.
+        # The tree itself is not a credential. Only a marked label inside it is.
         assert tree.secret is False
         shown = contract.REDACTED if secret else None
         assert tree.value == [{"label": shown or "l-1", "children": [{"label": shown or "l-2"}]}]
@@ -951,7 +951,7 @@ class TestJudgingAWrite:
         assert "takes one of" in contract.check_value(option, "csv")
 
     def test_the_catalogue_s_enum_refuses_what_the_schema_would_accept(self):
-        # The schema calls protocol a plain string; only the capability catalogue
+        # The schema calls protocol a plain string. Only the capability catalogue
         # says which two values the app actually takes.
         option = self._option("dfe-loader", "config.clickhouse.protocol")
         assert contract.check_value(option, "http") == ""
@@ -1016,7 +1016,7 @@ class TestHeldAcknowledgements:
 
     @pytest.mark.parametrize(("service", "block"), HOLDING_BLOCKS)
     def test_no_chart_supplies_it(self, service, block):
-        # A chart-derived path is refused on write; this one is the operator's.
+        # A chart-derived path is refused on write. This one is the operator's.
         path = f"config.{block}.acknowledgements.enabled"
         assert contract.chart_supplier(service, path) is None
 

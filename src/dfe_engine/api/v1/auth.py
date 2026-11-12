@@ -268,7 +268,7 @@ def _mint(
 @router.post(
     "/login",
     response_model=TokenResponse,
-    # Public, so the session-derived declaration skips it; the refusals are its own.
+    # Public, so the session-derived declaration skips it. The refusals are its own.
     responses={
         401: {
             "description": "Invalid username or password, or the account is disabled or blocked",
@@ -287,7 +287,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token.
 
     The password check runs off the event loop. Failed attempts back off per
-    username and per client address (``auth.login_throttle``); a waiting attempt is
+    username and per client address (``auth.login_throttle``). A waiting attempt is
     refused with 429 before the password is checked.
     """
     provider: LocalAuthProvider = request.app.state.auth_provider
@@ -340,7 +340,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
 
     change_required = _password_change_required(request, auth_ctx.user_id)
-    # The provider resolves role names only; the claim needs the scope each is bound at.
+    # The provider resolves role names only. The claim needs the scope each is bound at.
     live = resolve_live_grants_for_user(request, auth_ctx.user_id)
     data = _token_data(
         auth_ctx.user_id,
@@ -478,7 +478,7 @@ async def get_me(user: CurrentUser, request: Request):
     groups or orgs, because its token carries none until the change.
 
     ``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a
-    session's dashboard role and team from; it caches this answer for 30 seconds,
+    session's dashboard role and team from. It caches this answer for 30 seconds,
     so a group change reaches dfe-hyperdx in that window rather than at token expiry.
     """
     role_config = get_role_config(request)
@@ -523,7 +523,7 @@ def get_setup_status(request: Request) -> SetupStatus:
     configured deployment does not serve its inventory to anonymous callers.
     The exception is the name and display name of each enabled OIDC provider,
     which stay (no configuration) because the login screen needs to know which
-    IdPs to offer and what to call them. Accounts are never returned; the
+    IdPs to offer and what to call them. Accounts are never returned. The
     ``first_user`` step reports whether a real (non break-glass) user exists.
     """
     return evaluate_initial_setup(request)
@@ -557,7 +557,7 @@ def retire_bootstrap_admin(
     )
 
     admin_name = admin_account_name(settings.auth.local.admin_name)
-    # The account may always retire itself; anyone else needs the admin role.
+    # The account may always retire itself. Anyone else needs the admin role.
     if user.user_id != admin_name:
         check_action(request, user, scopes_dict["account_write"])
 

@@ -71,7 +71,7 @@ def filter_columns(
     attribute: str | None = None,
     searchable_columns: list[str] | None = None,
 ) -> list[SchemaColumn]:
-    """Filter columns; all filters are case-insensitive substring matches."""
+    """Filter columns. All filters are case-insensitive substring matches."""
     field_filters = {
         "name": name,
         "type": type,

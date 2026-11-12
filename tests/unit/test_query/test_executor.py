@@ -1,4 +1,4 @@
-"""Unit tests for ViewExecutor — parameterized view execution."""
+"""Unit tests for ViewExecutor -- parameterized view execution."""
 
 from unittest.mock import MagicMock
 
@@ -472,7 +472,7 @@ class TestViewExecutorKeyset:
             _run_page(QueryOptions(order_by="n", after_key="x"), error=mismatch)
 
     def test_the_request_error_carries_none_of_clickhouses_text(self):
-        """A ViewRequestError's message reaches the caller; ClickHouse's text does not."""
+        """A ViewRequestError's message reaches the caller. ClickHouse's text does not."""
         mismatch = Exception(
             "Code: 53. TYPE_MISMATCH near ALTER USER u IDENTIFIED WITH sha256_hash BY 'c0ffee'"
         )

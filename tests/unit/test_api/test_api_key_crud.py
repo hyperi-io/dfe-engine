@@ -185,7 +185,7 @@ class TestListAPIKeys:
             json={"name": "lapsed-key", "expires_at": _iso_in(seconds=60)},
             headers=admin_headers,
         )
-        # Backdate the stored expiry — create() only accepts future values.
+        # Backdate the stored expiry -- create() only accepts future values.
         import dfe_engine.yaml_utils as yu
 
         key_file = app.state.api_key_store._keys_dir / "lapsed-key.yaml"

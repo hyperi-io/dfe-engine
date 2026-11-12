@@ -39,7 +39,7 @@ from .catalogue import (
 from .instances import HELMVARS_CLASS, parse_overlay_name
 
 # Kubernetes quantity forms we accept. CPU is either a plain number of cores or
-# milli-cores; memory is a byte count with an optional binary or decimal suffix.
+# milli-cores. Memory is a byte count with an optional binary or decimal suffix.
 _CPU_RE = re.compile(r"(\d+(\.\d+)?|\d+m)")
 _MEMORY_RE = re.compile(r"\d+(\.\d+)?(Ki|Mi|Gi|Ti|K|M|G|T)?")
 

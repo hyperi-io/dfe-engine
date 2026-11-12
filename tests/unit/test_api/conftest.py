@@ -40,7 +40,7 @@ BREAKGLASS_PASSWORD = "test-breakglass-pw"
 
 @pytest.fixture
 def sigma_enabled() -> bool:
-    """Off, as a deployment ships; a module testing the sigma API overrides it to True."""
+    """Off, as a deployment ships. A module testing the sigma API overrides it to True."""
     return False
 
 
@@ -216,7 +216,7 @@ def admin_token(app, client: TestClient, api_settings: DFESettings) -> str:
 def viewer_token(app, client: TestClient, api_settings: DFESettings) -> str:
     """JWT token for viewer user (read-only).
 
-    Claims may be stale; get_current_user resolves roles from dfe-viewers membership.
+    Claims may be stale. get_current_user resolves roles from dfe-viewers membership.
     """
     return session_token(
         app,

@@ -43,8 +43,8 @@ storage:
 # Authorization settings
 auth:
   # ON, to match env's default "production" posture. With it off, api/deps.py
-  # hands an unauthenticated request the admin role -- so the previous
-  # production + auth-off default granted anonymous admin out of the box.
+  # hands an unauthenticated request the admin role, so a production + auth-off
+  # default would grant anonymous admin out of the box.
   # Dev and test set DFE_ENGINE_AUTH_ENABLED=false together with a dev DFE_ENGINE_ENV.
   enabled: true
   local:

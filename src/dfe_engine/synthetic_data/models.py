@@ -79,7 +79,7 @@ class Scenario(BaseModel):
     Attributes:
         name: Label for debugging/tests.
         weight: Relative draw weight among the schema's scenarios.
-        values: Column name -> value; a list draws uniformly, a scalar is
+        values: Column name -> value. A list draws uniformly, a scalar is
             emitted as-is.
         templates: Column name -> template set (same placeholders as
             :class:`ColumnHints`).

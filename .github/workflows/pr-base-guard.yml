@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Refuse a mode-160000 index entry
-        # tests/unit/test_index_has_no_gitlink.py asserts the same property, but inside the 2h26m suite; a gitlink breaks the release checkout's credential cleanup, so the report has to arrive before then.
+        # tests/unit/test_index_has_no_gitlink.py asserts the same property, but inside the 2h26m suite. A gitlink breaks the release checkout's credential cleanup, so the report has to arrive before then.
         run: |
           set -euo pipefail
 

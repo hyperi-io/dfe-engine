@@ -114,7 +114,7 @@ class TestRenderTier:
         )
         stmts = render_tier(t)
         s = _joined(stmts)
-        # the role comes first; the profile then precedes the ALTER that carries it
+        # the role comes first. The profile then precedes the ALTER that carries it
         assert stmts[0] == "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`"
         assert stmts[1] == ("CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_analyst_tier_2_profile`")
         # the ALTER carries the settings so edits reach an existing profile
@@ -147,7 +147,7 @@ class TestRenderTier:
 
         The failure is UNKNOWN_ROLE at reconcile time, and only on a cluster where
         the role was not already present - so a cluster that has run before hides
-        it. Membership assertions cannot catch an ordering fault; this can.
+        it. Membership assertions cannot catch an ordering fault. This can.
         """
         stmts = render_tier(ChTier(name="t", quota={"interval": "1 hour", "queries": 1}))
         role_at = next(i for i, s in enumerate(stmts) if s.startswith("CREATE ROLE"))
@@ -271,7 +271,7 @@ class TestRenderTenantAxis:
 
     def test_each_filter_is_reasserted_in_place_and_nothing_is_dropped(self):
         # A table moving between the two kinds keeps its policy's name, so only an
-        # ALTER changes the filter; a DROP first would leave it open to every org.
+        # ALTER changes the filter. A DROP first would leave it open to every org.
         stmts = render_tenant_axis([("dfe", "events")], [("dfe", "hunt_lease")])
 
         assert (
@@ -362,7 +362,7 @@ class TestRenderPinnedUser:
         platform = _joined(
             render_pinned_user("dfe_grp_ops", "h", tier_role="dfe_analyst_tier_2_role", org_ids=[])
         )
-        # both get the tier role; neither gets a direct whole-db data grant
+        # both get the tier role. Neither gets a direct whole-db data grant
         assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme`" in org
         assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_ops` WITH REPLACE OPTION" in platform
         assert "GRANT SELECT ON dfe.*" not in org
@@ -520,7 +520,7 @@ class TestDefaultServiceRoles:
     def test_query_reader_readonly_no_ddl_select_only(self):
         qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
         # readonly=2, not 1: hyperdx sends per-query output settings and readonly=1
-        # rejects them (code 164); allow_ddl=0 + SELECT-only keep it read-only.
+        # rejects them (code 164). allow_ddl=0 + SELECT-only keep it read-only.
         assert qr.settings["readonly"] == 2
         assert qr.settings["allow_ddl"] == 0
         assert all("INSERT" not in g for g in qr.grants)
@@ -564,7 +564,7 @@ class TestDefaultServiceRoles:
 
 class TestRenderMaterialise:
     def test_projects_without_creating_anything(self):
-        """The two tables are manifest objects; the reconciler only writes rows."""
+        """The two tables are manifest objects. The reconciler only writes rows."""
         s = _joined(render_materialise([], []))
         assert "CREATE" not in s
         # full refresh each run so removed orgs/tiers drop out of the projection

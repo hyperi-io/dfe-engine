@@ -100,7 +100,7 @@ class TestGetVersion:
         assert body["source"] == "deployment"
 
     def test_the_pins_win_over_what_deployed_the_pod(self, client, app, admin_headers, tmp_path):
-        # The pins are what the operator chose; the deployment value is only
+        # The pins are what the operator chose. The deployment value is only
         # what happened to stand this pod up.
         _wire(app, tmp_path)
         app.state.settings.stack_version = "2.2.0-rc.12"

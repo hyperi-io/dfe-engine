@@ -6,12 +6,12 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""App-instance seeding. Public methods are the scripts; privates are reusable.
+"""App-instance seeding. Public methods are the scripts. Privates are reusable.
 
 An instance IS its values overlay, so every method here writes one overlay through
 the same ``appmgmt`` document operations ``api/v1/apps.py`` uses and commits it with
 ``GitCrud.put``. Seeding is bootstrap rather than an operator edit, so it skips the
-review routing that router applies; everything it produces is read back through the
+review routing that router applies. Everything it produces is read back through the
 product API unchanged.
 """
 
@@ -82,7 +82,7 @@ the hash is minted at the first boot, so ``reset_all`` mints it again from the
 configured password once this clears it (``Accounts.restore_breakglass``).
 
 Deliberately NOT here: ``actions`` and ``policies`` are the shipped governance
-library, re-seeded from packaged resources on every start; ``accounts`` is the
+library, re-seeded from packaged resources on every start. ``accounts`` is the
 durable copy of the local admin the reset re-mirrors rather than removes.
 """
 
@@ -334,7 +334,7 @@ class Apps(Seed):
     def _ensure_dials(self, service: str, instance: str) -> bool:
         """Set the scaling dials, whatever the deploy target reports about them.
 
-        The dials are overlay values; whether they APPLY is a deploy-target
+        The dials are overlay values. Whether they APPLY is a deploy-target
         question the API answers on read, so a seed writes them either way.
         """
         gc = self._require_gitcrud()

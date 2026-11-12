@@ -16,7 +16,7 @@ Two entry points:
 - ``build_source`` - hand logreducer a bounded ``KafkaSource`` (reads from the
   earliest offset, capped by ``max_messages``, never commits).
 
-The engine has no long-lived Kafka consumer; these use throwaway,
+The engine has no long-lived Kafka consumer. These use throwaway,
 non-committing consumer groups so sampling never disturbs real offsets.
 """
 
@@ -36,7 +36,7 @@ def librdkafka_config(kafka_settings: Any) -> dict[str, Any]:
         conf["sasl.username"] = kafka_settings.sasl_username
         conf["sasl.password"] = kafka_settings.sasl_password
         # A SASL mechanism with a PLAINTEXT protocol is almost always a
-        # misconfig; default to SASL_PLAINTEXT so a dev SCRAM broker still works.
+        # misconfig. Default to SASL_PLAINTEXT so a dev SCRAM broker still works.
         conf.setdefault("security.protocol", "SASL_PLAINTEXT")
     return conf
 

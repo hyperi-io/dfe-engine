@@ -9,7 +9,7 @@
 
 Thin MVP only: the rule MODEL (threshold-over-window + severity->channel) and a
 pluggable dispatcher. The web-research / platform survey (Apprise as the re-use
-sender base; the Alertmanager routing model) happens WHEN THIS PHASE IS REACHED,
+sender base. The Alertmanager routing model) happens WHEN THIS PHASE IS REACHED,
 NOT now. Builds on the existing alert grouping/cooldown (dfe.alert_state).
 """
 

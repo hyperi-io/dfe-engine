@@ -14,7 +14,7 @@ so registries are backed by tmp_path and a real app instance runs.
 
 from __future__ import annotations
 
-# ── Fixtures are provided by tests/unit/test_api/conftest.py via pytest conftest
+# -- Fixtures are provided by tests/unit/test_api/conftest.py via pytest conftest
 # inheritance.  The ``client`` fixture uses tmp_path isolation, so each test
 # class method gets a fresh app instance.
 

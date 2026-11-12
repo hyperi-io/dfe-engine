@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from dfe_engine.schema.schema_ddl import unsafe_ident_reason
 
 # Standard JSON column name across all schema profiles. The canonical constant
-# lives at services.schema.json_promotion_service.JSON_COLUMN; kept as a single
+# lives at services.schema.json_promotion_service.JSON_COLUMN. Kept as a single
 # literal here (as in sampling/clickhouse_reader) to avoid a service-layer import
 # from the fieldmap package - keep the two in step if the column is ever renamed.
 JSON_COLUMN = "_json"
@@ -143,7 +143,7 @@ def _safe_ident(name: str, *, what: str) -> str:
 
     Rejects a backtick (which would break out of ``\`...\``` quoting), whitespace,
     and the DDL control chars ``; ( ) ' " \``. The charset rule is
-    ``schema_ddl.unsafe_ident_reason`` (ONE rule, two exception seams). Governed,
+    ``schema_ddl.unsafe_ident_reason`` (ONE rule, two exception paths). Governed,
     RBAC'd, git-stored values, checked as defence in depth (the discipline
     json_promotion_service applies to its JSON subcolumn accessor).
     """
@@ -185,7 +185,7 @@ def _parens_balanced(s: str) -> bool:
 def _safe_type(ch_type: str) -> str:
     """Validate an operator-declared ClickHouse type for a CAST (allow-list).
 
-    The charset already blocks the obvious injectors (=, ;, backtick, ...); the
+    The charset already blocks the obvious injectors (=, ;, backtick, ...). The
     remaining break-out is an unbalanced/premature ``)`` that ends the CAST early,
     so parentheses must be properly nested too.
     """
@@ -252,7 +252,7 @@ def build_remap_view_ddl(
 
     The view is named ``{table}_{standard}`` over table ``{table}`` (``table``
     defaults to the definition's ``source_name``). Each declared column becomes a
-    standard-aligned alias; a JSON-derived column is extracted from ``_json`` with
+    standard-aligned alias. A JSON-derived column is extracted from ``_json`` with
     the dynamic-subcolumn idiom and read as text or its declared type. ``{db}`` is a
     placeholder the deployer substitutes, consistent with the schema DDL writer.
 

@@ -151,7 +151,7 @@ def _write(
 ) -> None:
     """Write one cumulative reading per ``(age_seconds, value)``, stamped that long before ``base``.
 
-    ``started`` is how long before ``base`` the stream began; None leaves its start at
+    ``started`` is how long before ``base`` the stream began. None leaves its start at
     the epoch, as a row that carries no start time reads.
     """
     attributes = attributes or {}
@@ -376,7 +376,7 @@ def test_a_single_pod_reads_its_own_rate(ch_client, manager_client, otel_db, bas
 
 
 def test_a_pod_that_appears_mid_window_adds_its_own_rate(ch_client, manager_client, otel_db, base):
-    """Pod a carries 100/60 for the whole window; pod b starts 33s ago and adds 60/30.
+    """Pod a carries 100/60 for the whole window. Pod b starts 33s ago and adds 60/30.
 
     The fleet's rate now is 100/60 + 2 = 3.67. Summing per timestamp reads only pod
     a's first and last readings, 100 / 60 = 1.67, and misses pod b entirely.
@@ -536,7 +536,7 @@ def test_a_reporting_app_on_the_data_path_reads_an_unrecorded_counter_as_zero(
     """The receiver reports and receives 100 over 60s, but has processed, delivered, dead-lettered and failed nothing.
 
     A push carries only counters that have been recorded, so the other four have no
-    rows; the scrape served them as 0. An app-specific error counter it never sent
+    rows. The scrape served them as 0. An app-specific error counter it never sent
     stays absent.
     """
     _info(ch_client, otel_db, service=_SERVICE, pod="dfe-receiver-a")

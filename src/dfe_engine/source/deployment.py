@@ -479,7 +479,7 @@ def plan_from_build(
     table_exists: bool,
     ttl_change: TtlChange | None = None,
 ) -> SourcePlanArtifact:
-    """The plan a deploy of *version* would carry out; a TTL move that expires rows is named."""
+    """The plan a deploy of *version* would carry out. A TTL move that expires rows is named."""
     errors = list(result.validation_errors)
     ready, ready_reason = plan_ready_status(
         validation_errors=errors,
@@ -522,7 +522,7 @@ def execute_ddl_statements(
     client: Any,
     statements: list[str],
 ) -> tuple[list[str], list[tuple[str, str]]]:
-    """Run DDL statements; return (executed, failed)."""
+    """Run DDL statements. Return (executed, failed)."""
     executed: list[str] = []
     failed: list[tuple[str, str]] = []
     for stmt in statements:
@@ -734,7 +734,7 @@ class SourceDeploymentStore:
         return True
 
     def delete_source_records(self, source_name: str) -> list[Path]:
-        """Remove every build, plan and deploy record for a source; return what went.
+        """Remove every build, plan and deploy record for a source. Return what went.
 
         A record left behind outlives the source it describes, and the next source
         to take that name inherits it -- reporting itself built and deployed before

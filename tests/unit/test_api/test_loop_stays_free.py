@@ -69,7 +69,7 @@ _NEW_PASSWORD = "loop-probe-Passw0rd-2026"
 
 
 class _Park:
-    """Holds the first call through a patched function until released; later calls pass."""
+    """Holds the first call through a patched function until released. Later calls pass."""
 
     def __init__(self) -> None:
         self.entered = threading.Event()
@@ -77,7 +77,7 @@ class _Park:
         self.touched_again = threading.Event()
 
     def hold(self) -> None:
-        """Park the first caller; flag any caller after it."""
+        """Park the first caller. Flag any caller after it."""
         if self.entered.is_set():
             self.touched_again.set()
             return
@@ -147,7 +147,7 @@ def _assert_the_loop_answers(
     headers: dict[str, str],
     probe_path: str = _PROBE,
 ) -> int:
-    """Park one request, probe the loop, release; returns the parked request's status."""
+    """Park one request, probe the loop, release. Returns the parked request's status."""
     handled: list[int] = []
     answered: list[int] = []
 
@@ -294,7 +294,7 @@ _PASSWORD_CHECK_CASES: list[tuple[str, str, dict]] = [
     ids=[f"{m} {p}" for m, p, _ in _PASSWORD_CHECK_CASES],
 )
 def test_the_loop_answers_while_a_password_is_checked(seeded, monkeypatch, method, path, body):
-    """A bcrypt check is a quarter of a second of CPU; on the loop it stalls every caller."""
+    """A bcrypt check is a quarter of a second of CPU. On the loop it stalls every caller."""
     client, headers = seeded
     park = _Park.on_function(client.app.state.account_store, "verify_account_password", monkeypatch)
 

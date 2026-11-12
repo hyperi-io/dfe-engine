@@ -3,7 +3,7 @@
 ``_ensure_source_topics`` is the wiring that makes a deploy create its own
 ``_land``/``_load`` topics, and ``_remove_source_topics`` is the wiring that takes
 the same pair away when the source is deleted. The module's own behaviour is
-covered in ``tests/unit/test_kafka/test_topics.py``; what is proven here is the
+covered in ``tests/unit/test_kafka/test_topics.py``. What is proven here is the
 contract the two endpoints depend on - the off switch is honoured, a topic the
 broker did not create fails the deploy of a source on the bus and is reported
 everywhere else, and the result lands on the response.
@@ -55,7 +55,7 @@ def _source(name="filebeat", *, transform=True) -> Source:
 
 class TestOffSwitch:
     def test_disabled_reaches_no_broker_at_all(self, monkeypatch):
-        """The operator's override; the hook must not try to find a broker."""
+        """The operator's override. The hook must not try to find a broker."""
 
         def _boom(*args, **kwargs):
             raise AssertionError("ensure_topics called while it was switched off")

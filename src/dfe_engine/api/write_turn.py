@@ -24,7 +24,7 @@ _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 async def take_write_turn(request: Request) -> AsyncIterator[None]:
-    """Hold a mutating request until no other one is in flight; reads pass straight through."""
+    """Hold a mutating request until no other one is in flight. Reads pass straight through."""
     if request.method in _READ_METHODS:
         yield
         return

@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/gitcrud/test_forge.py
-#  Purpose:      Forge PR seam - real REST against a local HTTP server
+#  Purpose:      Forge PR interface - real REST against a local HTTP server
 #  Language:     Python
 #
 #  License:      BUSL-1.1

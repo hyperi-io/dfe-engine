@@ -98,7 +98,7 @@ def test_zero_interval_is_skipped(tmp_path: Path):
 
 
 def test_hunt_id_comes_from_filename_not_infile_field(tmp_path: Path):
-    # The YAML carries a bogus id/name; identity MUST be the filename stem.
+    # The YAML carries a bogus id/name. Identity MUST be the filename stem.
     _write(
         tmp_path,
         "real_identity",
@@ -139,7 +139,7 @@ def test_timestamp_field_defaults_to_the_common_header_load_column(tmp_path: Pat
 
 
 def test_checkpoint_timestamp_field_is_read_as_the_watermark_column(tmp_path: Path):
-    # checkpoint_timestamp_field is the API's name for it, and it used to be ignored.
+    # checkpoint_timestamp_field is the API's name for it and must be read.
     _write(
         tmp_path,
         "api_named",

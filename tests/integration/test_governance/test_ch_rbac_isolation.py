@@ -18,7 +18,7 @@ end. Everything is created under a unique ``uid`` suffix and dropped in
 teardown, so it is safe on a shared cluster.
 
 Requires the server to allow the ``SQL_`` custom-settings prefix
-(``custom_settings_prefixes``); the fixture skips where it cannot tell.
+(``custom_settings_prefixes``). The fixture skips where it cannot tell.
 
 No mocks (project policy): a real CH, real users, real row policies.
 """
@@ -56,7 +56,7 @@ def tenant_world(ch_client, ch_params):
 
     The tenant role and policies are SHARED objects with fixed names, so on a
     shared cluster this fixture must not run concurrently with another instance of
-    itself; the uid-scoped db keeps the data isolated regardless.
+    itself. The uid-scoped db keeps the data isolated regardless.
     """
     if not _prefix_allowed(ch_client):
         pytest.skip("server does not allow the SQL_ custom-settings prefix")
@@ -169,8 +169,8 @@ class TestPinnedTenantIsolation:
     def test_unrestricted_user_sees_all_rows(self, tenant_world):
         """No tenant role -> no policy applies -> ALL rows.
 
-        This is the exact restrictive-only property the platform axis relies on;
-        if CH flipped to default-deny this would be 0 and the test would fail.
+        This is the exact restrictive-only property the platform axis relies on.
+        If CH flipped to default-deny this would be 0 and the test would fail.
         """
         w = tenant_world
         assert count_as(w["params"], w["u_open"], _PW, w["table_fqn"]) == 5

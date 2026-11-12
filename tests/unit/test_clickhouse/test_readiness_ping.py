@@ -45,7 +45,7 @@ class _FakeDriverClient:
 class _PingManager(ClickHouseManager):
     """Manager whose live client is a driver double (or a build that raises).
 
-    Overrides ONLY the external driver-client boundary; the ping wrapper under
+    Overrides ONLY the external driver-client boundary. The ping wrapper under
     test runs for real. ``client=None`` models a client that cannot be built (a
     connect failure) - ``_live_client`` raises, which the wrapper must swallow.
     """

@@ -30,7 +30,7 @@ from dfe_engine.source.type_registry import TypeRegistry
 from tests.support.present import present
 
 # dfe-loader/src/column_meta/mod.rs:379-386 DIRECTIVE_NAMES. A '@' only starts a
-# directive when the word after it is one of these; anything else is read as
+# directive when the word after it is one of these. Anything else is read as
 # prose and leaves the column with no instruction at all.
 LOADER_DIRECTIVE_NAMES = frozenset({"skip", "default", "source", "renamed", "computed", "coerce"})
 

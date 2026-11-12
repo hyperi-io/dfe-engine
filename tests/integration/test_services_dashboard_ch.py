@@ -160,7 +160,7 @@ _COUNTER_TILES = [
 def test_a_counter_tile_sums_each_pods_own_increase(
     ch_client, otel_db, bucket, tile_id, metric, attributes, per_second
 ):
-    """Pod a adds 30, restarts and counts 20; pod b adds 10: 60 in the bucket.
+    """Pod a adds 30, restarts and counts 20. Pod b adds 10: 60 in the bucket.
 
     Subtracting across the fleet reads pod b's 5 against pod a's 710: 705.
     """
@@ -246,7 +246,7 @@ def test_an_increase_across_a_bucket_boundary_lands_in_the_later_bucket(ch_clien
 
 
 def test_the_balance_table_sums_each_series_increase(ch_client, otel_db, bucket):
-    """One pod receives 30 on one source and 10 on another; two pods deliver 30 and 10.
+    """One pod receives 30 on one source and 10 on another. Two pods deliver 30 and 10.
 
     Keyed on the pod alone, the two sources on one pod subtract: 1030 - 50.
     """

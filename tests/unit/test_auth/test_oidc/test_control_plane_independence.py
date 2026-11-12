@@ -9,7 +9,7 @@
 """CRITICAL: Verify auth works when dfe-engine management features are unavailable.
 
 These tests prove the platform keeps running with just static YAML files.
-No provider registry, no sync, no API — just group files on disk.
+No provider registry, no sync, no API -- just group files on disk.
 
 Design principle: dfe-engine is a control plane, NOT a runtime dependency.
 If dfe-engine is down, Envoy Gateway keeps doing OIDC (static K8s CRD),
@@ -84,7 +84,7 @@ def app(auth_settings: DFESettings):
 
 @pytest.fixture
 def client(app, auth_settings: DFESettings) -> Iterator[TestClient]:
-    """TestClient with lifespan — bootstrap groups already seeded."""
+    """TestClient with lifespan -- bootstrap groups already seeded."""
     with TestClient(app, raise_server_exceptions=False) as c:
         admin_on_its_own_password(app)
         yield c
@@ -100,17 +100,17 @@ def admin_headers(app, client: TestClient, auth_settings: DFESettings) -> dict[s
 
 
 # ---------------------------------------------------------------------------
-# Class 1: Auth resolves roles from group files — no dfe-engine services needed
+# Class 1: Auth resolves roles from group files -- no dfe-engine services needed
 # ---------------------------------------------------------------------------
 
 
 class TestOIDCAuthWithStaticFiles:
-    """Auth resolves roles from group files — no dfe-engine services needed."""
+    """Auth resolves roles from group files -- no dfe-engine services needed."""
 
     def test_oidc_groups_resolve_from_yaml_files(self, tmp_path: Path) -> None:
-        """X-Oidc-Groups values match group filenames → roles resolved."""
+        """X-Oidc-Groups values match group filenames -> roles resolved."""
         groups_dir = tmp_path / "groups"
-        # Create group YAML files manually — simulating pre-existing config on disk
+        # Create group YAML files manually -- simulating pre-existing config on disk
         groups_dir.mkdir(parents=True)
         yaml_dump(
             {"description": "Admins", "roles": ["admin"], "members": []},
@@ -149,15 +149,15 @@ class TestOIDCAuthWithStaticFiles:
         assert roles == sorted(set(roles))
 
     def test_unknown_groups_yield_no_roles_not_error(self, tmp_path: Path) -> None:
-        """Groups not matching any file → empty roles, NOT an error."""
+        """Groups not matching any file -> empty roles, NOT an error."""
         groups_dir = tmp_path / "groups"
         groups_dir.mkdir(parents=True)
-        # No files written — all groups are unknown
+        # No files written -- all groups are unknown
 
         store = GroupStore(groups_dir)
         from dfe_engine.api.deps import _resolve_roles_from_groups
 
-        # Should NOT raise — unknown groups are silently skipped
+        # Should NOT raise -- unknown groups are silently skipped
         roles, org_ids = _resolve_roles_from_groups(["unknown-group-1", "unknown-group-2"], store)
 
         assert roles == []
@@ -195,7 +195,7 @@ class TestAuthWithoutProviderRegistry:
         oidc_registry: OIDCProviderRegistry = app.state.oidc_provider_registry
         assert oidc_registry.list() == []
 
-        # dfe-admins group is seeded by bootstrap_auth; linked to the name the IdP sends
+        # dfe-admins group is seeded by bootstrap_auth. Linked to the name the IdP sends
         app.state.group_store.update("dfe-admins", source_provider="oidc", source_id="dfe-admins")
         response = client.get(
             "/api/v1/auth/me",
@@ -231,7 +231,7 @@ class TestGroupsPersistAfterProviderDetach:
     """Detaching a provider does NOT delete group files."""
 
     def test_groups_survive_provider_deletion(self, tmp_path: Path) -> None:
-        """Delete provider → group files still exist → roles still resolve."""
+        """Delete provider -> group files still exist -> roles still resolve."""
         oidc_dir = tmp_path / "oidc-providers"
         groups_dir = tmp_path / "groups"
         groups_dir.mkdir(parents=True)
@@ -330,7 +330,7 @@ class TestExistingRolesSurviveRestart:
             groups_dir / "custom-ops.yaml",
         )
 
-        # Run bootstrap — simulates engine restart
+        # Run bootstrap -- simulates engine restart
         bootstrap_auth(auth_dir)
 
         # Custom group must still exist and have original roles
@@ -364,7 +364,7 @@ class TestExistingRolesSurviveRestart:
         # Run bootstrap (engine restart)
         bootstrap_auth(auth_dir)
 
-        # Bootstrap only seeds groups if the dir is EMPTY; since dfe-analysts.yaml
+        # Bootstrap only seeds groups if the dir is EMPTY. Since dfe-analysts.yaml
         # already existed, the existing file must be preserved intact.
         store = GroupStore(groups_dir)
         group = store.get("dfe-analysts")
@@ -401,7 +401,7 @@ class TestSyncFailureDoesNotBreakAuth:
         )
 
         # Simulate sync failure by NOT updating the files (they remain as-is)
-        # Auth must still work with the stale — but valid — files
+        # Auth must still work with the stale -- but valid -- files
 
         store = GroupStore(groups_dir)
         from dfe_engine.api.deps import _resolve_roles_from_groups
@@ -434,7 +434,7 @@ class TestSyncFailureDoesNotBreakAuth:
         # Simulate a failed sync that writes a partial/empty temp file
         # then abandons it without renaming (leaving original intact)
         temp_file = groups_dir / "mixed-team.yaml.tmp"
-        temp_file.write_text("")  # partial write — never renamed
+        temp_file.write_text("")  # partial write -- never renamed
 
         # Original must still be readable and correct
         store = GroupStore(groups_dir)
@@ -456,9 +456,9 @@ class TestAuthFlowWithNoExternalDependencies:
     """The complete auth flow works with zero network/API calls."""
 
     def test_full_oidc_flow_offline(self, client: TestClient, app) -> None:
-        """Complete OIDC auth flow: header → group resolution → role check.
+        """Complete OIDC auth flow: header -> group resolution -> role check.
 
-        No Envoy, no IdP, no network — just headers and YAML files on disk.
+        No Envoy, no IdP, no network -- just headers and YAML files on disk.
         Bootstrap seeds dfe-admins with the 'admin' role. Once an operator links
         it to the identifier the IdP sends, that identifier in X-Oidc-Groups
         must resolve to admin role and grant access.
@@ -488,8 +488,8 @@ class TestAuthFlowWithNoExternalDependencies:
                 "X-Oidc-Groups": "dfe-admins",
             },
         )
-        # 200 (sources configured) or 503 (sources not configured) — either
-        # proves auth succeeded; 401/403 would indicate auth failure
+        # 200 (sources configured) or 503 (sources not configured) -- either
+        # proves auth succeeded. 401/403 would indicate auth failure
         assert sources_response.status_code not in (401, 403)
 
     def test_full_api_key_flow_offline(self, client: TestClient, app) -> None:
@@ -502,7 +502,7 @@ class TestAuthFlowWithNoExternalDependencies:
             description="CI automation key for independence test",
         )
 
-        # Authenticate using the API key — no network, no IdP
+        # Authenticate using the API key -- no network, no IdP
         response = client.get(
             "/api/v1/auth/me",
             headers={"X-API-Key": full_key},
@@ -526,7 +526,7 @@ class TestAuthFlowWithNoExternalDependencies:
         token = login_response.json()["access_token"]
         assert token
 
-        # Step 2: use the JWT bearer token to authenticate — no network
+        # Step 2: use the JWT bearer token to authenticate -- no network
         me_response = client.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {token}"},

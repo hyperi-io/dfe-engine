@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from .hdx_sanitizer import HdxSanitizeError, split_time_window
 
 TIME_PLACEHOLDER = "{timestamp_condition}"
-"""Time-bound placeholder a rule stored before #683 may still carry; the hunt window replaces it."""
+"""Time-bound placeholder a rule stored before #683 may still carry. The hunt window replaces it."""
 
 # The lookbehind starts the second form only at the first character of a whitespace
 # run, so a long run is read once rather than once from each of its characters.
@@ -48,7 +48,7 @@ def strip_time_placeholder(where: str) -> str:
     """``where`` without :data:`TIME_PLACEHOLDER`, which the worker never fills in.
 
     Left in, ClickHouse reads it as a query parameter with no type and refuses the
-    statement. As a conjunct it is dropped; anywhere else it becomes ``1``, since the
+    statement. As a conjunct it is dropped. Anywhere else it becomes ``1``, since the
     hunt window already bounds the scan in time.
     """
     return _TIME_PLACEHOLDER_CONJUNCT.sub("", where).replace(TIME_PLACEHOLDER, "1").strip()

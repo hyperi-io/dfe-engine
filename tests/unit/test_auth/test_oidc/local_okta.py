@@ -21,7 +21,7 @@ from tests.support.loopback import stop_server
 
 
 class PlainHttpOkta(OktaAdapter):
-    """Okta whose Management API is a plain-http stand-in; the adapter builds only https origins."""
+    """Okta whose Management API is a plain-http stand-in. The adapter builds only https origins."""
 
     def __init__(self, provider: OIDCProvider, *, base_url: str) -> None:
         super().__init__(provider)

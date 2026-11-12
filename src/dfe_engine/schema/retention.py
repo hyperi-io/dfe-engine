@@ -9,7 +9,7 @@
 """Reconcile the tables that follow the deployment default TTL.
 
 Two kinds of table follow it. A core table does when its dfe-schemas definition
-names TTL columns and no ``ttl_days``; the schema phase creates it with the
+names TTL columns and no ``ttl_days``. The schema phase creates it with the
 default and refuses a later change as drift, so a change reaches it only through
 :func:`reconcile_core_ttls`. A deployed source's table does when its schema
 leaves ``ttl_days`` unset, and :func:`reconcile_source_ttls` applies it through
@@ -53,7 +53,7 @@ from dfe_engine.source.type_registry import TypeRegistry, TypeRegistryError
 
 LiveStatus = Literal["altered", "unchanged", "not_deployed", "failed"]
 
-# A table's engine is fixed when it is created; changing it means copying the data out.
+# A table's engine is fixed when it is created. Changing it means copying the data out.
 ENGINE_NEEDS_REBUILD = "needs a table rebuild; applies to new tables only"
 
 # An outcome's reason reaches API callers, so ClickHouse's own text stays in the log.
@@ -198,7 +198,7 @@ def reconcile_source_ttls(
 ) -> RetentionReconcile:
     """Apply every deployed source's table under the deployment default TTL.
 
-    One source failing is logged and counted as skipped; it never stops the rest.
+    One source failing is logged and counted as skipped. It never stops the rest.
     """
     tables = SourceTables(client, settings=settings)
     database = tables.database
@@ -257,10 +257,10 @@ class SourceLiveOutcome:
     Attributes:
         source: The source name.
         status: ``altered`` or ``unchanged`` once the table was reconciled;
-            ``not_deployed`` when no table runs the pinned version; ``failed`` when
+            ``not_deployed`` when no table runs the pinned version. ``failed`` when
             ClickHouse or the build refused.
         table: ``database.table``; empty when the source has never been deployed.
-        ttl: The TTL move in days, such as ``90 -> 91``; empty when it did not move.
+        ttl: The TTL move in days, such as ``90 -> 91``. Empty when it did not move.
         columns_added: Columns the table gained.
         not_applied: Pinned values the table did not take.
         reason: Why nothing reached the table, for ``not_deployed`` and ``failed``.
@@ -282,7 +282,7 @@ def apply_pinned_defaults(
 
     Only a source whose current version is the deployed one has a table running
     those pins. Its table gains the columns the version adds and moves to the
-    version's TTL; the engine stays as created and existing columns keep their
+    version's TTL. The engine stays as created and existing columns keep their
     type, so each outcome names what the table did not take. *connect* is called
     only when some source has such a table.
 
@@ -357,7 +357,7 @@ def _apply_one(tables: SourceTables, source: Source, live: LiveTable | None) -> 
         kept = tables.header_nullability_kept(source, source.current, applied.columns)
     except _TABLE_ERRORS as exc:
         logger.warning(f"{target}: table defaults not applied: {exc}")
-        # The build, type and DDL errors are about the source's own schema; the server's is not.
+        # The build, type and DDL errors are about the source's own schema. The server's is not.
         reason = CLICKHOUSE_REFUSED if isinstance(exc, SchemaApplyError) else str(exc)
         return SourceLiveOutcome(source=source.source, status="failed", table=target, reason=reason)
     not_applied: list[FieldNotApplied] = []

@@ -173,8 +173,8 @@ class TestWhatTheContainerReads:
         assert _rendered(settings, RECEIVER)["rules"]["rules"] == [{"id": "app"}]
 
     def test_a_setting_the_sources_do_not_derive_survives_a_source_deploy(self, crud, tmp_path):
-        # The deployment turns the loader's dead letter off in its base config;
-        # the compiled block owns the table map and must leave that switch alone.
+        # The deployment turns the loader's dead letter off in its base config.
+        # The compiled block owns the table map and must leave that switch alone.
         settings = _settings(tmp_path)
         _base(settings, LOADER, "routing:\n  dlq:\n    enabled: false\n")
         app = instances.instance_of(LOADER, "default")
@@ -435,7 +435,7 @@ class TestFileSets:
 
     def test_an_entry_named_at_the_chart_s_mount_is_pointed_at_this_render(self, crud, tmp_path):
         # The overlay names each table where the chart mounts it, which is not
-        # where Compose mounts this render; the author's key columns go with it.
+        # where Compose mounts this render. The author's key columns go with it.
         settings = _settings(tmp_path)
         app = _deploy(crud, VRL, "filebeat")
         doc = instances.read_overlay(crud, app)
@@ -457,7 +457,7 @@ class TestFileSets:
         ]
 
     def test_an_entry_the_config_already_names_is_left_alone(self, crud, tmp_path):
-        # That one carries the author's key columns; a derived entry would turn
+        # That one carries the author's key columns. A derived entry would turn
         # every lookup into a full scan.
         settings = _settings(tmp_path)
         app = _deploy(crud, VRL, "filebeat")
@@ -486,7 +486,7 @@ class TestFileSets:
     def test_a_declared_entry_whose_file_was_removed_is_kept_and_named(
         self, crud, tmp_path, monkeypatch
     ):
-        # Kept for its key columns; the render rewrote the directory, so its path is dead.
+        # Kept for its key columns. The render rewrote the directory, so its path is dead.
         seen = self._warnings(monkeypatch)
         settings = _settings(tmp_path)
         app = _deploy(crud, VRL, "filebeat")
@@ -589,7 +589,7 @@ class TestOneContainerPerInstance:
         self, crud, tmp_path, captured_logs
     ):
         # The operator's checkout can hold an index another user created, which the
-        # engine reaches only through the directory; owner read-only stands in for it.
+        # engine reaches only through the directory. Owner read-only stands in for it.
         if os.geteuid() == 0:
             pytest.skip("root opens a read-only file for writing")
         settings = _settings(tmp_path)
@@ -610,7 +610,7 @@ class TestOneContainerPerInstance:
 
     def test_an_unwritable_env_directory_does_not_cost_the_apps_their_config(self, crud, tmp_path):
         # That directory is the operator's own checkout, so its mode is theirs to
-        # fix; the containers still have to get the config they read.
+        # fix. The containers still have to get the config they read.
         settings = _settings(tmp_path)
         _deploy(crud, VRL, "crowdstrike-eu")
         env_dir = Path(settings.deployment.app_env_dir)
@@ -936,7 +936,7 @@ class TestWhatTakingTheChangeCosts:
     def test_a_server_setting_the_http_listener_binds_restarts_the_receiver(
         self, crud, tmp_path, path, value
     ):
-        # The HTTP listener reads these once when it starts serving; only the
+        # The HTTP listener reads these once when it starts serving. Only the
         # bearer tokens reload.
         settings = _settings(tmp_path)
         app = _deploy(crud, RECEIVER, config__routing__default_source="main")
@@ -976,7 +976,7 @@ class TestWhatTakingTheChangeCosts:
         assert rendered[RECEIVER].restart_required
 
     def test_the_loader_is_told_to_watch_the_file_rendered_for_it(self, crud, tmp_path):
-        # dfe-loader's watcher ships off; without this key a change reported as
+        # dfe-loader's watcher ships off. Without this key a change reported as
         # needing no restart is never read.
         settings = _settings(tmp_path)
         _deploy(crud, LOADER)

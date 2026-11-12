@@ -13,7 +13,7 @@ from dulwich import porcelain
 
 
 def seeded_remote(tmp_path: Path) -> tuple[Path, str]:
-    """Create a bare repo under ``tmp_path`` with one commit; returns it and its branch."""
+    """Create a bare repo under ``tmp_path`` with one commit. Returns it and its branch."""
     remote = tmp_path / "remote.git"
     porcelain.init(str(remote), bare=True)
     seed = tmp_path / "seed"

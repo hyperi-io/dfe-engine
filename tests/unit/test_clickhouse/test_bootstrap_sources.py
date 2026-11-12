@@ -118,7 +118,7 @@ def switched_off() -> Iterator[DFESettings]:
 
 @pytest.fixture
 def boot(monkeypatch):
-    """A bootstrap whose schema phase converges without a server; records the reconcile."""
+    """A bootstrap whose schema phase converges without a server. Records the reconcile."""
 
     def ignore(*args, **kwargs):
         return None

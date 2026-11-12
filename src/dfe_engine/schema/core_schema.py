@@ -44,7 +44,7 @@ class CoreSchemaTargets:
 
     database: str
     profile: str = "timeseries"
-    # Retention for a time-series table that declares none; 0 removes its TTL, None leaves it alone.
+    # Retention for a time-series table that declares none. 0 removes its TTL, None leaves it alone.
     default_ttl_days: int | None = None
 
     @classmethod

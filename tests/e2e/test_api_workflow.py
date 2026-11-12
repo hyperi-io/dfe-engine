@@ -238,7 +238,6 @@ class TestAccountGroupWorkflow:
         headers = self._login(e2e_client)
         user_password = secrets.token_urlsafe(16)
 
-        # Create account
         resp = e2e_client.post(
             "/api/v1/auth/accounts",
             json={
@@ -384,6 +383,6 @@ class TestCrossRouterConsistency:
         # a third endpoint would only be another thing to keep in sync.
         resp = e2e_client.get("/livez")
         assert resp.status_code == 200, f"/livez returned {resp.status_code}"
-        # /readyz includes a ClickHouse ping; hermetic e2e has no CH.
+        # /readyz includes a ClickHouse ping. Hermetic e2e has no CH.
         resp = e2e_client.get("/readyz")
         assert resp.status_code in (200, 503), f"/readyz returned {resp.status_code}"

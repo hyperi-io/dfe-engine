@@ -184,7 +184,7 @@ class TestFetcherInstancesFollowTheSources:
 
         gc = _wire(app, tmp_path)
         client.post("/api/v1/sources", json=_fetcher_body("crates"), headers=admin_headers)
-        # The deploy endpoint needs ClickHouse; marking the version deployed is
+        # The deploy endpoint needs ClickHouse. Marking the version deployed is
         # the part of it the reconcile reads.
         _registries["source"].set_deployed_version("crates", "1.0.0")
 
@@ -295,7 +295,7 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
         self, client, app, admin_headers, tmp_path
     ):
         # The variant is the app's own config.source.name, which the elastic
-        # transform reads once at startup; the instance is already running here.
+        # transform reads once at startup. The instance is already running here.
         from dfe_engine.appmgmt import appconfig
 
         gc = self._compose(app, tmp_path)

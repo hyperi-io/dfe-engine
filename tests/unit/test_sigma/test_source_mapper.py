@@ -1,4 +1,4 @@
-"""Tests for SigmaSourceMapper — Source-based Sigma field mapping."""
+"""Tests for SigmaSourceMapper -- Source-based Sigma field mapping."""
 
 from collections.abc import Collection
 
@@ -508,7 +508,7 @@ class TestFieldMapRegistryIntegration:
         assert "convention_user" not in ddl
 
     def test_field_map_pin_standard_slash_form(self, type_registry, fm_registry):
-        """The 'standard/name' pin form resolves; a mismatched standard raises."""
+        """The 'standard/name' pin form resolves. A mismatched standard raises."""
         from dfe_engine.fieldmap.registry import FieldMapError
         from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 

@@ -231,7 +231,7 @@ class TestStream:
         assert r.status_code == 400
 
     def test_concurrent_stream_cap_enforced(self, client, admin_headers):
-        # Long low-rate streams stay RUNNING; the default cap is 3.
+        # Long low-rate streams stay RUNNING. The default cap is 3.
         started = []
         for _ in range(3):
             r = client.post(

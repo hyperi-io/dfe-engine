@@ -52,7 +52,7 @@ class ProtectedFloor:
     Attributes:
         usernames: The local admin and ``breakglass``.
         group: The group whose roles make those accounts able to run the
-            deployment; removing a protected member from it is refused.
+            deployment. Removing a protected member from it is refused.
         role: The role :attr:`group` must keep, system-wide, for those accounts to
             run the deployment.
     """
@@ -225,7 +225,7 @@ def resolve_floor(admin_name: str = "") -> ProtectedFloor:
 
 
 def _as_names(value: object) -> list[str]:
-    """A group- or member-list payload as names; anything else reads as empty.
+    """A group- or member-list payload as names. Anything else reads as empty.
 
     ``**fields`` is untyped at the store boundary, and a string is iterable, so a
     payload that is not a list of names must read as empty -- that refuses the

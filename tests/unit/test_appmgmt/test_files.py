@@ -103,7 +103,7 @@ def test_vector_accepts_yaml_not_vrl():
 
 
 def test_elastic_has_no_file_sets():
-    # dfe-transform-elastic selects a compiled-in transform; it reads no files.
+    # dfe-transform-elastic selects a compiled-in transform. It reads no files.
     assert catalogue.descriptor("dfe-transform-elastic").files == ()
     with pytest.raises(catalogue.UnknownAppError):
         catalogue.file_set("dfe-transform-elastic", "transforms")
@@ -139,7 +139,7 @@ def test_a_malformed_file_set_value_is_reported(vrl_set):
         files.list_files({"fileSets": {"transforms": {"files": {"a.vrl": "x"}}}}, vrl_set)
 
 
-# ── a set the app names table by table ────────────────────────
+# -- a set the app names table by table ------------------------
 
 
 @pytest.fixture
@@ -238,7 +238,7 @@ def test_a_second_file_with_one_table_name_is_refused_naming_both(tables):
 
 
 def test_a_file_already_sharing_a_table_name_can_still_be_edited(tables):
-    # A set that came in with both files keeps working; it only gets no second entry.
+    # A set that came in with both files keeps working. It only gets no second entry.
     both = [{"name": "geo.csv", "content": "a\n"}, {"name": "geo.json", "content": "{}\n"}]
     doc: dict = {"fileSets": {"enrichment": {"files": both}}}
     files.upsert_file(doc, tables, "geo.json", "[]\n")
@@ -275,7 +275,7 @@ def test_a_set_whose_mount_the_manifest_does_not_name_writes_no_entries(tables):
 
 def test_vector_s_tables_are_named_by_its_transforms_not_its_config():
     # dfe-transform-vector reads enrichment_tables from the Vector config its
-    # transform files assemble; its own config file has no such key.
+    # transform files assemble. Its own config file has no such key.
     doc: dict = {}
     files.upsert_file(doc, catalogue.file_set(VECTOR, "enrichment"), "timezones.csv", "a\n")
     assert "config" not in doc

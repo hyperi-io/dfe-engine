@@ -46,7 +46,7 @@ PLATFORM_SOURCES = {"otel_logs", "otel_traces", "otel_metrics", "clickhouse_syst
 
 KNOWN_SOURCES = TENANT_SOURCES | PLATFORM_SOURCES
 
-# The connection name the engine hands a platform caller (api/v1/hyperdx.py); a
+# The connection name the engine hands a platform caller (api/v1/hyperdx.py). A
 # tenant team's connection is named after its org, so this name resolves nowhere
 # else and is a second fence on the raw-SQL dashboards.
 PLATFORM_CONNECTION = "platform"
@@ -124,7 +124,7 @@ def test_dashboards_are_shipped():
 def test_dashboard_has_the_template_shape(filename):
     """Template format: a version, a name, and at least one tile.
 
-    ``version`` is what marks the file as a Template rather than a Document; the
+    ``version`` is what marks the file as a Template rather than a Document. The
     provisioner upserts on ``name``, so an empty or missing name would collide
     every dashboard onto one row.
     """
@@ -152,7 +152,7 @@ def test_tiles_are_well_formed(filename):
 
         config = tile.get("config", {})
         assert config.get("name"), f"{filename}:{tile_id} has no title"
-        # 24 columns is the dashboard grid width; a tile past it renders clipped.
+        # 24 columns is the dashboard grid width. A tile past it renders clipped.
         assert tile["x"] + tile["w"] <= 24, f"{filename}:{tile_id} overflows the grid"
 
 
@@ -295,7 +295,7 @@ def test_counter_tiles_difference_each_series_on_its_own():
 
     ``max(Value) - min(Value)`` over a sum metric spans every replica's series, so two
     loaders at 680 and 5 read 675. tests/integration/test_services_dashboard_ch.py runs
-    the tiles against ClickHouse; this holds every tile to the shape without one.
+    the tiles against ClickHouse. This holds every tile to the shape without one.
     """
     tiles = [
         (filename, tile)
@@ -375,7 +375,7 @@ def test_export_creates_a_missing_directory(tmp_path):
 
 
 def test_export_overwrites_a_stale_file_but_keeps_site_local_ones(tmp_path):
-    """An older image's copy is replaced; an operator's own file is left alone."""
+    """An older image's copy is replaced. An operator's own file is left alone."""
     stale = tmp_path / "dfe-throughput.json"
     stale.write_text('{"name": "old"}', encoding="utf-8")
     site_local = tmp_path / "site-local.json"

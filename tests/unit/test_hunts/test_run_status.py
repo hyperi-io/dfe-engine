@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """read_run_status turns one CH result into per-hunt run state.
 
-The JOIN itself is proved against real ClickHouse in tests/integration; what is
+The JOIN itself is proved against real ClickHouse in tests/integration. What is
 pinned here is the reading of its rows, because ClickHouse fills a LEFT JOIN miss
 with the type's DEFAULT rather than NULL. Every "never happened" in this model is
 therefore a zero, and telling "wrote no rows" apart from "has not run" is a
@@ -46,7 +46,7 @@ def test_a_hunt_that_has_never_run_reports_nothing_rather_than_zero():
 
 
 def test_a_run_that_wrote_no_rows_is_not_a_hunt_that_never_ran():
-    # Both come back as 0 from ClickHouse; the fire is what separates them.
+    # Both come back as 0 from ClickHouse. The fire is what separates them.
     status = read_run_status(
         _Rows([_row("quiet", wm=900, last_fire=900, rows=0)]), "dfe", ["quiet"], now=1000
     )["quiet"]
@@ -97,7 +97,7 @@ def test_the_hunt_ids_are_passed_as_a_bound_parameter():
 
 
 def test_the_live_runner_count_is_whatever_clickhouse_counted():
-    # The freshness comparison is ClickHouse's; this side only reads the one number.
+    # The freshness comparison is ClickHouse's. This side only reads the one number.
     assert live_runner_count(_Rows([[2]]), "dfe", now=1000) == 2
 
 

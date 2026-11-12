@@ -263,7 +263,7 @@ def test_action_change_rejected_by_commit_validators(store, crud):
     ],
 )
 def test_a_map_change_cannot_carry_a_refused_leaf_even_with_the_override(store, crud, path, value):
-    """The override lifts protected paths; the value rules still read every leaf of the map."""
+    """The override lifts protected paths. The value rules still read every leaf of the map."""
     from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 
     crud.put(
@@ -291,7 +291,7 @@ def test_a_map_change_cannot_carry_a_refused_leaf_even_with_the_override(store, 
 
 
 def test_an_action_cannot_hand_a_pinned_replica_count_back_to_keda(store, crud):
-    """The change names keda.enabled only; the document it lands in pins replicaCount."""
+    """The change names keda.enabled only. The document it lands in pins replicaCount."""
     from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 
     stored = {"keda": {"enabled": False}, "replicaCount": 3}
@@ -417,7 +417,7 @@ def test_invoke_multi_file_is_atomic_one_commit(store, crud):
 
 
 def test_invoke_multi_file_protected_aborts_both(store, crud):
-    # lock loader's var; the receiver change must NOT land either (atomic abort)
+    # lock loader's var. The receiver change must NOT land either (atomic abort)
     crud.put(
         _POLICY_CLASS,
         "lock-loader",

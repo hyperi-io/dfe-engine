@@ -48,7 +48,7 @@ async def list_admin_links(
 
     The deployer supplies the list, so an empty one means it listed none. Gated to
     the admin-class roles, which hold ``deployment:*`` or ``*``: the list maps the
-    deployment's consoles. Links only; nothing here carries a credential.
+    deployment's consoles. Links only. Nothing here carries a credential.
     """
     links: AdminLinks = request.app.state.admin_links
     return paginate(

@@ -65,7 +65,7 @@ class DiscoveredPath:
     samples: list[str] | None = None
     # Draft column the path would become in a meta-schema (server-derived so the
     # editor does not re-map ClickHouse types). Derived from the first observed
-    # type; check ``is_consistent`` before trusting it for a multi-type path.
+    # type. Check ``is_consistent`` before trusting it for a multi-type path.
     column_type: str | None = None
     column_attributes: list[str] = field(default_factory=list)
     column_expr: str = ""
@@ -472,7 +472,7 @@ def discover_paths(
     single source's match rule -- used to discover against the shared catch-all
     landing table before the source has its own table. Without them, the whole
     table is scanned. ``org_ids`` holds every query to those tenant ids
-    (:func:`row_filter`); None reads every org.
+    (:func:`row_filter`). None reads every org.
 
     Raises:
         JsonPromotionScopeError: when the read cannot be held to ``org_ids``.
@@ -493,7 +493,7 @@ def discover_paths(
     )
 
     sql = (
-        f"SELECT tup.1 AS path, tup.2 AS type FROM {table} "  # noqa: S608 - table quoted by qualified_table; values bound
+        f"SELECT tup.1 AS path, tup.2 AS type FROM {table} "  # noqa: S608 - table quoted by qualified_table, values bound
         f"ARRAY JOIN JSONDynamicPathsWithTypes(assumeNotNull({JSON_COLUMN})) AS tup "
     )
     if match_sql:
@@ -559,7 +559,7 @@ def _fetch_samples(
     if match_sql:
         where += f" AND {match_sql}"
     sql = (
-        f"SELECT DISTINCT toString({sub}) AS value FROM {table} "  # noqa: S608 - table quoted by qualified_table; path refuses backticks; values bound
+        f"SELECT DISTINCT toString({sub}) AS value FROM {table} "  # noqa: S608 - table quoted by qualified_table, path refuses backticks, values bound
         f"WHERE {where} ORDER BY rand() LIMIT {{n:UInt32}}"
     )
     try:
@@ -579,7 +579,7 @@ def _fetch_stats(
     """Coverage percentage and approximate distinct count for a path."""
     sub = json_subcolumn(path)
     sql = (
-        "SELECT "  # noqa: S608 - table quoted by qualified_table; path refuses backticks; values bound
+        "SELECT "  # noqa: S608 - table quoted by qualified_table, path refuses backticks, values bound
         f"100.0 * countIf({sub} IS NOT NULL) / count() AS coverage_pct, "
         f"uniqHLL12({sub}) AS distinct_count "
         f"FROM {table}"
@@ -620,7 +620,7 @@ def sample_rows(
     table where a source's rows are identified by its match. Without them, the
     whole table is sampled. Intended for inspecting real data while authoring a
     match condition or CEL before any path is promoted. ``org_ids`` holds the read
-    to those tenant ids (:func:`row_filter`); None reads every org.
+    to those tenant ids (:func:`row_filter`). None reads every org.
 
     Returns ``(column_names, rows)`` where each row is a ``column -> value``
     mapping. ``column_names`` is returned even when no rows match, so callers
@@ -641,7 +641,7 @@ def sample_rows(
         match_operator=match_operator,
         org_ids=org_ids,
     )
-    sql = f"SELECT * FROM {table} "  # noqa: S608 - table quoted by qualified_table; values bound
+    sql = f"SELECT * FROM {table} "  # noqa: S608 - table quoted by qualified_table, values bound
     if match_sql:
         sql += f"WHERE {match_sql} "
     sql += "ORDER BY rand() LIMIT {limit:UInt32}"
@@ -727,7 +727,7 @@ def build_promotion_columns(
                 continue
             primitive, attributes = ch_dynamic_type_to_primitive(types[0])
 
-        # Resolve the column name (explicit names must not collide; suggested
+        # Resolve the column name (explicit names must not collide, suggested
         # names auto-suffix).
         if req.column_name:
             column_name = req.column_name

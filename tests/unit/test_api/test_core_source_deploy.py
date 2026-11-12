@@ -10,7 +10,7 @@
 A deploy records the version it applied, and recording it on a core source is
 refused. The route used to apply the DDL, fence the table and ensure the topics
 first, so the 409 arrived after the table existed. The shipped landing definition
-carries no schema, which hides this behind a 404; these tests give it one.
+carries no schema, which hides this behind a 404. These tests give it one.
 """
 
 import copy

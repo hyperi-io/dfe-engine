@@ -26,7 +26,7 @@ Controls (env):
       anything the app settings name.
   DFE_TEST_DOCKER_HOST=user@host  - the ssh target for tier 2.
   DFE_TEST_KEEP=1                 - keep the spun container running afterwards
-      (reused on the next run); default is to remove it (clean up after itself).
+      (reused on the next run). Default is to remove it (clean up after itself).
       This is the ONLY way a container survives a run.
   DFE_TEST_CH_IMAGE              - override the CH image (default: current LTS).
 
@@ -413,7 +413,7 @@ def _start_or_join_shared(
             _run(run_cmd, timeout=240)  # first image pull can be slow
             return
         except subprocess.SubprocessError, FileNotFoundError:
-            time.sleep(0.5)  # lost the create race; loop and join the winner
+            time.sleep(0.5)  # lost the create race, loop and join the winner
     _unavailable(f"docker host '{spec}' cannot start or join the shared ClickHouse '{name}'")
 
 
@@ -421,7 +421,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str, keeper: bool = True)
     """Start (or reuse) a CH container on a local/remote docker host.
 
     Returns ``(params, teardown)``. With keep=True a stable-named container is
-    shared, reused across runs and left running; otherwise a container named for
+    shared, reused across runs and left running. Otherwise a container named for
     ``test`` is started and removed on teardown. Skips (never errors) if the
     docker host can't run it. ``keeper=False`` starts the stock image with no
     Keeper, the server the engine refuses.
@@ -889,7 +889,7 @@ def manager_client(ch_params):
     """The engine's own ClickHouseManager client wrapper, on the harness's ClickHouse.
 
     Code that calls ``execute`` or goes through the manager's resilience layer needs
-    this wrapper; the raw ``ch_client`` is not a substitute.
+    this wrapper. The raw ``ch_client`` is not a substitute.
     """
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 

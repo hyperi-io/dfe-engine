@@ -40,7 +40,7 @@ def run_loop(
     Each cycle, in order:
       - if ``on_reload`` is set and ``reload_every > 0`` and the count of ticks so
         far is a positive multiple of ``reload_every``, call ``on_reload`` FIRST
-        (the CLI wires this to "reload hunt specs and rebuild the runner"; the loop
+        (the CLI wires this to "reload hunt specs and rebuild the runner", the loop
         stays agnostic). Never fires at count 0, so the first tick is not a reload.
       - call ``tick(int(clock()))`` and increment the tick counter;
       - re-check ``should_stop`` AFTER the tick and BEFORE sleeping, so a stop
@@ -48,7 +48,7 @@ def run_loop(
       - otherwise ``sleep(poll_seconds)`` before the next cycle.
 
     Returns the total number of ticks executed. Injecting clock/sleep/stop keeps
-    this pure and deterministic to test; the caller owns the real wall clock, the
+    this pure and deterministic to test. The caller owns the real clock, the
     real ``time.sleep``, and the signal handler that flips the stop flag.
     """
     ticks = 0

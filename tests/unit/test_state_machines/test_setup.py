@@ -88,7 +88,7 @@ def test_steps_do_not_depend_on_the_auth_settings_toggles(ctx):
     ``bootstrap_auth`` seeds it unconditionally and ``POST /auth/login`` never
     consults auth.enabled / auth.local.enabled, so gating these steps on those
     toggles would hide a live credential. The context does not carry them at
-    all — this test pins that.
+    all -- this test pins that.
     """
     state = SETUP_MACHINE.evaluate(ctx)
 
@@ -150,7 +150,7 @@ def test_disabled_account_does_not_count_as_the_first_user(ctx):
 
 
 def test_external_account_counts_as_the_first_user(ctx):
-    """A JIT-provisioned OIDC identity is a real user — it has no local password."""
+    """A JIT-provisioned OIDC identity is a real user -- it has no local password."""
     ctx.account_store.create("bob", "", groups=[])
     ctx.account_store.update("bob", external=True, source_provider="entra")
 
@@ -445,7 +445,7 @@ def test_status_projects_the_registries_the_wizard_renders(ctx):
 
 
 def test_status_never_carries_accounts(ctx):
-    """Whether a user exists is a step verdict; the account list is not exposed."""
+    """Whether a user exists is a step verdict. The account list is not exposed."""
     ctx.account_store.create("alice", "a-strong-user-password", groups=["dfe-admins"])
 
     status = SETUP_MACHINE.status(ctx)
@@ -514,7 +514,7 @@ def test_completed_setup_keeps_oidc_login_options_only(ctx):
 
 
 def test_completed_setup_leaves_an_unset_display_name_empty(ctx):
-    """No invented label — ``name`` is right there for the UI to fall back to."""
+    """No invented label -- ``name`` is right there for the UI to fall back to."""
     ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
 
     assert [p.model_dump() for p in SETUP_MACHINE.status(_complete(ctx)).oidc_providers] == [
@@ -547,12 +547,12 @@ def test_status_surfaces_the_break_glass_git_state(ctx):
 
 
 def test_status_break_glass_absent_when_not_computed(ctx):
-    # Default context carries no git state -> the field is simply absent (None).
+    # Default context carries no git state -> the field is absent (None).
     assert SETUP_MACHINE.status(ctx).break_glass is None
 
 
 def test_incomplete_setup_still_returns_full_oidc_providers(ctx):
-    """The wizard edits providers, so it gets the whole record — disabled included."""
+    """The wizard edits providers, so it gets the whole record -- disabled included."""
     ctx.oidc_registry.create("okta", OIDCProvider(enabled=False, issuer="https://okta"))
 
     providers = SETUP_MACHINE.status(ctx).oidc_providers

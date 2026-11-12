@@ -107,7 +107,7 @@ class HuntFailures:
     it reloads the specs, and a rebuild must not restart a hunt's wait.
 
     Args:
-        initial_seconds: The wait after the first failure; each further failure doubles it
+        initial_seconds: The wait after the first failure. Each further failure doubles it
             (``hunts.failure_backoff_initial_seconds``).
         max_seconds: The cap on that wait (``hunts.failure_backoff_max_seconds``).
         reminder_seconds: How often a failure that has not changed is logged again
@@ -282,7 +282,7 @@ class HuntRunner:
         return requested.get(spec.hunt_id)
 
     def _beat(self, now: int) -> None:
-        """Say this runner is alive. A failed beat costs visibility; a lost tick costs runs."""
+        """Say this runner is alive. A failed beat costs visibility. A lost tick costs runs."""
         try:
             self._coord.heartbeat(now, self._poll_seconds)
         except Exception as exc:
@@ -324,7 +324,7 @@ class HuntRunner:
         for reached, spec in enumerate(specs[first:] + specs[:first]):
             if running + started >= self._cap:
                 self._start = first + reached
-                break  # global cap protects ClickHouse; lateness surfaces as overload
+                break  # global cap protects ClickHouse, lateness surfaces as overload
             fire = self._fire_for(spec, now, requested)
             if fire is None:
                 continue

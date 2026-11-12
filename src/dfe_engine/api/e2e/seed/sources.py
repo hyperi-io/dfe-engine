@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Source seeding. Public methods are the scripts; privates are reusable."""
+"""Source seeding. Public methods are the scripts. Privates are reusable."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from dfe_engine.source.models import (
 from dfe_engine.source.registry import SourceNotFoundError
 
 SEED_SOURCE_NAME = "seedsource"
-"""The source every app-management seed binds to; siblings key their instances off it.
+"""The source every app-management seed binds to. Siblings key their instances off it.
 
 Deliberately hyphen-free as well as underscore-free: a hyphen is legal in a source
 name but not yet quoted in a ClickHouse identifier position, so a hyphenated fixture

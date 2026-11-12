@@ -8,7 +8,7 @@
 
 """Read a table written in exact ClickHouse types from dfe-schemas.
 
-The `meta/` schemas map DFE's primitives onto ClickHouse; the `tables/` ones do
+The `meta/` schemas map DFE's primitives onto ClickHouse. The `tables/` ones do
 not map anything, because their columns are engine state and telemetry rather
 than user data. Format reference: ``docs/tables.md`` in dfe-schemas.
 

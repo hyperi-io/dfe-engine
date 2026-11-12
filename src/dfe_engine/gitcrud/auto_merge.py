@@ -12,8 +12,7 @@ The stored flag lives in gitops (governance/settings/gitops.yaml, key
 and the toggle is itself an audited commit. The deployment gate decides whether
 the flag may be enabled at all: dev posture (DFE_ENGINE_ENV, ~80% of the want) OR
 gitops.mode=solo (solo-operator production, the rest). effective = stored AND
-gate. Loud by design - see the spec
-(docs/superpowers/specs/2026-07-03-gitcrud-auto-merge-design.md).
+gate. Loud by design.
 """
 
 from dataclasses import dataclass
@@ -57,12 +56,12 @@ def gate(environment: str, mode: str) -> tuple[bool, str]:
 
 
 def stored_flag(crud: GitCrud) -> bool:
-    """The committed flag; absent resource/key means OFF.
+    """The committed flag. Absent resource/key means OFF.
 
     Fail-safe: a hand-edited gitops.yaml that is malformed YAML (ruamel's
     ParserError/ScannerError zoo) or a non-mapping doc (list/str -> AttributeError
     on .get) must NEVER be read as ON. Catch broadly on purpose here - a broken
-    file returning False is always safe; the alternative is a 500 on startup and
+    file returning False is always safe. The alternative is a 500 on startup and
     every read/write.
     """
     try:

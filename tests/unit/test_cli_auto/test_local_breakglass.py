@@ -199,7 +199,7 @@ def test_set_requires_reason_non_interactive(repo: Path):
 
 
 def test_guard_confirm_yes_proceeds(repo: Path):
-    # No --yes: the default y/N confirm runs; feed "y".
+    # No --yes: the default y/N confirm runs. Feed "y".
     result = _run(
         repo,
         [
@@ -317,7 +317,7 @@ def test_safety_guard_checks_the_resulting_document(repo_keda_disabled: Path):
 
 
 def test_unset_warns_when_the_revert_hands_the_count_back_to_keda(repo_keda_disabled: Path):
-    # The API's DELETE refuses this revert; break-glass names it and lets --yes through.
+    # The API's DELETE refuses this revert. break-glass names it and lets --yes through.
     result = _run(
         repo_keda_disabled,
         [
@@ -347,7 +347,7 @@ def test_unset_declined_at_the_safety_guard_commits_nothing(repo_keda_disabled: 
 
 
 def test_an_unrelated_set_over_a_stored_violation_only_notes_it(repo: Path):
-    # The seeded overlay already carries a count KEDA owns; a dial write elsewhere is
+    # The seeded overlay already carries a count KEDA owns. A dial write elsewhere is
     # not the write that broke it, so there is nothing to override.
     _run(
         repo,
@@ -358,7 +358,7 @@ def test_an_unrelated_set_over_a_stored_violation_only_notes_it(repo: Path):
         repo,
         ["set", "helmvars", "receiver-default", "keda.maxReplicas", "4", "--reason", "x"]
         + ["--no-push"],
-        input="y\n",  # the write confirm; no safety prompt precedes it
+        input="y\n",  # the write confirm, no safety prompt precedes it
     )
     assert result.exit_code == 0, result.output
     assert "Override this safety guard?" not in result.output

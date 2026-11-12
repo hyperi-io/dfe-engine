@@ -139,7 +139,7 @@ class CountingListener:
                 return
             with self._lock:
                 # ``close`` may dial once to wake this ``accept`` on platforms
-                # where ``shutdown`` on a listening socket is a no-op; that
+                # where ``shutdown`` on a listening socket is a no-op. That
                 # connect is not a client under test.
                 if self._stopping:
                     conn.close()

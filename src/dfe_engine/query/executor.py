@@ -46,7 +46,7 @@ class ViewExecutionError(Exception):
 
 
 class ViewRequestError(ViewExecutionError):
-    """The request's options cannot form a valid query; the caller must change them."""
+    """The request's options cannot form a valid query. The caller must change them."""
 
 
 def _holds_role_at(auth: AuthContext, roles: list[str], scope: Scope) -> bool:
@@ -137,7 +137,7 @@ class ViewExecutor:
             )
         except Exception as e:
             if options.after_key is not None and _TYPE_MISMATCH.search(str(e)):
-                # A ViewRequestError's message reaches the caller; ClickHouse's text goes to the log.
+                # A ViewRequestError's message reaches the caller. ClickHouse's text goes to the log.
                 logger.warning("view cursor does not parse", label=label, error=str(e))
                 raise ViewRequestError(
                     "after_key or after_tiebreak does not parse as its column's type "
@@ -268,12 +268,12 @@ class ViewExecutor:
                     where = f"WHERE {key} {op} {cursors[0]} "
                 else:
                     where = f"WHERE ({', '.join(columns)}) {op} ({', '.join(cursors)}) "
-            return f"SELECT * FROM {view_call} {where}ORDER BY {order} {paging}"  # noqa: S608 - quoted view; order columns pass column_reference; values bound
+            return f"SELECT * FROM {view_call} {where}ORDER BY {order} {paging}"  # noqa: S608 - quoted view, order columns pass column_reference, values bound
 
         if any(p.name == "limit" for p in view_def.parameters):
-            return f"SELECT * FROM {view_call}"  # noqa: S608 - quoted view; values bound
+            return f"SELECT * FROM {view_call}"  # noqa: S608 - quoted view, values bound
 
-        return f"SELECT * FROM {view_call} {paging}"  # noqa: S608 - quoted view; paging is two ints
+        return f"SELECT * FROM {view_call} {paging}"  # noqa: S608 - quoted view, paging is two ints
 
     @staticmethod
     def _check_paging(view_def: ViewDefinition, offset: int, options: QueryOptions) -> None:
@@ -327,7 +327,7 @@ def build_view_executor(settings: Any) -> ViewExecutor:
     """A ViewExecutor that runs every view as the restricted reader.
 
     The catalogue lists views through the engine's own connection, because the
-    discovery query reads ``system.tables``; the views themselves run only on the
+    discovery query reads ``system.tables``. The views themselves run only on the
     restricted one.
 
     Args:
@@ -342,7 +342,7 @@ def build_view_executor(settings: Any) -> ViewExecutor:
     from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
 
     qv = settings.query_views
-    # `target` selects the connection (auth db); catalog/executor qualify view +
+    # `target` selects the connection (auth db). catalog/executor qualify view +
     # table lookups against the data database.
     adapter = ClickHouseAdapter(target=settings.clickhouse.database)
     restricted_client = adapter.get_restricted_client(settings)

@@ -48,7 +48,7 @@ def resolve_orgs(markers: Iterable[str], orgs: Iterable[Any]) -> list[Any]:
         orgs: The org registry's entries.
 
     Returns:
-        The orgs named, each once, in registry order; empty when no marker resolves.
+        The orgs named, each once, in registry order. Empty when no marker resolves.
     """
     registered = list(orgs)
     by_name = {org.name: org for org in registered}

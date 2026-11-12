@@ -47,7 +47,7 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
         headers["Authorization"] = f"Bearer {e2e.receiver_token}"
 
     # HTTPS ingest. verify=e2e.verify (default off): the receiver may present the
-    # deployment's own CA; this test asserts the data path, not the cert chain.
+    # deployment's own CA. This test asserts the data path, not the cert chain.
     resp = httpx.post(
         f"{must(e2e.receiver_url).rstrip('/')}/ingest",
         headers=headers,

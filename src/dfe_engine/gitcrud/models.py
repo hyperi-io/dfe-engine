@@ -44,7 +44,7 @@ class ResourceClass:
 
     name        logical class name, e.g. "helmvars", "hunts", "governance".
     directory   repo-relative directory holding the class's resources.
-    rbac_prefix RBAC action prefix; defaults to ``name``. Grants are bound here,
+    rbac_prefix RBAC action prefix. Defaults to ``name``. Grants are bound here,
                 e.g. ``helmvars:write`` covers every file in the class.
     suffix      file extension for a FILE-layout resource (".yaml").
     versioned   opt-in: the class's docs carry a per-artifact version envelope
@@ -54,7 +54,7 @@ class ResourceClass:
     manifest    BUNDLE only: the manifest filename inside a resource's directory.
     nested      opt-in: a name may carry ``/`` segments, so the class's resources
                 live in a tree (``beats/filebeat_auth``). Every segment still goes
-                through the same name rule; only the separator is permitted.
+                through the same name rule. Only the separator is permitted.
     check       opt-in: called with a resource's name and doc on every write of
                 the class, and raises to refuse a doc its reader would refuse.
     """

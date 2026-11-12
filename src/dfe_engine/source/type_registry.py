@@ -218,8 +218,8 @@ class TypeRegistry:
 
     Loaded from dfe-schemas ``registries/types.yaml``. Provides:
     - resolve(): primitive -> full CH type with wrapping + codec
-    - validate_use_case(): enforce 1:M use_case↔primitive constraint
-    - validate_attribute(): enforce 1:M attribute↔primitive constraint
+    - validate_use_case(): enforce 1:M use_case<->primitive constraint
+    - validate_attribute(): enforce 1:M attribute<->primitive constraint
     - validate_ch_override(): check against supported CH types catalogue
     """
 

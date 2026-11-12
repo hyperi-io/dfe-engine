@@ -8,7 +8,7 @@
 """The runner's startup connect, against a ClickHouse that does not know its user yet.
 
 The engine creates the runner's user in a reconcile that may land after the runner
-starts. The runner used to exit on the refused login and crash-loop its pod; here
+starts. The runner used to exit on the refused login and crash-loop its pod. Here
 it has to back off, and connect on its own once the user is made.
 """
 
@@ -32,7 +32,7 @@ from dfe_engine.settings import (
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 PASSWORD = "runner-probe-password"
-# Sleeps the runner takes before the user is made; each one is a refused login.
+# Sleeps the runner takes before the user is made. Each one is a refused login.
 REFUSALS_BEFORE_THE_USER_EXISTS = 3
 
 

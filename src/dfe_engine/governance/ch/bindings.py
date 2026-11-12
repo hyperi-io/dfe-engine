@@ -42,7 +42,7 @@ from dfe_engine.orgs.tenant_scope import resolve_orgs
 from .models import GroupChBinding
 
 # Engine roles whose groups also read the otel database (every org's platform
-# telemetry), held at system scope; analysts and org-scoped groups never do.
+# telemetry), held at system scope. Analysts and org-scoped groups never do.
 OTEL_READER_ROLES = {"admin", "infra_admin"}
 
 
@@ -56,7 +56,7 @@ def derive_group_bindings(
     groups) plus its ``org_ids``, matching how ``api.deps`` resolves the same
     membership for an auth context. ``role_config`` is the role definitions
     ``authorize()`` reads, so a ``scoped`` role fences here as it does in the
-    API; None reads the shipped ones.
+    API. None reads the shipped ones.
 
     The tier is left empty so the reconciler resolves it to the default analyst
     tier - the least-privilege end of the tier list.

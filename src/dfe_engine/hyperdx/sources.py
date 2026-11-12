@@ -54,16 +54,16 @@ _PAYLOAD_COLUMN = "_json"
 
 
 class DfeSourcesClient(Protocol):
-    """The calls on the fork's ``/dfe/sources`` routes that write, remove and list DFE sources; ``HyperDXClient`` is the real one."""
+    """The calls on the fork's ``/dfe/sources`` routes that write, remove and list DFE sources. ``HyperDXClient`` is the real one."""
 
     async def delete_dfe_source(self, name: str) -> dict[str, Any] | None:
-        """Remove one DFE source from every team holding it; None on failure."""
+        """Remove one DFE source from every team holding it. None on failure."""
 
     async def list_dfe_sources(self) -> dict[str, Any] | None:
-        """List every team and the DFE sources it holds; None on failure."""
+        """List every team and the DFE sources it holds. None on failure."""
 
     async def put_dfe_source(self, name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
-        """Create or replace one DFE source on every team; None on failure."""
+        """Create or replace one DFE source on every team. None on failure."""
 
 
 def timestamp_column(columns: Iterable[str]) -> str | None:
@@ -122,11 +122,11 @@ async def ensure_source(
 
     Args:
         client: HyperDX client.
-        name: DFE source name; the HyperDX source carries the same name.
+        name: DFE source name. The HyperDX source carries the same name.
         database: ClickHouse database the table was deployed into.
         table: ClickHouse table name.
         columns: Column names on the deployed table.
-        timestamp: Column to read as the event time; None picks it from *columns*.
+        timestamp: Column to read as the event time. None picks it from *columns*.
 
     Returns:
         The teams the source now sits on, or None when nothing was written

@@ -1,4 +1,4 @@
-"""Tests for field map resolver — two-tier merge logic."""
+"""Tests for field map resolver -- two-tier merge logic."""
 
 import pytest
 

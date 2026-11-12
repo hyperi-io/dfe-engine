@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Sigma is now a data_analyst (not admin-only) surface, so its operator-declared
+"""Sigma is a data_analyst (not admin-only) surface, so its operator-declared
 inputs must be hardened. These pin the CAST-type breakout rejection and the
 file:// provider-URL rejection."""
 

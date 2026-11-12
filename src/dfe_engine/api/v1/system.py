@@ -9,7 +9,7 @@ GET /api/v1/system/settings    -> Redacted settings summary
 GET /api/v1/system/retention   -> The effective default TTL and where it comes from
 PUT /api/v1/system/retention   -> Set or clear the admin's override, then apply it
 GET /api/v1/system/defaults    -> TTL, common header and merge engine a source inherits
-PATCH /api/v1/system/defaults  -> Change any of those; only ttl_days is applied live
+PATCH /api/v1/system/defaults  -> Change any of those. Only ttl_days is applied live
 POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources and their tables
 GET /api/v1/system/defaults/drift  -> Sources and tables off the defaults, searched and paginated
 """
@@ -467,7 +467,7 @@ async def get_system_status(user: CurrentUser) -> SystemStatusResponse:
     """Conditions that leave the engine degraded while it keeps serving.
 
     A refused YAML write keeps the old file or the old deploy-repo content, so reads
-    stay correct and readiness is not failed; this is where the refusal shows.
+    stay correct and readiness is not failed. This is where the refusal shows.
     """
     degraded = [
         DegradedCondition(
@@ -623,7 +623,7 @@ def put_retention(
     The engine's own tables and every deployed source's table are brought to the new
     effective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or
     ``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A
-    ClickHouse failure answers 502 with the override ALREADY committed; sending the
+    ClickHouse failure answers 502 with the override ALREADY committed. Sending the
     same value again applies it.
     """
     gc = _gitcrud(request)
@@ -701,7 +701,7 @@ class SystemDefaults(BaseModel):
 
 
 class SystemDefaultsPatch(BaseModel):
-    """A partial change. Omitted fields stay as they are; null clears that override."""
+    """A partial change. Omitted fields stay as they are. Null clears that override."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -826,8 +826,8 @@ def patch_defaults(
     """Store the named defaults. Only ttl_days is applied to live tables.
 
     Omitted fields are left alone. null clears that override. Common-header type,
-    version and engine are what a source inherits the next time it is deployed;
-    this request does not rewrite them onto live tables. A patch that names
+    version and engine are what a source inherits the next time it is deployed.
+    This request does not rewrite them onto live tables. A patch that names
     ttl_days stores it and then runs the same reconcile as PUT /retention.
     """
     gc = _gitcrud(request)
@@ -1176,7 +1176,7 @@ def _drift_search_row(item: SourceDefaultDrift) -> dict[str, Any]:
 
 
 def _deployed_tables(settings: Any, sources: list[Source]) -> dict[str, LiveTable]:
-    """The data database's tables, read once, when any source has been deployed; else none.
+    """The data database's tables, read once, when any source has been deployed. Else none.
 
     Read within ``clickhouse.interactive_budget_seconds``, so a down server answers
     503 in seconds.

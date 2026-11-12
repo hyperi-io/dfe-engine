@@ -38,7 +38,7 @@ MATCH = (
 
 
 class _Rows:
-    """A ClickHouse stand-in for the landing table; records every query it is sent."""
+    """A ClickHouse stand-in for the landing table. Records every query it is sent."""
 
     def __init__(self, *, org_id_column: bool = True) -> None:
         self.org_id_column = org_id_column

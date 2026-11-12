@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Who runs each backing service, and what the engine may change because of it.
 
-The deployer states the provider (``deployment.backing``); the provider catalogue
+The deployer states the provider (``deployment.backing``). The provider catalogue
 says what that provider means. Together they decide whether DFE runs the service,
 a provider whose API DFE knows runs it, or someone else does, and which deploy-repo
 values a write cannot move.

@@ -1,4 +1,4 @@
-"""Tests for SourceRegistry — CRUD, validation, round-trip."""
+"""Tests for SourceRegistry -- CRUD, validation, round-trip."""
 
 from collections.abc import Iterator
 
@@ -487,7 +487,7 @@ class TestList:
     def test_a_route_to_another_source_saves_before_that_source_exists(
         self, registry: SourceRegistry
     ):
-        """A route may legitimately be written before its target; compile checks it."""
+        """A route may legitimately be written before its target. Compile checks it."""
         registry.save_source(
             Source.model_validate(
                 {
@@ -656,13 +656,13 @@ class TestValidation:
         """Updating the same source should not conflict with itself."""
         source = _make_source("filebeat", match_value="fb")
         registry.save_source(source)
-        # Save again (update) — should not raise
+        # Save again (update) -- should not raise
         registry.save_source(source)
 
     def test_match_conflict_disabled_ok(self, registry: SourceRegistry):
         """Disabled sources don't participate in match conflict checks."""
         registry.save_source(_make_source("filebeat", match_value="fb", enabled=False))
-        # Same match value but first source is disabled — should be OK
+        # Same match value but first source is disabled -- should be OK
         registry.save_source(_make_source("another", match_value="fb"))
 
 

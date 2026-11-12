@@ -15,7 +15,7 @@ stored, operator-editable object (gitcrud ``sigma_views`` class, keyed by source
 name) that also declares columns DERIVED FROM the source's ``_json`` column.
 
 The view MODEL + DDL generation are now the STANDARD-AGNOSTIC engine in
-:mod:`dfe_engine.fieldmap.remap_view` (the same engine ECS + CIM views use); this
+:mod:`dfe_engine.fieldmap.remap_view` (the same engine ECS + CIM views use). This
 module is the thin Sigma facade over it - it keeps the ``sigma_field`` stored
 contract + the CRUD store, and delegates rendering. Those JSON-derived columns are
 the capability the fixed meta schema lacks: a Sigma field like ``EventID`` that
@@ -45,7 +45,7 @@ from .catalog import VIEWS_CLASS, sigma_registry
 # The Sigma standard name (the view suffix + the remap-view standard).
 SIGMA_STANDARD = "sigma"
 
-# Rendering errors surface as SigmaViewError for API/back-compat; it IS the shared
+# Rendering errors surface as SigmaViewError for API/back-compat. It IS the shared
 # remap-view error so callers catching either type keep working.
 SigmaViewError = RemapViewError
 
@@ -103,7 +103,7 @@ class SigmaViewColumn(BaseModel):
 class SigmaViewDefinition(BaseModel):
     """A CRUD-managed Sigma view definition for one source.
 
-    Keyed (in the store) by ``source_name``; the generated view targets table
+    Keyed (in the store) by ``source_name``. The generated view targets table
     ``source_name`` and is named ``{source_name}_sigma``. ``include_source_columns``
     appends ``SELECT *`` so the base table columns remain visible alongside the
     Sigma-aligned aliases (the legacy view's behaviour).
@@ -181,7 +181,7 @@ class SigmaViewStore:
         return self._crud.list(VIEWS_CLASS)
 
     def get(self, source_name: str) -> SigmaViewDefinition:
-        """Read one view definition; raises ResourceNotFoundError if absent."""
+        """Read one view definition. Raises ResourceNotFoundError if absent."""
         doc = self._crud.get(VIEWS_CLASS, source_name)
         return SigmaViewDefinition.model_validate(doc)
 

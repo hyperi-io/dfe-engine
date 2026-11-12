@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class GraphCredentials:
-    """The app-only credentials a Graph API token is requested with; an empty field was not configured.
+    """The app-only credentials a Graph API token is requested with. An empty field was not configured.
 
     Attributes:
         client_id: The login client's id.
@@ -242,7 +242,7 @@ class EntraAdapter(OIDCGroupAdapter):
         every ``@odata.nextLink`` page is followed.
 
         The user's own login token asks ``/me`` first. Graph answers that with
-        User.Read; without GroupMember.Read.All each group carries only its id,
+        User.Read. Without GroupMember.Read.All each group carries only its id,
         which is all role resolution needs. A token Graph refuses falls through
         to the app-only credentials, which ask ``/users/{directory_id}``. A user
         token that answers with no groups is the answer and does not fall through.
@@ -329,7 +329,7 @@ class EntraAdapter(OIDCGroupAdapter):
                     )
                     return LookupFailure.REFUSED
                 # A token that may not read a group still gets it, with only the id set and
-                # every other property null; the id is all role resolution keys on.
+                # every other property null. The id is all role resolution keys on.
                 groups.extend(
                     GroupInfo(
                         id=str(item["id"]),
@@ -538,7 +538,7 @@ class EntraAdapter(OIDCGroupAdapter):
 
         token = result.get("access_token")
         if not token:
-            # The AADSTS numbers say what Entra refused; its description is prose and stays out.
+            # The AADSTS numbers say what Entra refused. Its description is prose and stays out.
             error_codes = [c for c in result.get("error_codes") or [] if isinstance(c, int)]
             logger.warning(
                 "Entra _get_token: no access_token in MSAL response",

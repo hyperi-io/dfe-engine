@@ -40,7 +40,7 @@ class TestTier1HelmVars:
 
     def test_set_then_list_var(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
-        # KEDA bound is fine; replicaCount would be rejected (controller-owned)
+        # KEDA bound is fine. ReplicaCount would be rejected (controller-owned)
         resp = client.put(
             "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
             json={"value": 10},
@@ -320,7 +320,7 @@ def test_governed_ops_requires_auth(client, path):
 
 
 def _scoped_headers(app, api_settings, *, username, role, permissions):
-    """Create a role+group+account with exactly these perms; return auth headers."""
+    """Create a role+group+account with exactly these perms. Return auth headers."""
 
     role_store = app.state.role_store
     group_store = app.state.group_store
@@ -463,7 +463,7 @@ class TestRouterProtected:
     def test_the_override_lifts_the_lock_but_not_a_value_rule_inside_a_map(
         self, client, app, admin_headers, tmp_path
     ):
-        """The grant unlocks image.tag; a floating tag nested in the image map stays refused."""
+        """The grant unlocks image.tag. A floating tag nested in the image map stays refused."""
         gc = _wire_gitcrud(app, tmp_path)
         stored = {"image": {"repository": "ghcr.io/x/y", "tag": "v1.0.0"}}
         gc.put("helmvars", "receiver-default", stored, "tester")

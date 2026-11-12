@@ -9,7 +9,7 @@
 
 An app instance IS its values overlay, so a deploy repo holding none deploys no
 apps and the API lists no instances. On Kubernetes the forgejo setup job writes
-that first set as it creates the repo; a Compose deployment has no such job, so
+that first set as it creates the repo. A Compose deployment has no such job, so
 the engine writes it at startup - from the same manifest, with the same marker,
 so the two seeds cannot disagree about what a profile runs.
 
@@ -37,10 +37,10 @@ from .catalogue import APP_CATALOGUE, Multiplicity
 from .derived import ENGINE_ACTOR
 
 SEED_INSTANCE = "default"
-"""Instance name every seeded overlay carries; the forgejo job's ``seedInstance``."""
+"""Instance name every seeded overlay carries. The forgejo job's ``seedInstance``."""
 
 MARKER_FILE = ".seeded-apps"
-"""Repo-root file listing the offered apps, one per line; the job's ``seedMarker``."""
+"""Repo-root file listing the offered apps, one per line. The job's ``seedMarker``."""
 
 
 def default_services(profile: str) -> list[str]:

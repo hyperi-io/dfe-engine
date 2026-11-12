@@ -7,9 +7,8 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """The configured ``DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD`` (settings.auth.local.admin_password)
-must be applied to the bootstrapped admin. It was previously ignored (app startup
-read a different env var), leaving the admin on the well-known default even when
-an operator configured a password.
+must be applied to the bootstrapped admin, or the admin stays on the well-known
+default even when an operator configured a password.
 """
 
 from __future__ import annotations

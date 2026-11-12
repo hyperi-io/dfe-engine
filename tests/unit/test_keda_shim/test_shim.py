@@ -74,7 +74,7 @@ class _FakeResult:
 
 
 class _FakeClient:
-    """Records the SQL/params it was asked to run; returns canned rows or raises."""
+    """Records the SQL/params it was asked to run. Returns canned rows or raises."""
 
     def __init__(self, rows: list[list] | None = None, error: Exception | None = None) -> None:
         self.rows = rows if rows is not None else [[0]]

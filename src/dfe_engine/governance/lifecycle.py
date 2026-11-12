@@ -15,10 +15,10 @@ GitCrud and Argo reconciles - nothing is applied live, the engine only flips a
 config dial (see docs/deployment/backing-services.md and the engine<->infra boundary).
 
 State semantics:
-  running - deployed; KEDA scales min..max.
+  running - deployed. KEDA scales min..max.
   paused  - replicas pinned to 0, config/Application intact (resumable instantly;
             safe because dfe-* apps are crash-safe - CH watermarks, Kafka retention).
-  stopped - disabled stub kept in git (nothing deleted; gitops-survivable).
+  stopped - disabled stub kept in git (nothing deleted, gitops-survivable).
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ class ServiceLifecycle:
     path: str = "state"  # the dot-path of the dial within the resource
 
 
-# Built-in registry. dfe-* apps are operator-managed; a few backing services are
-# admin/infra-managed; critical cascade deps are pinned. Overridable from gitops
+# Built-in registry. dfe-* apps are operator-managed. A few backing services are
+# admin/infra-managed. Critical cascade deps are pinned. Overridable from gitops
 # later (YAGNI: built-in for now).
 _MANAGED_APPS = ("receiver", "loader", "fetcher", "archiver", "transforms", "hunt-runner", "ui")
 _MANAGED_BACKING = ("kafka", "objectstore", "hyperdx")
@@ -94,7 +94,7 @@ def services() -> list[ServiceLifecycle]:
 def required_action(name: str, state: LifecycleState) -> str:
     """The RBAC action needed to set ``state`` on ``name``.
 
-    Apps -> ``lifecycle:app:<name>`` (operator-grantable); backing services ->
+    Apps -> ``lifecycle:app:<name>`` (operator-grantable). Backing services ->
     ``lifecycle:backing:<name>`` (admin/infra roles only). Raises LifecycleError for
     a pinned service - it has no lifecycle action at all.
     """
@@ -115,7 +115,7 @@ def set_state(
     """Write a service's lifecycle state to gitops (a helm-var dial) and commit.
 
     Raises LifecycleError for a pinned service. The dial is committed to the deploy
-    repo; Argo reconciles it (commit != deployment). Returns the PublishResult
+    repo. Argo reconciles it (commit != deployment). Returns the PublishResult
     (commit sha), which the API surfaces to the caller.
     """
     svc = resolve(name)

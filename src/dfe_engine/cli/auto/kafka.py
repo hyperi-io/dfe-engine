@@ -10,7 +10,7 @@
 """``dfe kafka`` - Kafka provider tooling.
 
 Headline command ``dfe kafka client-config``: connecting a CLI to Kafka is a
-genuine PITA (bootstrap + security.protocol + sasl.mechanism + JAAS/creds all
+real PITA (bootstrap + security.protocol + sasl.mechanism + JAAS/creds all
 have to line up per provider). This emits the correct librdkafka config for a
 provider so you point a tool at it and it works:
 
@@ -25,7 +25,7 @@ The emitted shape is the STANDARD librdkafka ``.properties`` file (bootstrap.ser
 + security.protocol + sasl.mechanisms + creds) that every librdkafka tool reads -
 kcat via ``-F``/``$KCAT_CONFIG``, the confluent CLI, rpk, plain clients. The provider
 DERIVES security.protocol + sasl.mechanism (SCRAM for owned/Redpanda/MSK, PLAIN for
-Confluent Cloud); we never hand-set them. Creds come from the configured secrets
+Confluent Cloud). We never hand-set them. Creds come from the configured secrets
 source (``.env`` / OpenBao via settings) unless passed explicitly.
 
 The emitters live in ``scalo.kafka.toolconfig`` (one source of provider truth, many

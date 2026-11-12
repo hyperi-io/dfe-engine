@@ -9,7 +9,7 @@
 
 The engine's ClickHouse user is targeted by no row policy, so the rows a caller
 gets back are exactly the rows the sampler's own WHERE selects. One table holds
-three orgs' rows; an org_viewer bound at system scope with two of those orgs gets
+three orgs' rows. An org_viewer bound at system scope with two of those orgs gets
 only theirs, an admin gets all three, and a table with no ``_org_id`` is refused.
 """
 

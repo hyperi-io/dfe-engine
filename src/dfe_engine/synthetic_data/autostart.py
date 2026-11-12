@@ -38,7 +38,7 @@ async def run_standing_stream(
     *,
     retry_seconds: float = _RETRY_SECONDS,
 ) -> None:
-    """Stream one pack forever in bounded segments; degrade and retry on errors."""
+    """Stream one pack forever in bounded segments. Degrade and retry on errors."""
     while True:
         try:
             summary = await service.run_stream(request)

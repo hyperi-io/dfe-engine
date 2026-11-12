@@ -21,7 +21,7 @@ from dfe_engine.schema.plan import render_one
 pytestmark = pytest.mark.integration
 
 
-# ── Fixtures ────────────────────────────────────────────────────
+# -- Fixtures ----------------------------------------------------
 
 
 def _apply_alert_state(ch_client, db: str) -> None:
@@ -71,7 +71,7 @@ def alert_state(ch_client, manager_client, dfe_db):
     return mgr
 
 
-# ── Grouping Query Tests ───────────────────────────────────────
+# -- Grouping Query Tests ---------------------------------------
 
 
 class TestGroupingQuery:
@@ -180,16 +180,16 @@ class TestGroupingQuery:
             assert len(sample_events) <= 3
 
 
-# ── Alert State Cooldown Tests ─────────────────────────────────
+# -- Alert State Cooldown Tests ---------------------------------
 
 
 class TestAlertStateCooldown:
     def test_cooldown_lifecycle(self, manager_client, alert_state):
-        """record fire → check within window (blocked) → check after window (allowed)."""
+        """record fire -> check within window (blocked) -> check after window (allowed)."""
         mgr = alert_state
         hunt = f"hunt_{uuid.uuid4().hex[:6]}"
 
-        # No prior fire — should be allowed
+        # No prior fire -- should be allowed
         assert (
             mgr.check_cooldown(manager_client, hunt, "rule_1", "acme", timedelta(hours=1)) is True
         )
@@ -197,16 +197,16 @@ class TestAlertStateCooldown:
         # Record fire
         mgr.record_fire(manager_client, hunt, "rule_1", "acme")
 
-        # Check within window — should be blocked
+        # Check within window -- should be blocked
         assert (
             mgr.check_cooldown(manager_client, hunt, "rule_1", "acme", timedelta(hours=1)) is False
         )
 
-        # Check with zero cooldown — always allowed
+        # Check with zero cooldown -- always allowed
         assert mgr.check_cooldown(manager_client, hunt, "rule_1", "acme", timedelta(0)) is True
 
     def test_per_group_cooldown(self, manager_client, alert_state):
-        """Fire group A → group B still fires, group A blocked."""
+        """Fire group A -> group B still fires, group A blocked."""
         mgr = alert_state
         hunt = f"hunt_{uuid.uuid4().hex[:6]}"
         group_a = build_group_key(["source_ip"], {"source_ip": "10.0.0.1"})
@@ -249,7 +249,7 @@ class TestAlertStateCooldown:
     def test_ensure_table_asserts_the_table_rather_than_creating_it(
         self, ch_client, manager_client, dfe_db
     ):
-        """The schema phase creates alert_state; the manager only checks it is there."""
+        """The schema phase creates alert_state. The manager only checks it is there."""
         absent = AlertStateManager(database=dfe_db)
         absent.ensure_table_exists(manager_client)
         assert absent._table_ensured is False

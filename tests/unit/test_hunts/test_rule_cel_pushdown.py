@@ -4,9 +4,9 @@ Verifies that CEL expressions are correctly transpiled to ClickHouse SQL
 WHERE clauses and integrated into the hunt Rule model for query pushdown.
 
 Three creation paths:
-1. SQL only — existing behaviour, unchanged
-2. CEL only — transpile_to_clickhouse() generates the WHERE clause
-3. SQL + CEL — both are ANDed together
+1. SQL only -- existing behaviour, unchanged
+2. CEL only -- transpile_to_clickhouse() generates the WHERE clause
+3. SQL + CEL -- both are ANDed together
 """
 
 import pytest
@@ -14,7 +14,7 @@ import pytest
 from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.hunts.rule_model import Rule, RuleCreate
 
-# ── RuleCreate validation ────────────────────────────────────────
+# -- RuleCreate validation ----------------------------------------
 
 
 class TestRuleCreateValidation:
@@ -66,7 +66,7 @@ class TestRuleCreateValidation:
         assert parsed.where_clause == ""
 
 
-# ── CEL-only rules ───────────────────────────────────────────────
+# -- CEL-only rules -----------------------------------------------
 
 
 class TestCelOnlyRules:
@@ -168,7 +168,7 @@ def test_a_cel_filter_transpiles_into_the_where_clause(cel, fragments):
         assert fragment in rule.where_clause
 
 
-# ── SQL-only rules (backward compatibility) ──────────────────────
+# -- SQL-only rules (backward compatibility) ----------------------
 
 
 class TestSqlOnlyRules:
@@ -207,11 +207,11 @@ class TestSqlOnlyRules:
         assert len(rule.warnings) > 0
 
 
-# ── Combined SQL + CEL rules ────────────────────────────────────
+# -- Combined SQL + CEL rules ------------------------------------
 
 
 class TestCombinedSqlCel:
-    """Rules with both SQL and CEL — CEL is ANDed into the WHERE."""
+    """Rules with both SQL and CEL -- CEL is ANDed into the WHERE."""
 
     def test_sql_and_cel_anded(self):
         rc = RuleCreate(
@@ -275,7 +275,7 @@ class TestCombinedSqlCel:
         assert "count > 100" in rule.where_clause
 
 
-# ── Error handling ───────────────────────────────────────────────
+# -- Error handling -----------------------------------------------
 
 
 class TestCelErrors:
@@ -315,7 +315,7 @@ class TestCelErrors:
             )
 
 
-# ── validate_rule() ──────────────────────────────────────────────
+# -- validate_rule() ----------------------------------------------
 
 
 class TestValidateRule:
@@ -378,7 +378,7 @@ class TestValidateRule:
         assert any("empty detection" in e.lower() for e in errors)
 
 
-# ── Serialization ────────────────────────────────────────────────
+# -- Serialization ------------------------------------------------
 
 
 class TestSerialization:
@@ -427,7 +427,7 @@ class TestSerialization:
         assert rule2.cel_filter is None
 
 
-# ── Integration with HuntResultSchema ────────────────────────────
+# -- Integration with HuntResultSchema ----------------------------
 
 
 class TestBuildInsertSelect:
@@ -512,7 +512,7 @@ class TestBuildInsertSelect:
         assert "{timestamp_condition}" in sql
 
 
-# ── Real-world detection patterns ────────────────────────────────
+# -- Real-world detection patterns --------------------------------
 
 
 class TestRealWorldPatterns:

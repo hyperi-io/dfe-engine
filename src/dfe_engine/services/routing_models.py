@@ -254,7 +254,7 @@ class LoaderDlqConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    # Non-empty routes every dead letter here; the per-app topic dfe-schemas
+    # Non-empty routes every dead letter here. The per-app topic dfe-schemas
     # declares and the engine creates at bootstrap.
     topic: str = "dfe_loader_dlq"
     # Read only when topic is empty, as <destination><suffix>.
@@ -286,7 +286,7 @@ class LoaderRoutingConfig(BaseModel):
     contract, and serde drops an unknown key without a word, so a key invented
     here does not fail the loader -- it silently never takes effect and the
     loader falls back to its own default, sending every message somewhere the
-    author never asked for. The Rust struct is the SSoT; anything added here
+    author never asked for. The Rust struct is the SSoT. Anything added here
     must exist there first.
 
     The table comes from the first ``table_fields`` hit (mapped through
@@ -299,7 +299,7 @@ class LoaderRoutingConfig(BaseModel):
 
     table_fields: list[str] = Field(default_factory=lambda: ["_source"])
     default_db: str = "dfe"
-    # The key names the fallback mechanism; its value is the landing table's name.
+    # The key names the fallback mechanism. Its value is the landing table's name.
     default_table: str = DEFAULT_LANDING_LABEL
     org_id_field: str | None = "_org_id"
     default_org_id: str = Field(

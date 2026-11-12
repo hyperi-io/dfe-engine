@@ -102,7 +102,7 @@ class HuntValidator:
                 raise ValueError(
                     "Either 'global_source_table_name' or per-rule 'source' field is required."
                 )
-        # A blank one defers to the per-rule 'source'; anything else must name a table.
+        # A blank one defers to the per-rule 'source'. Anything else must name a table.
         if global_source_table_name is not None and str(global_source_table_name).strip():
             HuntValidator._validate_table_name(
                 "'global_source_table_name'", global_source_table_name, split=plain_source_name
@@ -185,8 +185,8 @@ class HuntValidator:
             if rule_path.is_file():
                 HuntValidator.validate_rule_file(rule_path)
             else:
-                # Rule file may be uploaded AFTER the hunt is drafted (create-then-add);
-                # warn instead of blocking. The file is checked once it exists.
+                # Rule file may be uploaded AFTER the hunt is drafted (create-then-add).
+                # Warn instead of blocking. The file is checked once it exists.
                 logger.warning(
                     f"Rule file not found for hunt rule '{rule_name}' at {rule_path}; "
                     "create-time existence check skipped (rule may be added later)."
@@ -238,7 +238,7 @@ class HuntValidator:
 
         :param rule_path: The rule's ``{name}.yaml``.
         :raises ValueError: If the file cannot be read as YAML, is not a mapping,
-            or names a source that is not a plain table name; the runner drops
+            or names a source that is not a plain table name. The runner drops
             such a rule.
         """
         try:
@@ -255,7 +255,7 @@ class HuntValidator:
 
         :param payload: The rule document, as the hunt runner reads it.
         :param label: What the message names the rule as, such as ``rule file x.yaml``.
-        :raises ValueError: If the pair is not a plain source table name; the runner
+        :raises ValueError: If the pair is not a plain source table name. The runner
             drops such a rule.
         """
         source = rule_source(

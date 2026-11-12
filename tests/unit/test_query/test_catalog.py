@@ -145,7 +145,7 @@ class TestParseViewParameters:
 
 
 class TestViewNameConversion:
-    """Tests for view name ↔ label conversion."""
+    """Tests for view name <-> label conversion."""
 
     def test_name_to_label_standard(self):
         assert view_name_to_label("dfe_v_analytics_user_activity") == "analytics/user_activity"
@@ -163,7 +163,7 @@ class TestViewNameConversion:
             view_name_to_label("some_other_view")
 
     def test_name_to_label_single_segment(self):
-        """Single segment after prefix — namespace only."""
+        """Single segment after prefix -- namespace only."""
         assert view_name_to_label("dfe_v_health") == "health"
 
 

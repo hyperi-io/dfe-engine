@@ -100,7 +100,7 @@ class Resolution:
         which every read-only value sits under.
 
         Args:
-            path: The dot-path below the service's values prefix; empty for the prefix.
+            path: The dot-path below the service's values prefix. Empty for the prefix.
 
         Returns:
             True when the write would land on a read-only value.
@@ -199,7 +199,7 @@ def load_providers(path: Path | str | None = None) -> dict[str, ServiceProviders
     the snapshot bundled in the image, which is always there.
 
     Args:
-        path: An explicit catalogue file; None resolves through the environment.
+        path: An explicit catalogue file. None resolves through the environment.
 
     Returns:
         Each service the catalogue names, keyed by service.
@@ -238,9 +238,9 @@ def resolve(
 
     Args:
         service: The backing service, as the API names it.
-        provider: The provider key the deployer stated; empty when it stated none.
+        provider: The provider key the deployer stated. Empty when it stated none.
         mode: Returns the mode the deploy repo declares for the service, or None.
-        catalogue: The catalogue to read; the one this process loaded when None.
+        catalogue: The catalogue to read. The one this process loaded when None.
 
     Returns:
         The resolution: ``dfe`` with nothing refused, or who runs it and what is refused.

@@ -34,7 +34,7 @@ from dfe_engine.names import VALID_NAME
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 MAX_ATTRIBUTE_DEPTH = 64
-"""Deepest an attributes blob may nest; the YAML writer recurses once per level."""
+"""Deepest an attributes blob may nest. The YAML writer recurses once per level."""
 
 
 def check_attribute_depth(attributes: dict) -> dict:

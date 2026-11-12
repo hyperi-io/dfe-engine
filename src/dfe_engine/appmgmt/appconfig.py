@@ -70,7 +70,7 @@ CONFIG_ROOT = "config"
 """The overlay key holding what becomes the app's own config file.
 
 Every ``dir_setting`` and ``entries_path`` in the manifest is an OVERLAY path,
-so it carries this prefix; the rendered file is the block itself, and the prefix
+so it carries this prefix. The rendered file is the block itself, and the prefix
 comes off on the way in.
 """
 
@@ -79,7 +79,7 @@ ENV_ROOT = "extraEnv"
 
 A sibling of ``config:`` rather than a branch of it: the app's own schema decides
 what belongs under ``config:``, and this block exists for what it does not know
-about. On Kubernetes the app's chart renders it; here it becomes a file.
+about. On Kubernetes the app's chart renders it. Here it becomes a file.
 """
 
 CUSTOM_ENV_SUFFIX = ".custom.env"
@@ -126,7 +126,7 @@ def container_name(service: str, instance: str) -> str:
     """The Compose service one render runs as.
 
     ``<service>-<instance>`` for an instance of a per-config app, which is what
-    the deployer names the container it declares from the index; the app's own
+    the deployer names the container it declares from the index. The app's own
     name otherwise. Pass an empty ``instance`` for anything but a per-config app.
     """
     return f"{service}-{instance}" if instance else service
@@ -138,7 +138,7 @@ class RenderedApp:
 
     service: str
     instance: str
-    """The overlay this was rendered from; empty where the app has none yet."""
+    """The overlay this was rendered from. Empty where the app has none yet."""
 
     directory: Path
     changed: bool
@@ -355,7 +355,7 @@ def without_nulls(value: Any) -> Any:
         value: A merged config, or any part of one.
 
     Returns:
-        The same shape with the null-valued keys gone; ``value`` itself is not changed.
+        The same shape with the null-valued keys gone. ``value`` itself is not changed.
     """
     if isinstance(value, dict):
         return {key: without_nulls(item) for key, item in value.items() if item is not None}
@@ -497,7 +497,7 @@ def _apply_entries(
 
 
 def _remounted(entry: Any, mount_path: str, mounted: str) -> Any:
-    """An entry naming a file under ``mount_path``, re-pointed at ``mounted``; any other as is."""
+    """An entry naming a file under ``mount_path``, re-pointed at ``mounted``. Any other as is."""
     if not mount_path or not isinstance(entry, dict):
         return entry
     path = entry.get("path")

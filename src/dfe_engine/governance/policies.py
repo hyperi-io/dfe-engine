@@ -8,7 +8,7 @@
 """Protected-var policies, stored as YAML in the gitops governance class.
 
 A policy lists `cls:name:path` glob patterns that are LOCKED. The generic engine's
-Tier-1 writes and Tier-2 actions consult ``is_protected`` before mutating; a
+Tier-1 writes and Tier-2 actions consult ``is_protected`` before mutating. a
 protected var changes only when the caller holds the override grant (the router
 gates ``helmvars:override`` / ``library:override``). This is the one thing that
 reaches below a class - a policy object, not a per-var ACL.

@@ -128,7 +128,7 @@ def test_a_pack_directory_that_refuses_writes_does_not_fail_the_write(
     repo.publish({"seed2.yaml": "seed: 2\n"}, message="seed2")
     pack_dir = repo.path / ".git" / "objects" / "pack"
     assert list(pack_dir.iterdir()) == []
-    # A pack directory that points nowhere refuses a new pack for root as well; with
+    # A pack directory that points nowhere refuses a new pack for root as well. With
     # no packs yet, every object is still loose and readable.
     pack_dir.rmdir()
     pack_dir.symlink_to(tmp_path / "gone")

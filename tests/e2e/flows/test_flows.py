@@ -60,7 +60,7 @@ from tests.e2e.flows.conftest import app_instance, catalogue
 # Argo polls the deploy repo every 300 s with up to 60 s of jitter, and the pod
 # then rolls on the new ConfigMap checksum, so a routing change is minutes away.
 ROUTING_DEADLINE = 900.0
-# Once the routing is live the record's own trip is seconds; this only covers a
+# Once the routing is live the record's own trip is seconds. This only covers a
 # loader mid-roll.
 LANDING_DEADLINE = 240.0
 # A fetcher polls its upstream on its own schedule, and the first fetch follows
@@ -320,7 +320,7 @@ class TestFlows:
         else:
             self._assert_posted(shape, e2e, ch_client, catchall[1])
 
-        # Deleting HERE is the assertion that a source can be removed; the
+        # Deleting HERE is the assertion that a source can be removed. The
         # fixture repeats it and drops the table, so the names stay on its list.
         _delete(engine, shape.names())
         if shape.origin == "fetcher":
@@ -468,7 +468,7 @@ def test_a_flow_the_deployment_cannot_run_is_refused(
     """The refusal is the assertion: a flow that cannot run must fail at save.
 
     Not the same claim as the skip beside it. The skip says this suite cannot
-    prove the landing half here; this says the deployment says so too, and says
+    prove the landing half here. This says the deployment says so too, and says
     why, rather than accepting the source and never starting the pod.
 
     On a bus deployment asked to prove both transports, this is what the direct

@@ -209,7 +209,7 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
 
 
 class TestASectionThePutLeavesOutIsKept:
-    """A form sends some sections; the rest, and the secrets in them, stay as stored."""
+    """A form sends some sections. The rest, and the secrets in them, stay as stored."""
 
     URL = "/api/v1/services/fetcher/sections"
     TABLE = "fetcher-sections"

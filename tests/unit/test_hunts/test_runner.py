@@ -44,7 +44,7 @@ def test_next_due_is_future_and_within_interval():
 def test_latest_fire_is_this_interval_once_arrived_else_the_previous():
     from dfe_engine.hunts.schedule import current_fire, latest_fire
 
-    # fire = boundary + stable offset; owed from the moment now passes it
+    # fire = boundary + stable offset. Owed from the moment now passes it
     fire = current_fire("h", 600, 1000)
     assert 600 <= fire < 1200
     assert latest_fire("h", 600, fire) == fire
@@ -274,7 +274,7 @@ def test_a_tick_publishes_the_backlog_the_shim_scales_on(manager):
 
 
 def test_a_runner_with_no_metrics_backend_does_not_query_the_backlog():
-    """The backlog is another ClickHouse round trip per tick; nothing reads it here."""
+    """The backlog is another ClickHouse round trip per tick. Nothing reads it here."""
     coord = _RecordingCoordinator()
     runner = HuntRunner(coord, _CountingWorker(), {}, cap=8)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
@@ -404,7 +404,7 @@ def _exact(seconds: float) -> float:
 
 
 def _ticks(runner: HuntRunner, worker: _TableWorker, start: int, count: int) -> list[int]:
-    """Run ``count`` polls from ``start``; returns the clock of each poll that attempted the hunt."""
+    """Run ``count`` polls from ``start``. Returns the clock of each poll that attempted the hunt."""
     attempted: list[int] = []
     for now in range(start, start + count * POLL, POLL):
         before = worker.attempts
@@ -544,7 +544,7 @@ def test_a_hunt_still_failing_is_reminded_about_periodically_and_on_a_new_error(
         # Attempts at 0, 30, 90, then every 60 s: the one at 630 is the reminder.
         _ticks(runner, worker, now, 44)
         worker.error = "Code: 241. DB::Exception: Memory limit exceeded. (MEMORY_LIMIT_EXCEEDED)"
-        # The attempt at 690 fails differently, so it is told at once; 750 is not.
+        # The attempt at 690 fails differently, so it is told at once. 750 is not.
         _ticks(runner, worker, now + 44 * POLL, 8)
     finally:
         logger.remove(handler_id)
@@ -571,7 +571,7 @@ def test_failures_and_held_fires_are_counted_by_reason(manager):
 
 
 def test_the_back_off_outlives_a_runner_rebuilt_on_a_spec_reload():
-    """The CLI rebuilds the runner every few ticks; a rebuild must not reset the wait."""
+    """The CLI rebuilds the runner every few ticks. A rebuild must not reset the wait."""
     worker = _TableWorker()
     failures = HuntFailures(initial_seconds=600, jitter=_exact)
     first, now = _due_runner(_RecordingCoordinator(), worker, failures=failures)

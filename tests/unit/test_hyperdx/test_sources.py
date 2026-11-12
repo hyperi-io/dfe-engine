@@ -36,7 +36,7 @@ from dfe_engine.hyperdx.sources import (
 from tests.support.present import present
 from tests.unit.test_hyperdx.fake_hyperdx import HUMAN_TEAMS, Exploding, FakeHyperDX
 
-# The default `timeseries` header profile; `passthrough` is the one without an
+# The default `timeseries` header profile. `passthrough` is the one without an
 # event-time column at all.
 TIMESERIES_COLUMNS = ["_timestamp_load", "_timestamp", "_uuid", "_org_id", "_source", "_json"]
 PASSTHROUGH_COLUMNS = ["_timestamp_load", "_uuid", "_org_id", "_json"]
@@ -89,8 +89,8 @@ class TestSourceSpec:
         assert spec["displayedTimestampValueExpression"] == "_timestamp"
 
     def test_carries_no_name_and_no_connection(self):
-        # The name is the path segment and the connection is resolved per team;
-        # sending either would pin every team to one team's connection.
+        # The name is the path segment and the connection is resolved per team.
+        # Sending either would pin every team to one team's connection.
         spec = source_spec(database="dfe", table="filebeat", timestamp="_timestamp")
 
         assert "name" not in spec
@@ -163,8 +163,8 @@ class TestEnsureSource:
         assert client.puts == 0
 
     async def test_a_name_the_fork_seeded_is_refused(self):
-        # The fork 409s a name it seeded itself (`main`, `hunts`, the otel set);
-        # replacing it would retarget the landing view of every team.
+        # The fork 409s a name it seeded itself (`main`, `hunts`, the otel set).
+        # Replacing it would retarget the landing view of every team.
         client = FakeHyperDX(owned=False)
 
         assert (

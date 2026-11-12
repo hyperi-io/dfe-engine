@@ -1,4 +1,4 @@
-"""Tests for auth router — login, me, permissions, 401/403."""
+"""Tests for auth router -- login, me, permissions, 401/403."""
 
 import secrets
 from pathlib import Path
@@ -440,7 +440,7 @@ class TestMe:
         assert "config:write" not in data["permissions"]
 
     def test_permissions_ignore_stale_jwt_roles(self, client: TestClient, api_settings):
-        """Roles in the JWT are not used; group membership is authoritative."""
+        """Roles in the JWT are not used. Group membership is authoritative."""
 
         token = session_token(
             client.app,
@@ -738,7 +738,7 @@ class TestRolesFollowTheBoundAccount:
         assert resp.json()["code"] == "session_ended"
 
     def test_a_bound_idp_user_gets_its_accounts_roles(self, client: TestClient, app, api_settings):
-        """Alice.Smith@corp binds alice-smith-corp through the stem; the claim is not consulted."""
+        """Alice.Smith@corp binds alice-smith-corp through the stem. The claim is not consulted."""
         _link(app, "dfe-analysts")
         client.get(
             "/api/v1/auth/me",
@@ -913,7 +913,7 @@ class TestRolesFollowTheBoundAccount:
     def test_an_idp_user_added_to_a_group_by_hand_keeps_its_idp_groups(
         self, client: TestClient, app, admin_headers: dict, api_settings
     ):
-        """jane's IdP asserts dfe-admins; an operator adding her to dfe-viewers adds, not replaces."""
+        """jane's IdP asserts dfe-admins. An operator adding her to dfe-viewers adds, not replaces."""
         _link(app, "dfe-admins")
         signed_in = client.get(
             "/api/v1/auth/me",
@@ -1030,7 +1030,7 @@ class TestAMemberSeesTheGroupsItHolds:
     def test_an_idp_assertion_takes_the_group_linked_to_it_not_the_one_of_its_name(
         self, client: TestClient, app
     ):
-        """A group of the asserted name is not the IdP's; the group linked to that id is."""
+        """A group of the asserted name is not the IdP's. The group linked to that id is."""
         app.state.group_store.create("linked-analysts", ["data_viewer"])
         app.state.group_store.update(
             "linked-analysts", source_provider="oidc", source_id="dfe-analysts"
@@ -1216,7 +1216,7 @@ class TestAMembershipTakenAwayIsGoneFromTheNextRequest:
         assert client.get("/api/v1/auth/me", headers=orla).json()["org_ids"] == []
 
     def test_a_hand_edit_of_the_group_file_takes_the_org_away(self, client: TestClient, app, orla):
-        """The account record still names the group; the group file decides."""
+        """The account record still names the group. The group file decides."""
         group_file = app.state.group_store._dir / "acme-analysts.yaml"
         yaml_dump({**yaml_load(group_file), "members": []}, group_file)
 

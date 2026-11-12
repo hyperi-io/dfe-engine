@@ -29,7 +29,7 @@ from typing import Any
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.settings import default_data_database
 
-# The fallback for a caller with no settings; live callers pass
+# The fallback for a caller with no settings. Live callers pass
 # clickhouse.effective_data_database, which is the SSoT for this name.
 DFE_DATABASE = default_data_database()
 
@@ -71,7 +71,7 @@ def cost_leaderboard(
     """
     target = f"{quote_identifier(database)}.{quote_identifier(archive_table(database))}"
     sql = (
-        "SELECT dfe_id AS id, feature, tenant_id, "  # noqa: S608 - quoted database and manifest table; values bound
+        "SELECT dfe_id AS id, feature, tenant_id, "  # noqa: S608 - quoted database and manifest table, values bound
         "count() AS queries, sum(read_rows) AS read_rows, sum(read_bytes) AS read_bytes, "
         "sum(query_duration_ms) AS duration_ms, max(memory_usage) AS peak_memory "
         f"FROM {target} "

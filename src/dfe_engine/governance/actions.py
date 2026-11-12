@@ -123,7 +123,7 @@ def resolve_params(action: ActionDef, params: dict[str, Any] | None) -> dict[str
 
 
 def _substitute(value: Any, resolved: dict[str, Any]) -> Any:
-    """Whole-value substitution of a param reference; literals pass through.
+    """Whole-value substitution of a param reference. Literals pass through.
 
     The define-time model validator guarantees the reference resolves and any
     map covers every enum value, so lookups here cannot miss.
@@ -137,7 +137,7 @@ def _substitute(value: Any, resolved: dict[str, Any]) -> Any:
 
 
 def _branches(action: ActionDef, value: Any) -> list[tuple[str, Any]]:
-    """Each value a param reference can land, labelled as validate reports it; none for a literal.
+    """Each value a param reference can land, labelled as validate reports it. None for a literal.
 
     An enum map yields each mapped value and a bare enum each of its values. A bare
     number yields its two bounds, because every refusal of a number shows at one: a
@@ -188,7 +188,7 @@ def _hunt_as_written(doc: dict) -> dict:
 def _masked(target: dict, path: str, value: Any) -> Any:
     """``value`` as a reader sees it at a credential ``path``.
 
-    Its own credential fields are masked where it has them; otherwise the path is
+    Its own credential fields are masked where it has them. Otherwise the path is
     what makes it a credential, and the whole value is masked.
     """
     shown = contract.shown_var(target, path, value)
@@ -353,7 +353,7 @@ class ActionStore:
         """A stored definition with every credential it carries masked.
 
         A definition stored before credentials were refused still invokes with
-        what it holds; only what is read back is masked, and each such definition
+        what it holds. Only what is read back is masked, and each such definition
         is logged once so an operator can move it to the vars routes.
         """
         try:
@@ -417,7 +417,7 @@ class ActionStore:
         collect=False is the invoke path: the first violation raises, keeping the
         action atomic. collect=True is the validate path: every violation is
         reported in one pass so an author fixes the lot in one round trip.
-        ``resolved`` carries the checked param values; substitution happens
+        ``resolved`` carries the checked param values. Substitution happens
         BEFORE commit-policy validation so the resolved literal is what gets
         validated.
 
@@ -428,7 +428,7 @@ class ActionStore:
         as on the direct path.
 
         A hunt or rule document is then validated whole, as the hunts API
-        validates one it writes; a document that fails is refused with the
+        validates one it writes. A document that fails is refused with the
         validator's message.
         """
         docs: dict[tuple[str, str], dict] = {}
@@ -539,7 +539,7 @@ class ActionStore:
                 )
             elif cls == RULE_CLASS:
                 HuntValidator.validate_rule_source(doc, "the rule")
-                # The runner compiles the stored WHERE unchecked; refuse it here as the rules API does at save.
+                # The runner compiles the stored WHERE unchecked. Refuse it here as the rules API does at save.
                 where_refusal = refuse_rule_condition(
                     str(doc.get("where_clause") or ""), lookup_databases=self._lookup_databases
                 )
@@ -548,7 +548,7 @@ class ActionStore:
         except ValueError as exc:
             return str(exc)
         except (AttributeError, TypeError) as exc:
-            # The validator reads the shape the API writes; any other shape is refused, not a 500.
+            # The validator reads the shape the API writes. Any other shape is refused, not a 500.
             return f"it is not a {cls} document the hunts API writes ({type(exc).__name__}: {exc})"
         return None
 
@@ -564,7 +564,7 @@ class ActionStore:
         override: bool = False,
         guard: ChangeGuard | None = None,
     ) -> tuple[builtins.list[dict[str, Any]], builtins.list[str]]:
-        """Validate an UNSAVED action definition; nothing is written.
+        """Validate an UNSAVED action definition. Nothing is written.
 
         Returns (diff, errors): the diff the action would apply, plus every
         violation found - unknown class, governance-class target, commit-policy
@@ -579,10 +579,10 @@ class ActionStore:
 
         Args:
             action: The definition to check.
-            policy: The protected-var policy store; None checks no locks.
+            policy: The protected-var policy store. None checks no locks.
             override: Whether the caller holds the grant that lifts a lock.
             guard: The check invoke runs on each change against the document the
-                whole action leaves; None runs none.
+                whole action leaves. None runs none.
 
         Returns:
             The would-be diff and every violation, each naming the change it refuses.
@@ -603,7 +603,7 @@ class ActionStore:
             branches = _branches(action, ch.value)
             if not branches:
                 continue
-            # Invoke judges a value against the stored document; a branch adds only what landed lacks.
+            # Invoke judges a value against the stored document. A branch adds only what landed lacks.
             stored = self._target(ch)
             default = keda_by_default(ch.cls, ch.name)
             shown = {str(v) for v in added_violations(stored, landed, keda_by_default=default)}

@@ -873,7 +873,7 @@ class _NoTokenEntra(EntraAdapter):
     """Entra whose token request returns no token, as it does for a client secret Entra refuses.
 
     MSAL pins an https authority at login.microsoftonline.com, so the token endpoint
-    cannot be a loopback server. ``_get_token`` is the seam where its answer arrives.
+    cannot be a loopback server. ``_get_token`` is where its answer arrives.
     """
 
     def _get_token(self) -> str | None:

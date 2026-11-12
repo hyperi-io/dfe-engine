@@ -228,7 +228,7 @@ def sources():
         _make_source("syslog", match_field="tags.event.category", match_value="syslog"),
         _make_source(
             "crowdstrike-edr", match_field="_source_fetcher", match_value="crowdstrike"
-        ),  # SaaS fetcher source — still carries a match
+        ),  # SaaS fetcher source -- still carries a match
         _make_source("present-src", match_field="tags.present_marker", match_operator="exists"),
         _make_source("disabled-src", match_field="x", match_value="y", state="disabled"),
         _make_source("dormant-src", match_field="d", match_value="d", state="dormant"),

@@ -136,7 +136,7 @@ def validate_group_scope(scope: str) -> str:
 
     ``<name>`` follows the org name rule, since it is looked up in the org registry.
 
-    Returns the scope unchanged; raises ValueError otherwise.
+    Returns the scope unchanged. Raises ValueError otherwise.
     """
     if scope == GROUP_SCOPE_SYSTEM:
         return scope
@@ -184,14 +184,14 @@ class Group(BaseModel):
     source_provider: str = ""
     """Name of the identity provider this group is linked to (empty for an unlinked group)."""
     source_id: str = ""
-    """That provider's id for the group (Google group key, Entra object ID); needs a provider."""
+    """That provider's id for the group (Google group key, Entra object ID). Needs a provider."""
     org_ids: list[str] = Field(default_factory=list)
     """Organisation IDs this group has access to (empty means no org-scoped access)."""
     attributes: dict[str, Any] = Field(default_factory=dict)
     """Free-form NON-sensitive attributes (nested JSON, KVP is the floor).
 
     Stored inline on the group and round-trips through both backends. Never put
-    secrets here - a broad group read returns this blob; sensitive attributes live
+    secrets here - a broad group read returns this blob. Sensitive attributes live
     in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
 
     @field_validator("scope")
@@ -430,7 +430,7 @@ class GroupStore:
         :func:`~dfe_engine.auth.membership.linked_groups`, which also checks the provider.
 
         When two groups share a source_id (a misconfiguration) the
-        last-by-sorted-name wins; that is deterministic rather than correct, and
+        last-by-sorted-name wins. That is deterministic rather than correct, and
         such a collision is a config error worth avoiding.
         """
         index: dict[str, Group] = {}
@@ -558,7 +558,7 @@ class GroupStore:
     def resolve_roles_for_member(self, username: str) -> builtins.list[str]:
         """Return the sorted unique list of roles held by a member across all groups.
 
-        Scans every group file; a user accumulates roles from all groups they
+        Scans every group file. A user accumulates roles from all groups they
         belong to.  Returns an empty list if the user is in no groups.
         """
         roles: set[str] = set()

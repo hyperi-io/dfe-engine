@@ -190,7 +190,7 @@ def _late_claimant(ch_client, db: str, holder: ChCoordinator, won: list[bool]):
 
 
 def test_a_claim_inserted_after_the_holder_won_does_not_steal_the_hunt(ch_client, dfe_db):
-    """a saw the hunt free and won; b saw it free too, but inserted after a had resolved."""
+    """a saw the hunt free and won. B saw it free too, but inserted after a had resolved."""
     a = _coord(ch_client, dfe_db, "a")
     a.ensure_schema()
     a_won: list[bool] = []

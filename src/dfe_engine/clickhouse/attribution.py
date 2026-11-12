@@ -85,7 +85,7 @@ def tags_context(**fields: Any) -> Iterator[None]:
 def merge_log_comment(settings: dict[str, Any] | None) -> dict[str, Any]:
     """Return a settings dict with the current tags' ``log_comment`` merged in.
 
-    A caller-supplied ``log_comment`` is preserved (``setdefault``); otherwise the
+    A caller-supplied ``log_comment`` is preserved (``setdefault``). Otherwise the
     ambient :class:`DfeQueryTags` JSON is used. Always returns a fresh dict so the
     caller's is never mutated.
     """

@@ -17,7 +17,7 @@ carries:
 - **directory** (standalone): ``<schemas_dir>/derived/`` as a plain YAML tree,
   used when no gitops deploy repo is configured.
 
-A registry key is ``<group>/<name>`` or a bare ``<name>``; the reference a source
+A registry key is ``<group>/<name>`` or a bare ``<name>``. The reference a source
 carries adds the ``derived/`` segment in front, and both backends resolve that
 reference under :meth:`DerivedSchemaRegistry.reference_root`.
 """
@@ -96,7 +96,7 @@ def derived_reference_root(settings: Any) -> Path | None:
     """Root a ``derived/<group>/<name>`` reference resolves under, for this deployment.
 
     Gitops on puts the documents in the deploy repo, so the root is the class
-    directory's parent; otherwise they sit under the runtime schemas tree. None
+    directory's parent. Otherwise they sit under the runtime schemas tree. None
     when the deployment configures neither, which leaves the reference to be
     resolved as it was given.
     """
@@ -306,7 +306,7 @@ class DerivedSchemaRegistry:
         summary: str = "",
         routing: ReviewRouting | None = None,
     ):
-        """Write one document; returns the destination label for the save log."""
+        """Write one document. Returns the destination label for the save log."""
         if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
 

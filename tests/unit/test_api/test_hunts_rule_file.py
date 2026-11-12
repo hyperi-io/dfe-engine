@@ -10,7 +10,7 @@
 The rule registry writes ``{name}.yaml`` and the runner's rule compiler reads the
 same file, so that is the file a hunt write looks for: in ``hunts.rules_dir``, or
 in the deploy repo's ``config/rules`` once the registry is backed by it. A rule
-not there yet is a warning, because a hunt may be drafted before its rules; a file
+not there yet is a warning, because a hunt may be drafted before its rules. A file
 the runner could not read as a YAML mapping is refused.
 """
 

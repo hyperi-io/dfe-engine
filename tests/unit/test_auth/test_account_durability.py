@@ -68,7 +68,7 @@ class _FakeForge:
         return PullRequest(number=7, url="http://forge.local/pr/7", branch=head)
 
 
-# ── Git-disabled (file share) ────────────────────────────────
+# -- Git-disabled (file share) --------------------------------
 
 
 def test_disabled_publish_returns_none_and_file_share_state():
@@ -103,7 +103,7 @@ def account_durability_file_share():
     )
 
 
-# ── Dev / solo: direct commit, immediately durable ───────────
+# -- Dev / solo: direct commit, immediately durable -----------
 
 
 def test_dev_direct_commit_is_merged(tmp_path):
@@ -148,7 +148,7 @@ def test_dev_autonmerge_flag_reports_auto_merged(tmp_path):
     assert ad.state_from_outcome(gc, outcome).auto_merge is True
 
 
-# ── Production + team: review PR, pending until merged ───────
+# -- Production + team: review PR, pending until merged -------
 
 
 def test_prod_team_opens_pr_and_is_pending(tmp_path):
@@ -207,7 +207,7 @@ def test_prod_team_no_forge_falls_back_to_cli(tmp_path):
     assert gc.get(ad.ACCOUNTS_CLASS, "admin")["password_hash"] == _HASH_A  # main unchanged
 
 
-# ── Steady state (setup-status) ──────────────────────────────
+# -- Steady state (setup-status) ------------------------------
 
 
 def test_steady_state_merged_when_git_matches_live(tmp_path):
@@ -239,7 +239,7 @@ def test_steady_state_unmerged_when_not_yet_persisted(tmp_path):
     assert state.merged is False
 
 
-# ── Hydration + seed ─────────────────────────────────────────
+# -- Hydration + seed -----------------------------------------
 
 
 def test_hydrate_restores_accounts_from_deploy_repo(tmp_path):
@@ -261,7 +261,7 @@ def test_hydrate_is_a_noop_when_gitops_disabled(tmp_path):
     assert ad.hydrate_from_deploy_repo(None, fresh) == 0
 
 
-# ── Hydration never moves a session end back ─────────────────
+# -- Hydration never moves a session end back -----------------
 
 
 def _live(tmp_path: Path, account: Account) -> AccountStore:
@@ -337,7 +337,7 @@ def test_hydrate_writes_a_later_session_end_back_to_the_deploy_repo(tmp_path):
     assert present(rebuilt.get("admin")).session_marker() == ended.session_marker()
 
 
-# ── A session end reaches the deploy repo ────────────────────
+# -- A session end reaches the deploy repo --------------------
 
 
 def test_a_session_end_is_committed_onto_the_deploy_repos_copy(tmp_path):
@@ -397,7 +397,7 @@ def test_publish_direct_carries_the_summary_and_actor_into_the_commit(tmp_path):
     assert "kaz" in message
 
 
-# ── Remote merge poll (step 2 of the review-PR path) ─────────
+# -- Remote merge poll (step 2 of the review-PR path) ---------
 
 
 def test_remote_state_file_share_when_disabled(tmp_path):
@@ -431,7 +431,7 @@ def test_remote_state_flips_merged_when_remote_catches_up(tmp_path):
     )
     engine_gc = GitCrud(engine)
 
-    # The engine rotated the password to B and opened a PR; remote main still has A.
+    # The engine rotated the password to B and opened a PR. Remote main still has A.
     store = AccountStore(tmp_path / "live")
     store.put(_account(password_hash=_HASH_B))
     pending = ad.remote_state(engine_gc, store, "admin", environment=PROD, mode="team")
@@ -451,7 +451,7 @@ def test_read_remote_file_none_without_remote(tmp_path):
     assert repo.read_remote_file("governance/rbac/accounts/admin.yaml") is None
 
 
-# ── Local admin gating (only the admin's doc is git-persisted) ─────
+# -- Local admin gating (only the admin's doc is git-persisted) -----
 
 
 def test_is_local_admin_matches_the_admin(monkeypatch):
@@ -463,13 +463,13 @@ def test_is_local_admin_matches_the_admin(monkeypatch):
 
 
 def test_is_local_admin_follows_the_configured_admin_name():
-    # DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME renames the admin; without the name threaded
+    # DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME renames the admin. Without the name threaded
     # through, the renamed account loses its git-durability path entirely.
     assert ad.is_local_admin("root", "root") is True
     assert ad.is_local_admin("admin", "root") is False
 
 
-# ── breakglass: one hash in the governance settings ──────────
+# -- breakglass: one hash in the governance settings ----------
 
 
 def _breakglass_live(tmp_path: Path, password_hash: str) -> AccountStore:
@@ -564,6 +564,6 @@ def test_breakglass_state_follows_the_remote(tmp_path):
 def test_not_git_backed_state_is_durable():
     state = ad.not_git_backed_state()
     assert state.enabled is False
-    assert state.committed is False  # not in git; durable in its own store
+    assert state.committed is False  # not in git, durable in its own store
     assert state.merged is True
     assert state.pending is None

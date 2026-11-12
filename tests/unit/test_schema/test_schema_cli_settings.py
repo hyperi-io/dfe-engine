@@ -50,7 +50,7 @@ def production_without_secret(monkeypatch):
     for key, value in _PRODUCTION_NO_SECRET.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv("DFE_ENGINE_API_JWT_SECRET", raising=False)
-    # load_settings() re-reads cwd/.env; a developer secret must not sneak back in.
+    # load_settings() re-reads cwd/.env. A developer secret must not sneak back in.
     monkeypatch.setattr("dfe_engine.env_files.load_env_files", lambda: None)
 
 
@@ -128,7 +128,7 @@ def test_a_zero_default_declares_no_ttl_on_the_time_series_tables_only(monkeypat
 
 
 def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(monkeypatch):
-    """The shipped landing, detection and OTel tables inherit it; the state tables never do."""
+    """The shipped landing, detection and OTel tables inherit it. The state tables never do."""
     monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
 
     ttls = _ttls(monkeypatch)

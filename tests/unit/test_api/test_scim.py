@@ -43,7 +43,7 @@ GROUP_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Group"
 LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 
 
-# ── Pure mapper round-trips ──────────────────────────────────
+# -- Pure mapper round-trips ----------------------------------
 
 
 class TestMapperRoundTrips:
@@ -94,7 +94,7 @@ class TestMapperRoundTrips:
         assert fields["source_provider"] == "scim"
 
 
-# ── User CRUD via the API ────────────────────────────────────
+# -- User CRUD via the API ------------------------------------
 
 
 class TestScimUsers:
@@ -313,7 +313,7 @@ class TestScimUsers:
         assert resp.status_code == 403
 
 
-# ── A refused body never echoes what it carried ──────────────
+# -- A refused body never echoes what it carried --------------
 
 
 def _echoes(secret: str, text: str, window: int = 8) -> bool:
@@ -403,7 +403,7 @@ class TestScimRefusalsCarryNoPassword:
         assert not _echoes(secret, resp.text)
 
 
-# ── Group CRUD via the API ───────────────────────────────────
+# -- Group CRUD via the API -----------------------------------
 
 
 class TestScimGroups:
@@ -437,7 +437,7 @@ class TestScimGroups:
         assert group.members == ["gm-1"]
         assert group.source_id == "grp-1"
         assert group.source_provider == "scim"
-        # gm-1 is IdP-owned, so its own list stays its assertion; /Users reads membership off the group.
+        # gm-1 is IdP-owned, so its own list stays its assertion. /Users reads membership off the group.
         assert app.state.account_store.get("gm-1").groups == []
         user = client.get(f"{BASE}/Users/gm-1", headers=admin_headers).json()
         assert [membership["value"] for membership in user["groups"]] == ["scim-team"]
@@ -556,7 +556,7 @@ class TestScimGroups:
         )
         assert resp.status_code == 200, resp.text
         assert app.state.group_store.get("replace-grp").members == ["rp-2"]
-        # Both are IdP-owned, so neither list is written; /Users reads membership off the group.
+        # Both are IdP-owned, so neither list is written. /Users reads membership off the group.
         stored = [app.state.account_store.get(name).groups for name in ("rp-1", "rp-2")]
         listed = [
             client.get(f"{BASE}/Users/{name}", headers=admin_headers).json().get("groups")
@@ -584,7 +584,7 @@ class TestScimGroups:
         assert "del-grp" not in app.state.account_store.get("dg-1").groups
 
 
-# ── List filters (RFC 7644 section 3.4.2.2) ──────────────────
+# -- List filters (RFC 7644 section 3.4.2.2) ------------------
 
 
 # kind -> (schema, filter attribute, the other kind's attribute, item field, app.state store,
@@ -676,7 +676,7 @@ def test_a_request_with_no_token_is_401(client, kind):
     assert client.get(f"{BASE}/{kind}", params={"filter": "garbage"}).status_code == 401
 
 
-# ── The protected-name floor (issue #505) ────────────────────
+# -- The protected-name floor (issue #505) --------------------
 
 
 PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
@@ -799,7 +799,7 @@ class TestScimProtectedNamesStillWork:
     def test_a_refused_batch_leaves_the_other_members_in_place(
         self, recovery_accounts, client, admin_headers
     ):
-        """The remove-with-no-filter form clears the group; nothing may be detached."""
+        """The remove-with-no-filter form clears the group. Nothing may be detached."""
         recovery_accounts.state.group_store.add_member(RECOVERY_GROUP, "operator")
         resp = client.patch(
             f"{BASE}/Groups/{RECOVERY_GROUP}",
@@ -814,7 +814,7 @@ class TestScimProtectedNamesStillWork:
         assert {"admin", BREAKGLASS, "operator"} <= set(members)
 
 
-# ── Discovery ────────────────────────────────────────────────
+# -- Discovery ------------------------------------------------
 
 
 class TestScimDiscovery:

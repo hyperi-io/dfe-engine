@@ -8,7 +8,7 @@
 """``resolve_orgs`` and ``colliding_org`` over org markers.
 
 A marker is an org's name or one of its tenant ids. Either names that org and
-maps to exactly that org's tenant ids; anything that does not name exactly one
+maps to exactly that org's tenant ids. Anything that does not name exactly one
 org maps to nothing. ``colliding_org`` is the write-time guard: a write may not
 plant a marker another org already owns.
 """

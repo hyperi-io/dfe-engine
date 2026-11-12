@@ -92,7 +92,7 @@ def admin_account_name(override: str = "") -> str:
 def seeded_account_email(username: str, recovery_email: str = "") -> str:
     """Contact email for a bootstrap-seeded local account.
 
-    ``DFE_ENGINE_RECOVERY_EMAIL`` wins when set; otherwise ``{username}@dfe.local``.
+    ``DFE_ENGINE_RECOVERY_EMAIL`` wins when set. Otherwise ``{username}@dfe.local``.
     """
     if recovery_email.strip():
         return recovery_email.strip()
@@ -140,7 +140,7 @@ def admin_on_default_password(
     are fields the password-change path writes, so this is a store read, no bcrypt.
 
     Args:
-        account_store: The live account store; None while bootstrap is in flight.
+        account_store: The live account store. None while bootstrap is in flight.
         admin_name: The local admin's username.
         admin_password: The configured admin password.
 
@@ -170,7 +170,7 @@ def require_admin_password(admin_password: str, environment: str, *, retired: bo
     ``retired`` lifts the refusal: a retired admin is never seeded, so an absent
     password is the intended end state and the operator has deleted it.
 
-    A dev posture on the default starts with a warning; whether the admin is still
+    A dev posture on the default starts with a warning. Whether the admin is still
     on it is :func:`admin_on_default_password`, read where it is reported.
 
     Raises:
@@ -299,7 +299,7 @@ def bootstrap_auth(
     if not group_store.list():
         _seed_groups(group_store)
         logger.info("Seeded default groups")
-    # The writes refuse a new collision; one already stored is reported, not repaired.
+    # The writes refuse a new collision. One already stored is reported, not repaired.
     warn_identifier_collisions(groups=group_store.list())
 
     # Restore accounts from the durable deploy repo BEFORE the reconcile, so an
@@ -365,7 +365,7 @@ def _disable_retired_admin(
     account = account_store.get(admin_name)
     if account is not None and account.enabled:
         # The retirement fact in the deploy repo is what authorises disabling a
-        # protected name; the store refuses it from anywhere else.
+        # protected name. The store refuses it from anywhere else.
         account_store.update(admin_name, enabled=False, allow_protected=True)
         logger.info(f"Local admin '{admin_name}' is retired; disabled the account")
 

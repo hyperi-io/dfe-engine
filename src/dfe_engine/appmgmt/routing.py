@@ -107,7 +107,7 @@ class RoutingStatus:
     """Each derived block the sources call for now, by name."""
 
     deployed: dict[str, Any]
-    """The same blocks as the overlay carries them; a block it lacks is absent here."""
+    """The same blocks as the overlay carries them. A block it lacks is absent here."""
 
     @property
     def drift(self) -> bool:
@@ -277,7 +277,7 @@ def _fetcher_route(
     """One route: which fetched records go to ANOTHER source's landing, and where.
 
     The target has to exist and be live, because a route to a source with no
-    table sends records nowhere; and it has to be on the same transport, because
+    table sends records nowhere. And it has to be on the same transport, because
     a fetcher delivers over one.
 
     Returns the destination's name, the transport block the fetcher builds a
@@ -344,7 +344,7 @@ def _fetcher(
 ) -> dict[str, Any]:
     """What this fetcher instance polls, where the records it pulls are sent, and their org.
 
-    A source is one connector type, so the composed block carries one; a stored
+    A source is one connector type, so the composed block carries one. A stored
     source that spans two is refused here rather than deployed, which is the
     second place the rule holds (the first is the save path).
 

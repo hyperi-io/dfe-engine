@@ -8,14 +8,13 @@
 """Direct-to-main vs review-PR, decided BEFORE the write and enforced in code.
 
 The auto-merge deployment gate (gitcrud/auto_merge.py) says a production DFE_ENGINE_ENV
-with DFE_ENGINE_GITOPS_MODE=team may NOT auto-merge, and the design says that posture has
-NO escape hatch: a governed write must not land straight on the deploy repo's main
-(CLAUDE.md gitops section; docs/control-plane/gitops-commit-standard.md section 4). Historically
-that refusal was only a response badge -- the commit+push happened first
-regardless. ``route_write`` closes that: when the gate refuses, the write is
-committed to a short-lived branch and a review PR is opened via the forge seam;
-if no forge is configured it HARD-FAILS (never main). Dev / solo / effective
-auto-merge keep committing straight to main -- the sanctioned fast path, unchanged.
+with DFE_ENGINE_GITOPS_MODE=team may NOT auto-merge, and that posture has NO escape
+hatch: a governed write must not land straight on the deploy repo's main
+(docs/control-plane/gitops-commit-standard.md section 4). ``route_write`` enforces it
+before the write: when the gate refuses, the write is committed to a short-lived
+branch and a review PR is opened through the forge interface. If no forge is
+configured it HARD-FAILS (never main). Dev / solo / effective auto-merge commit
+straight to main.
 """
 
 import re
@@ -77,7 +76,7 @@ class ReviewRouting:
     pr_urls: list[str] = field(default_factory=list)
 
     def record(self, outcome: WriteOutcome | None) -> None:
-        """Fold one write's outcome in; a direct or off-gitops write adds nothing."""
+        """Fold one write's outcome in. A direct or off-gitops write adds nothing."""
         if outcome is None or not outcome.review_required:
             return
         self.review_required = True
@@ -96,7 +95,7 @@ class ReviewRouting:
 
     @property
     def first_pr_url(self) -> str | None:
-        """The PR to send an operator to first; the rest ride on the response body."""
+        """The PR to send an operator to first. The rest ride on the response body."""
         return self.pr_urls[0] if self.pr_urls else None
 
 
@@ -125,10 +124,10 @@ def route_write(
     """Resolve direct-vs-PR, then perform the write on the chosen target.
 
     ``write(branch)`` does the actual gitcrud write: ``branch=""`` commits to the
-    tracked branch (main); a non-empty branch commits to that review branch. It
+    tracked branch (main). A non-empty branch commits to that review branch. It
     must return an object exposing ``changed`` + ``commit_sha`` (PublishResult or
     InvokeResult). Enforcement is scoped to the auto-merge gate refusal (team +
-    production); every other posture keeps its current direct-to-main behaviour.
+    production). Every other posture keeps its current direct-to-main behaviour.
     """
     state = resolve_state(gc, environment=environment, mode=mode)
     resolved = resolve_mode(

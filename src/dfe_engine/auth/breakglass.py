@@ -60,7 +60,7 @@ KEY_ENABLED = "breakglass.enabled"
 
 
 def _settings_doc(crud: GitCrud) -> dict:
-    """The governance auth settings doc; absent or unreadable reads as empty.
+    """The governance auth settings doc. Absent or unreadable reads as empty.
 
     Fail-soft on purpose: a hand-edited auth.yaml that no longer parses must not
     500 every login and every startup. An empty doc means no stored hash (no

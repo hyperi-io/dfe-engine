@@ -51,8 +51,8 @@ class Pipeline:
         Args:
             name (str): The name of the pipeline.
             output_dir (str): The directory where the pipeline configurations will be written.
-            dfe_config (Dict): A dictionary containing the DFE configuration settings.
-            pipeline_config (Dict): A dictionary containing the pipeline configuration settings.
+            dfe_config (Dict): The DFE configuration settings.
+            pipeline_config (Dict): The pipeline configuration settings.
             logger (Logger, optional): The logger object for logging messages. Defaults to None.
             ingestion_pipeline_template_path: The pipeline template. None reads
                 ``global_settings.helm_template`` from the DFE config.
@@ -328,10 +328,10 @@ class Pipeline:
         """Converts all the environment variables to strings.
 
         Args:
-            env_vars (Dict): A dictionary containing the environment variables.
+            env_vars (Dict): The environment variables.
 
         Returns:
-            Dict: A dictionary containing the environment variables with all values as strings.
+            Dict: The environment variables with all values as strings.
         """
         # if the var looks like a list then wrap it in a quotes
         str_env_vars = {}

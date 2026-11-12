@@ -121,7 +121,7 @@ class TestDeploymentFacts:
     def test_a_target_the_deployer_did_not_name_is_not_taken_for_compose(
         self, client, app, admin_headers
     ):
-        # Only the one target that consumes no overlay reports False; reporting it
+        # Only the one target that consumes no overlay reports False. Reporting it
         # for an unnamed target would tell a console the routing is dead wherever
         # the deployer left the value out.
         assert app.state.settings.deployment.target == "unknown"
@@ -154,7 +154,7 @@ class TestDeploymentFacts:
         assert body["ui"] == "v1.5.1"
 
     def test_the_deploy_repo_pin_wins_over_the_chart(self, client, app, admin_headers, tmp_path):
-        # The pins are what the operator chose; the chart value is only what
+        # The pins are what the operator chose. The chart value is only what
         # happened to render this pod.
         _wire(app, tmp_path, PINS + 'overrides:\n  apps:\n    dfe-ui: "v1.20.0@sha256:abc"\n')
         app.state.settings.ui_version = "v1.5.1"

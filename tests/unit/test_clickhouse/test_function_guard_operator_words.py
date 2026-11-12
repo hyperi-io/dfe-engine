@@ -9,7 +9,7 @@
 
 sqlglot tokenises ``MOD`` as a plain name, which the guard would otherwise take
 for the end of an operand and so for the IN operator. ``AND``, ``OR``, ``NOT``
-and ``XOR`` carry token types of their own and were never read that way; they
+and ``XOR`` carry token types of their own and were never read that way. They
 are pinned here so a tokenizer change cannot slip them through.
 """
 

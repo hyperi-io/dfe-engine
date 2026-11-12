@@ -14,7 +14,7 @@ POST /authoring/ai/create        -> AI query from a prompt (QueryGenerator)
 POST /authoring/ai/generate-vrl  -> AI VRL from samples (LogParser)
 POST /authoring/ai/suggest-schema-> AI meta-schema promotions (SchemaOptimiser)
 
-The AI endpoints submit to the AI module registry - stub modules by default; real
+The AI endpoints submit to the AI module registry - stub modules by default. Real
 models register under the same name (see dfe_engine.ai). RBAC: rules:read.
 """
 

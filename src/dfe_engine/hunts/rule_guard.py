@@ -311,7 +311,7 @@ def preview_sql(
         source_db, source_table, (column,), where, window, tenant_condition=fence
     )
     return (
-        f"SELECT\n"  # noqa: S608 - quoted source and column; an integer window; quoted tenant ids; the rule itself
+        f"SELECT\n"  # noqa: S608 - quoted source and column, an integer window, quoted tenant ids, the rule itself
         f"    (SELECT count() FROM {source} WHERE {in_window}) AS {_TOTAL},\n"
         f"    count() AS {_MATCHED}\n"
         f"FROM {matched}"

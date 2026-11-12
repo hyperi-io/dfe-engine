@@ -8,7 +8,7 @@
 """Unit tests for the pure parts of ChRbacReconciler (no cluster).
 
 The apply path (execute + discovery against real CH) is covered by the real-CH
-integration tests; here we prove the ordered DDL composition and the stale-object
+integration tests. Here we prove the ordered DDL composition and the stale-object
 diff, both of which are pure functions.
 """
 
@@ -57,7 +57,7 @@ def captured_logs() -> Generator[list[str]]:
 
 
 class _FakeAdminClient:
-    """Records executed DDL; every discovery query returns no rows but the group-user one.
+    """Records executed DDL. Every discovery query returns no rows but the group-user one.
 
     Enough to exercise the whole ``reconcile`` apply path without a cluster: the
     empty result_rows mean no existing objects to drop, so only the rendered
@@ -89,7 +89,7 @@ class _FakeAdminClient:
 
 
 class _DiscoveringAdminClient(_FakeAdminClient):
-    """Records executed DDL; the fence's discovery finds ``ORG_TABLES`` carrying ``_org_id`` and ``REACHABLE_TABLES`` in the granted database."""
+    """Records executed DDL. The fence's discovery finds ``ORG_TABLES`` carrying ``_org_id`` and ``REACHABLE_TABLES`` in the granted database."""
 
     def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
         """Answer the fence's two discovery reads, and every other read as the base client does."""
@@ -105,8 +105,8 @@ def _rec() -> ChRbacReconciler:
     return ChRbacReconciler(admin_client=None)
 
 
-# ── _hash_for (mint-or-reuse) ───────────────────────────────────────
-# Real file-backed store, no mocks. Reuse is load-bearing: CREATE USER IF NOT
+# -- _hash_for (mint-or-reuse) ---------------------------------------
+# Real file-backed store, no mocks. Reuse is required: CREATE USER IF NOT
 # EXISTS never rotates an existing password, so a fresh mint on every reconcile
 # would leave ClickHouse holding a password the store no longer knows.
 
@@ -119,7 +119,7 @@ class TestHashFor:
         store = self._store(tmp_path)
         rec = ChRbacReconciler(admin_client=None, secrets_store=store)
         digest = rec._hash_for("ch/service/loader")
-        # the plaintext is recoverable from the store; the hash is of that plaintext
+        # the plaintext is recoverable from the store. The hash is of that plaintext
         plaintext = store.get("ch/service/loader")
         assert digest == hashlib.sha256(plaintext.encode()).hexdigest()
 
@@ -161,9 +161,9 @@ class TestHashFor:
         assert hashlib.sha256(stored.encode()).hexdigest() == stored_hash
 
 
-# ── password <-> served-secret sync (the bug) ───────────────────────
+# -- password <-> served-secret sync (the bug) -----------------------
 # The pinned CH user authenticates with the password whose sha256 hash reconcile
-# sets on it; /api/v1/hyperdx/connection serves the plaintext at the SAME secret
+# sets on it. /api/v1/hyperdx/connection serves the plaintext at the SAME secret
 # path (ch/orgs/<org> for an org, ch/service/<name> for a service user). These
 # assert the two agree AFTER a reconcile - so the hyperdx embed's connect can
 # never hit CH auth 516 because CREATE USER IF NOT EXISTS left a stale password.
@@ -353,7 +353,7 @@ class TestProvidedServicePassword:
         assert store.get("ch/service/hunt_runner") == "given-by-deploy"
 
     def test_a_provided_password_is_not_trimmed(self, tmp_path):
-        """The runner reads the same Secret verbatim; one stray byte is an auth failure."""
+        """The runner reads the same Secret verbatim. One stray byte is an auth failure."""
         client = _FakeAdminClient()
         ChRbacReconciler(
             client,
@@ -766,7 +766,7 @@ class TestRenderAll:
         assert "GRANT `dfe_hunt_tier_2_role` TO `dfe_grp_hunter`" in "\n".join(stmts)
 
     def test_binding_org_unknown_renders_unrestricted_group_user(self):
-        """derive_group_bindings skips unknown orgs upstream; render_all's own
+        """derive_group_bindings skips unknown orgs upstream. render_all's own
         guard degrades an unknown binding org to no pin rather than crashing."""
         tiers, _service, _orgs, _b = self._inputs()
         b = [GroupChBinding(group="x", org="ghost")]  # no Org 'ghost' exists

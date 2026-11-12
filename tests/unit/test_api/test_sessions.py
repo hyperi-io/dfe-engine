@@ -191,11 +191,11 @@ class TestAccountAccess:
 
 
 class TestMaximumSessionAge:
-    """A refresh reads the clock once; the tests freeze that reading so every expiry is exact."""
+    """A refresh reads the clock once. The tests freeze that reading so every expiry is exact."""
 
     @pytest.fixture
     def now(self, app) -> int:
-        # Behind the wall clock so a second clock read while signing lands past the cap,
+        # Behind the real clock so a second clock read while signing lands past the cap,
         # and inside the verify leeway so a one-second token still verifies.
         frozen = int(time.time()) - 10
         app.dependency_overrides[request_time] = lambda: frozen

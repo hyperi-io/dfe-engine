@@ -104,7 +104,7 @@ async def test_elastic_converter_declared_content_length_too_large_returns_413(
 async def test_a_config_file_limit_reaches_the_converter(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # The app's settings can carry a config file's values; get_settings() reads no file.
+    # The app's settings can carry a config file's values. get_settings() reads no file.
     monkeypatch.delenv(_LIMIT_ENV, raising=False)
     monkeypatch.chdir(tmp_path)
     config = tmp_path / "dfe.yaml"

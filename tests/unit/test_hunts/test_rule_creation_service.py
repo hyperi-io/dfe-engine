@@ -1,4 +1,4 @@
-"""Tests for RuleCreationService — HyperDX-aware rule creation pipeline."""
+"""Tests for RuleCreationService -- HyperDX-aware rule creation pipeline."""
 
 import random
 import re
@@ -23,7 +23,7 @@ def service():
     return RuleCreationService()
 
 
-# ── RuleCreateRequest model ─────────────────────────────────
+# -- RuleCreateRequest model ---------------------------------
 
 
 class TestRuleCreateRequest:
@@ -68,7 +68,7 @@ class TestRuleCreateRequest:
         assert req.estimate_cost is True
 
 
-# ── Raw SQL rule creation ───────────────────────────────────
+# -- Raw SQL rule creation -----------------------------------
 
 
 class TestCreateRuleRaw:
@@ -144,7 +144,7 @@ class TestCreateRuleRaw:
         assert result.rule.source == "crowdstrike_edr"
 
 
-# ── HyperDX SQL rule creation ──────────────────────────────
+# -- HyperDX SQL rule creation ------------------------------
 
 
 class TestCreateRuleHyperDX:
@@ -240,7 +240,7 @@ class TestCreateRuleHyperDX:
         assert result.sanitize_summary == {}
 
     def test_preserves_every_detection_predicate(self, service):
-        """Every user predicate survives; the window, grouping and SETTINGS do not."""
+        """Every user predicate survives. The window, grouping and SETTINGS do not."""
         result = service.create_rule(
             RuleCreateRequest(
                 name="Detection Logic",
@@ -307,7 +307,7 @@ class TestCreateRuleHyperDX:
         assert "process_name" in result.rule.where_clause
 
 
-# ── SQL validation ──────────────────────────────────────────
+# -- SQL validation ------------------------------------------
 
 
 class TestSqlValidation:
@@ -394,7 +394,7 @@ class TestSqlValidation:
         assert any(e.message.startswith(refusal) for e in errors), errors
 
     def test_raw_sql_grouping_without_having_is_a_row_filter(self, service):
-        """The grouping only shapes the view; the rule matches the rows the WHERE keeps."""
+        """The grouping only shapes the view. The rule matches the rows the WHERE keeps."""
         sql = "SELECT host, count() FROM dfe.main WHERE failed = 1 GROUP BY host"
         result = service.create_rule(RuleCreateRequest(name="Grouped", user_sql=sql), rule_id="r2")
         assert result.sql_errors == []
@@ -459,7 +459,7 @@ class TestSqlValidation:
         assert len(result.sql_errors) > 0
 
 
-# ── Cost estimation ─────────────────────────────────────────
+# -- Cost estimation -----------------------------------------
 
 
 _NO_CLICKHOUSE = (
@@ -536,7 +536,7 @@ class TestVolumePreview:
             ),
             rule_id="cost2",
         )
-        # No source table → cost estimation skipped
+        # No source table -> cost estimation skipped
         assert result.cost_estimate is None
 
     def test_a_rule_that_matches_everything_is_named_and_never_measured(self, service):
@@ -570,7 +570,7 @@ class TestVolumePreview:
         assert ce.band == VolumeBand.UNMEASURED
 
 
-# ── AI analysis stub ────────────────────────────────────────
+# -- AI analysis stub ----------------------------------------
 
 
 class TestAIAnalysisStub:
@@ -615,7 +615,7 @@ class TestAIAnalysisStub:
         assert stub.cost_estimate.window_minutes == 10
 
 
-# ── Sanitize summary ───────────────────────────────────────
+# -- Sanitize summary ---------------------------------------
 
 
 class TestSanitizeSummary:
@@ -735,7 +735,7 @@ class TestMaskQuoted:
         assert time.perf_counter() - started < 2.0
 
 
-# ── EXPLAIN PLAN against the source ──────────────────────────
+# -- EXPLAIN PLAN against the source --------------------------
 
 
 class _PlanClient:

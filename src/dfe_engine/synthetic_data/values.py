@@ -8,7 +8,7 @@
 """Semantic classification and typed value generation.
 
 The classifier maps a schema column (name tokens + primitive type + attributes
-+ comment) to a semantic type; the generator renders a realistic value for
++ comment) to a semantic type. The generator renders a realistic value for
 that semantic type from the event's entity context, so values cohere within an
 event (the hostname, FQDN, IP and MAC all belong to the same generated host).
 
@@ -187,7 +187,7 @@ _NUMERIC_TYPES = frozenset({"integer", "int", "float", "double", "long"})
 def classify(column: SchemaColumn, *, provider: str = "aws") -> Inference:
     """Classify a schema column into a semantic family.
 
-    Rules are ordered most-specific first; the fallbacks at the end key off
+    Rules are ordered most-specific first. The fallbacks at the end key off
     the primitive type alone. ``provider`` seeds cloud-specific vocabularies
     (regions) and normally comes from the meta-schema path (``meta/aws/...``).
 

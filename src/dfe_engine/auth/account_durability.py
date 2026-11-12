@@ -24,7 +24,7 @@ there instead. Both go through the normal governed-write routing
 is configured, hands back the git commands to merge the branch.
 
 When gitops is disabled (no deploy repo) the live store IS the durable store -- a
-plain file share -- so there is nothing to mirror and ``git_merged`` is trivially
+plain file share -- so there is nothing to mirror and ``git_merged`` is
 true.
 
 A session end skips that routing and goes straight to main on every posture
@@ -153,7 +153,7 @@ def _cli_merge_command(gc: GitCrud, branch: str) -> str:
 
 
 def _commit_message(username: str, summary: str, actor: str, request_id: str) -> str:
-    """A standard-conforming commit message; username rides an audit trailer.
+    """A standard-conforming commit message. Username rides an audit trailer.
 
     The scope stays the fixed ``account`` so the subject never exceeds the 50-char
     limit for a long username -- the username goes in a ``DFE-Account`` trailer.
@@ -426,7 +426,7 @@ def breakglass_state(
     """Whether the deploy repo's main carries the ``breakglass`` password the store serves.
 
     The remote is read where there is one, so a review merged on the forge shows as
-    merged before this clone pulls it; a local-init repo is its own truth.
+    merged before this clone pulls it. A local-init repo is its own truth.
     """
     if gc is None or account_store is None:
         return _FILE_SHARE_STATE
@@ -500,7 +500,7 @@ def publish_session_end(gc: GitCrud | None, account: Account, *, actor: str) -> 
         return
     try:
         _commit_session_state(gc, account, actor)
-    except Exception as exc:  # durability is best-effort; never fail the caller
+    except Exception as exc:  # durability is best-effort, never fail the caller
         logger.warning(
             "Session end not persisted to the deploy repo",
             account=account.username,
@@ -565,5 +565,5 @@ def publish_direct(
             actor,
             _commit_message(account.username, summary, actor, ""),
         )
-    except Exception as exc:  # durability is best-effort; never break startup
+    except Exception as exc:  # durability is best-effort, never break startup
         logger.warning("Account change not persisted to the deploy repo", error=str(exc))

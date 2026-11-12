@@ -9,7 +9,7 @@
 
 The deployer knows which consoles it stood up and where a browser reaches each
 one, so it hands the engine that list in ``deployment.admin_links``
-(``DFE_ENGINE_ADMIN_LINKS``) and the engine reports it; nothing here discovers a UI. An
+(``DFE_ENGINE_ADMIN_LINKS``) and the engine reports it. Nothing here discovers a UI. An
 entry that does not validate is dropped, logged and counted on
 ``admin_links_dropped_total`` by reason, so a typo loses that entry and never
 the engine.
@@ -128,7 +128,7 @@ def _validation_summary(exc: ValidationError) -> str:
 
 
 def parse_links(raw: str | list[Any], metrics: AdminLinkMetrics) -> list[AdminLink]:
-    """The valid entries of *raw*, in order; each invalid one is dropped, logged and counted.
+    """The valid entries of *raw*, in order. Each invalid one is dropped, logged and counted.
 
     Args:
         raw: ``deployment.admin_links`` -- the JSON text the env var carries, or a
@@ -174,7 +174,7 @@ class AdminLinks:
         timeout: float = PROBE_TIMEOUT_SECONDS,
         ttl: float = CACHE_TTL_SECONDS,
     ) -> None:
-        """Hold *links*; nothing is probed until the first status is asked for.
+        """Hold *links*. Nothing is probed until the first status is asked for.
 
         Args:
             links: the validated entries, in the order the deployer listed them.
@@ -214,7 +214,7 @@ class AdminLinks:
         if link.probe_url is None:
             return AdminLinkStatus.UNKNOWN
         try:
-            # httpx times each phase separately; this bounds the whole request.
+            # httpx times each phase separately. This bounds the whole request.
             async with asyncio.timeout(self._timeout):
                 await client.get(link.probe_url)
         except httpx.HTTPStatusError as exc:

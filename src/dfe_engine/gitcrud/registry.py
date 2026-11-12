@@ -8,7 +8,7 @@
 """Registry mapping a class name to its ResourceClass descriptor.
 
 The default registry seeds the DFE Governed Ops resource classes. Directories are the
-deploy-repo layout from docs/architecture.md; they are config, not hardcoded
+deploy-repo layout from docs/architecture.md. They are config, not hardcoded
 behaviour, so a deployment can override them.
 """
 
@@ -37,9 +37,9 @@ class UnknownResourceClassError(KeyError):
 
 
 class ResourceClassRegistry:
-    """Holds the known resource types; resolves one by name.
+    """Holds the known resource types. Resolves one by name.
 
-    Each registered ResourceClass is a resource TYPE (one directory); several types
+    Each registered ResourceClass is a resource TYPE (one directory). Several types
     share an RBAC `rbac_prefix` (the high-level CLASS). RBAC is bound at the class
     level (the prefix), so a `governance:write` grant covers every governance type
     (accounts/groups/roles/actions/policies) - never per-file.
@@ -85,13 +85,13 @@ def default_registry() -> ResourceClassRegistry:
             # helmvars class - deployment overlays
             ResourceClass("helmvars", "values", rbac_prefix="helmvars", check=_check_app_overlay),
             # The same class for the charts that are NOT app instances - the
-            # substrate and platform overlays. A separate DIRECTORY because
+            # backing-service and platform overlays. A separate DIRECTORY because
             # anything under values/ becomes an Argo application: the appset's
             # `values/*-values.yaml` glob reaches git as a pathspec, where `*`
             # matches `/`, so a subdirectory does not hide a file from it.
             ResourceClass("infravars", "infra", rbac_prefix="helmvars"),
             # datamodel class - source definitions. The stored doc IS the
-            # exchange format (API payload = file = gitcrud doc); the Source
+            # exchange format (API payload = file = gitcrud doc). The Source
             # model owns its own semver version envelope (current/versions/
             # deployed_version), which is what versioned=True declares here.
             ResourceClass("sources", "config/sources", rbac_prefix="sources", versioned=True),

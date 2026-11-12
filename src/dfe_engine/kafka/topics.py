@@ -19,7 +19,7 @@ and one pass over every enabled source at startup. A partition DECREASE is
 refused rather than attempted - Kafka has no such operation, and the records
 already assigned to the partitions it would drop have nowhere to go.
 
-Every source needs ``<label>_land`` (raw, receiver -> Kafka); a source with a
+Every source needs ``<label>_land`` (raw, receiver -> Kafka). A source with a
 transform also needs ``<source>_load`` (transformed, transform -> loader). That
 ``_land``/``_load`` convention is shared with scalo-rs and computed by
 ``Source.topic_land`` / ``Source.topic_load``.
@@ -216,7 +216,7 @@ class TopicUpdateResult:
 
     @property
     def ok(self) -> bool:
-        """True when the broker rejected nothing; a refusal is not a failure."""
+        """True when the broker rejected nothing. A refusal is not a failure."""
         return not self.failed
 
 
@@ -237,14 +237,14 @@ class TopicState:
 
 @dataclass
 class TopicStatusResult:
-    """Per-topic status for a status read; ``error`` is set when the broker is not reachable."""
+    """Per-topic status for a status read. ``error`` is set when the broker is not reachable."""
 
     topics: list[TopicState] = field(default_factory=list)
     error: str | None = None
 
     @property
     def reachable(self) -> bool:
-        """True when the broker answered; the topic list is only meaningful then."""
+        """True when the broker answered. The topic list is only meaningful then."""
         return self.error is None
 
 
@@ -259,7 +259,7 @@ def admin_config(
     """Build the librdkafka admin config, sourced from settings unless overridden.
 
     The provider DERIVES protocol and mechanism via the credential contract
-    (dfe-engine#98); never hand-set the mechanism. A ``bootstrap`` pointing at a
+    (dfe-engine#98). Never hand-set the mechanism. A ``bootstrap`` pointing at a
     broker other than the configured one inherits no credentials - pass them
     alongside it, or the connection is made unauthenticated.
     """
@@ -297,7 +297,7 @@ def admin_config(
     if mechanism:
         # librdkafka accepts a mechanism on a non-SASL transport, warns to its own
         # stderr, and then connects UNAUTHENTICATED - configured-looking and open.
-        # Refuse instead; ensure_topics reports it rather than deploying blind.
+        # Refuse instead. ensure_topics reports it rather than deploying blind.
         if not protocol.upper().startswith("SASL"):
             raise contract.KafkaContractError(
                 f"sasl.mechanism={mechanism!r} needs a SASL transport, got "
@@ -353,7 +353,7 @@ class TopicAdmin:
         """``(partitions, replication_factor)`` for one existing topic.
 
         Read off cluster metadata rather than describe_topics so it works on every
-        broker the contract covers; the replication factor is the replica count of
+        broker the contract covers. The replication factor is the replica count of
         the topic's first partition, which is what a uniform topic has.
         """
         metadata = self._admin.list_topics(topic=name, timeout=timeout)
@@ -505,7 +505,7 @@ def source_topic_specs(
 def topics_managed(settings: DFESettings) -> bool:
     """Whether this deployment manages its sources' topics at all.
 
-    Whether a bus is present is the FACT; ``kafka.ensure_topics`` is the operator's
+    Whether a bus is present is the FACT. ``kafka.ensure_topics`` is the operator's
     override on top of it, and unset follows the fact. One reader so the deploy
     hook, the delete hook, the API and the startup pass cannot disagree.
     """
@@ -518,7 +518,7 @@ def topics_managed_at_startup(settings: DFESettings) -> bool:
 
     It reaches the broker before anything has asked for a topic, so it runs only
     where an operator explicitly turned topic management on. Left unset it does
-    not: a deployment that merely carries a bus may not have told the engine
+    not: a deployment that carries a bus may not have told the engine
     where the broker is, and every boot would spend the admin timeout finding
     that out. The chart sets the dial whenever a broker address is configured.
     """
@@ -668,7 +668,7 @@ def ensure_all_source_topics(
     """One ensure pass over every source this deployment carries.
 
     Runs at startup so a fresh broker holds the topics before anything produces
-    into them; without it a deployment restored from its config repo has topics
+    into them. Without it a deployment restored from its config repo has topics
     only for the sources somebody happens to redeploy.
     """
     if not topics_managed_at_startup(settings):

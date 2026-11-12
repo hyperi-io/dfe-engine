@@ -44,7 +44,7 @@ __all__ = [
     "try_rebuild_all_sources",
 ]
 
-# The Merge table's name and its HyperDX source's name; a DFE source name cannot hold `_`, so no source can take it.
+# The Merge table's name and its HyperDX source's name. A DFE source name cannot hold `_`, so no source can take it.
 ALL_SOURCES = "all_sources"
 
 # The header columns every source table shares, in the order the Merge table declares them.
@@ -64,7 +64,7 @@ ALL_SOURCES_TIMESTAMP = "_timestamp_load"
 # The member list becomes a regex, so a name may only hold characters that match themselves there.
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_-]+")
 
-# A Merge table reads only real tables; views, dictionaries and other Merge tables are left out.
+# A Merge table reads only real tables. Views, dictionaries and other Merge tables are left out.
 _MERGE_TREE_FAMILY = "MergeTree"
 
 # The column the tenant row policy filters on, which every member must carry.
@@ -100,7 +100,7 @@ class Coalescer[T]:
             while True:
                 try:
                     outcome, failure = work(), None
-                except Exception as exc:  # work handed in meanwhile still runs; only the last run's failure is raised
+                except Exception as exc:  # work handed in meanwhile still runs, only the last run's failure is raised
                     outcome, failure = None, exc
                 with self._lock:
                     if self._pending is None:
@@ -117,7 +117,7 @@ class Coalescer[T]:
         return outcome
 
 
-# Bulk deploys rebuild concurrently; the rebuild in flight takes over every request made meanwhile, so a burst costs one extra rebuild rather than one each.
+# Bulk deploys rebuild concurrently. The rebuild in flight takes over every request made meanwhile, so a burst costs one extra rebuild rather than one each.
 _REBUILDS = Coalescer[list[str]]()
 
 
@@ -183,7 +183,7 @@ def member_tables(
 ) -> list[str]:
     """The landing table and each registry source's table that a live MergeTree-family table carrying ``_org_id`` backs, sorted.
 
-    A source named after a table the manifest owns in the data database (*reserved*) does not pull that table in; the landing table is the one reserved member. A table missing from *with_org_id* is left out because the tenant row policy on all_sources would fail every tenant's read of it.
+    A source named after a table the manifest owns in the data database (*reserved*) does not pull that table in. The landing table is the one reserved member. A table missing from *with_org_id* is left out because the tenant row policy on all_sources would fail every tenant's read of it.
     """
     candidates = sorted({landing_table, *(source.table_name for source in sources)})
     for name in candidates:
@@ -236,7 +236,7 @@ def rebuild_all_sources(
 ) -> list[str] | None:
     """Create or replace all_sources over the live member tables, fence it, and return the members.
 
-    None means a rebuild already in flight in this process took this one over; it reads the sources again through *load_sources* once its own pass ends.
+    None means a rebuild already in flight in this process took this one over. It reads the sources again through *load_sources* once its own pass ends.
     """
 
     def rebuild() -> list[str]:

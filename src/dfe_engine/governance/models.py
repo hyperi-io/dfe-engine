@@ -90,7 +90,7 @@ class ParamSpec(BaseModel):
         return self
 
     def check(self, name: str, value: Any) -> Any:
-        """Validate ``value`` against the constraint; return it or raise ValueError."""
+        """Validate ``value`` against the constraint. Return it or raise ValueError."""
         if self.type == "enum":
             if not isinstance(value, str) or value not in (self.values or []):
                 raise ValueError(f"param '{name}' must be one of {self.values}, got {value!r}")

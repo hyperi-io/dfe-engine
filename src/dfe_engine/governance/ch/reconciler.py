@@ -7,12 +7,11 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """ChRbacReconciler - read the gitops SoT, make ClickHouse match, idempotently.
 
-Rendering is pure (``render_all``); ``reconcile`` adds the I/O: discover the
+Rendering is pure (``render_all``). ``reconcile`` adds the I/O: discover the
 ``_org_id``-bearing tables, mint-or-reuse the per-identity secrets, execute the
 DDL, and drop the users of orgs and groups that no longer exist, deleting a
 dropped group user's secret with it. Every statement is idempotent (``IF NOT
-EXISTS`` / computed diff for drops), so a second run is a no-op. See
-docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md.
+EXISTS`` / computed diff for drops), so a second run is a no-op.
 """
 
 import hashlib
@@ -120,7 +119,7 @@ def _tenant_granted_dbs(tiers: list[Any]) -> list[str]:
 
 
 def _drop_user(user: str) -> str:
-    """The DDL that drops ``user``; dropping a user takes its grants with it."""
+    """The DDL that drops ``user``. Dropping a user takes its grants with it."""
     return f"DROP USER IF EXISTS {_bq(user)}"
 
 
@@ -153,7 +152,7 @@ def compute_drops(
     - ``dfe_org_*`` roles - ALL of them: the pinned design has no per-org roles,
       so any survivor is the old design's leftover.
     - ``dfe_org_*`` users for orgs no longer registered. An offboarded org whose
-      credential stays live is still a tenant of the platform; the drop is the
+      credential stays live is still a tenant of the platform. The drop is the
       revocation.
     - ``dfe_grp_*`` users no binding renders any more: the group was deleted or
       renamed, claims no org and holds no platform role, or now claims an org that is
@@ -196,7 +195,7 @@ class ChRbacReconciler:
 
     ``admin_client`` is a clickhouse-connect client with admin rights (duck-typed:
     ``.command(stmt)`` + ``.query(sql, parameters=...).result_rows``).
-    ``secrets_store`` is the scalo.secrets seam (``DfeSecrets``): when absent, tiers
+    ``secrets_store`` is the scalo.secrets interface (``DfeSecrets``): when absent, tiers
     / roles / org policies still reconcile but no group/org USERS are minted.
     ``database`` is what the ``{db}`` placeholder in the seeded grants resolves to,
     defaulting to the deployment's data database. ``provided_passwords`` maps a
@@ -388,7 +387,7 @@ class ChRbacReconciler:
         """Delete the secret of each group whose user was dropped and no binding still names.
 
         A drop that failed keeps its secret, because that user is still live and the
-        stored password is still the one it answers to; the next run drops it again.
+        stored password is still the one it answers to. The next run drops it again.
         """
         if self._secrets is None:
             return
@@ -646,7 +645,7 @@ def fence_tables(
     """Re-apply the tenant row policies alone, and report how many statements ran.
 
     Sources create their table one-per-source at deploy time, and the tier grant is
-    database-wide, so a new table is readable the instant it exists; only its row
+    database-wide, so a new table is readable the instant it exists. Only its row
     policy waits for a reconcile. Running this on deploy closes that window. Mints
     nothing and touches no user, so it is cheap enough to run every time.
 
@@ -654,7 +653,7 @@ def fence_tables(
     not one a tenant can read, so a server shared with other deployments keeps
     their tables' policies as they were. A full reconcile covers every database.
 
-    ``tables`` limits the policies to those tables of the reconciler's database; None fences every table discovered. The tenant role and its system grants are applied either way, since a policy names the role.
+    ``tables`` limits the policies to those tables of the reconciler's database. None fences every table discovered. The tenant role and its system grants are applied either way, since a policy names the role.
     """
     reconciler = ChRbacReconciler(admin_client, database=database or None)
     resolved = resolve_grant_databases(list(tiers or DEFAULT_TIERS), reconciler._database)
@@ -701,10 +700,10 @@ def reconcile_ch_rbac(
 ) -> ReconcileResult:
     """The one entry point to reconcile the CH-RBAC config into ClickHouse.
 
-    Defaults to the SEEDED tiers + service roles; pass explicit lists to override
+    Defaults to the SEEDED tiers + service roles. Pass explicit lists to override
     (e.g. once tiers load from gitcrud). ``bindings`` come from
     ``derive_group_bindings`` over the RBAC group store. ``secrets_store`` (the
-    scalo.secrets seam) enables minting the service/group USERS - without it only
+    scalo.secrets interface) enables minting the service/group USERS - without it only
     tiers, roles, org row policies and service users with a ``provided_passwords``
     entry reconcile. Used by app.py startup and the governance API endpoint.
     """

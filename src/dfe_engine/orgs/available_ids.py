@@ -40,7 +40,7 @@ def _safe_identifier(value: str) -> str:
     """A database or table name that can be quoted into SQL.
 
     The names come from ``system.columns``, so they are whatever a ClickHouse
-    client created; anything outside the identifier shape is skipped rather than
+    client created. Anything outside the identifier shape is skipped rather than
     quoted, because a quoted surprise is still a surprise.
     """
     if not _IDENT.fullmatch(value):
@@ -97,7 +97,7 @@ def available_org_ids(
         f"SELECT DISTINCT `{ORG_ID_COLUMN}` AS org_id FROM `{db}`.`{table}`"  # noqa: S608 - names pass _safe_identifier
         for table in tables
     )
-    sql = f"SELECT org_id FROM ({legs}) WHERE org_id != '' ORDER BY org_id LIMIT {int(limit)}"  # noqa: S608 - legs built from checked names; limit is an int
+    sql = f"SELECT org_id FROM ({legs}) WHERE org_id != '' ORDER BY org_id LIMIT {int(limit)}"  # noqa: S608 - legs built from checked names, limit is an int
 
     try:
         # Not injectable: db and table names pass _safe_identifier and are backtick-quoted, and limit is an int.

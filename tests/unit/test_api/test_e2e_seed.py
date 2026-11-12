@@ -96,7 +96,7 @@ def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     # The seeder adds a well-known e2e account alongside the bootstrap
-    # break-glass admin; it must not rename or clobber that admin.
+    # break-glass admin. It must not rename or clobber that admin.
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -112,7 +112,7 @@ def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
 
 
 def test_account_ensure_admin_joins_the_bootstrapped_group(tmp_path, monkeypatch):
-    """The seeder attaches membership; bootstrap owns the group itself."""
+    """The seeder attaches membership. Bootstrap owns the group itself."""
     from dfe_engine.api.e2e.seed.accounts import Accounts
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
@@ -381,7 +381,7 @@ def test_an_app_seed_without_a_deploy_repo_names_the_setting(tmp_path, monkeypat
 
 
 def test_reset_all_is_safe_without_a_deploy_repo(tmp_path, monkeypatch):
-    """The auth-only e2e specs run on a process with gitops off; reset must not raise."""
+    """The auth-only e2e specs run on a process with gitops off. Reset must not raise."""
     from dfe_engine.api.e2e.seed import Seed
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
@@ -393,7 +393,7 @@ def test_reset_all_is_safe_without_a_deploy_repo(tmp_path, monkeypatch):
 
 
 def test_reset_all_keeps_a_single_deployment_apps_values(tmp_path, monkeypatch):
-    """dfe-engine's own overlay is standing infra no seeder here writes; a source resets."""
+    """dfe-engine's own overlay is standing infra no seeder here writes. A source resets."""
     from dfe_engine.api.e2e.seed import Seed
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
@@ -416,7 +416,7 @@ def test_reset_all_keeps_a_single_deployment_apps_values(tmp_path, monkeypatch):
 
 
 def test_reset_all_keeps_the_deployers_common_infra_overlay(tmp_path, monkeypatch):
-    """The stack-wide infra baseline predates any run; a per-chart dial does not."""
+    """The stack-wide infra baseline predates any run. A per-chart dial does not."""
     from dfe_engine.api.e2e.seed import Seed
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")

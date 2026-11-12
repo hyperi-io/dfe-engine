@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Default STUB implementations of the AI module types (interface.py).
 
-The framework defines the contracts; real models live in separate repos and register
+The framework defines the contracts. Real models live in separate repos and register
 via ``AIModuleRegistry``. Until migrated, these stubs make the four touch-points
 functional - each returns a COMPLETED result marked ``stub: True``, echoing enough of
 the input that the UI/CLI can round-trip. Migrating a real model = registering a
@@ -40,7 +40,7 @@ class _StubExec:
     if TYPE_CHECKING:
         # Provided by the concrete AI-module host this mixin is combined with
         # (interface.py QueryOptimiser/QueryGenerator/LogParser/SchemaOptimiser).
-        # Declared for type-checkers only; no runtime attribute is created here.
+        # Declared for type-checkers only. No runtime attribute is created here.
         name: str
         module_type: AIModuleType
 

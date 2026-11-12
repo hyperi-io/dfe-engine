@@ -693,7 +693,7 @@ class TestScimMovesOnlyTheProviderIdsItOwns:
 
     @pytest.fixture
     def entra_linked(self, app, client) -> list[str]:
-        """dfe-admins linked to an Entra group, as the OIDC group sync links one; returns its members."""
+        """dfe-admins linked to an Entra group, as the OIDC group sync links one. Returns its members."""
         app.state.group_store.update(
             "dfe-admins", source_provider="entra", source_id="entra-admins-guid"
         )
@@ -776,7 +776,7 @@ class TestAProviderIdNamesOneGroup:
 
     @pytest.fixture(autouse=True)
     def admins_carry_a_provider_id(self, app, client) -> None:
-        """Depends on ``client``, whose lifespan builds the stores; IDP signs in as the gateway."""
+        """Depends on ``client``, whose lifespan builds the stores. IDP signs in as the gateway."""
         app.state.group_store.update(
             "dfe-admins", source_provider="oidc", source_id="entra-admins-guid"
         )
@@ -839,7 +839,7 @@ class TestAGroupsApiSourceIdNamesOneGroup:
 
     @pytest.fixture(autouse=True)
     def admins_carry_a_source_id(self, app: FastAPI, client: TestClient) -> None:
-        """Link dfe-admins to the name an IdP sends for it; depends on client, whose lifespan builds the stores."""
+        """Link dfe-admins to the name an IdP sends for it. Depends on client, whose lifespan builds the stores."""
         app.state.group_store.update(
             name="dfe-admins", source_id="dfe-admins", source_provider="oidc"
         )
@@ -912,12 +912,12 @@ class TestAGroupsApiSourceIdNamesOneGroup:
 class TestAGroupNameIsNoOtherGroupsSourceId:
     """An API key resolves a group identifier by name, then by source ID, so a group's name may not be another group's source ID, nor the reverse.
 
-    dfe-admins carries the source ID DFE-Admins; sec-team is an unlinked group with no members.
+    dfe-admins carries the source ID DFE-Admins. sec-team is an unlinked group with no members.
     """
 
     @pytest.fixture(autouse=True)
     def linked(self, app: FastAPI, client: TestClient) -> None:
-        """Link dfe-admins to ADMINS_SOURCE_ID and store sec-team; depends on client, whose lifespan builds the stores."""
+        """Link dfe-admins to ADMINS_SOURCE_ID and store sec-team. Depends on client, whose lifespan builds the stores."""
         app.state.group_store.update(
             name="dfe-admins", source_id=ADMINS_SOURCE_ID, source_provider="oidc"
         )
@@ -980,7 +980,7 @@ class TestAMembershipWriteLeavesAnIdpAccountsOwnList:
         client: TestClient,
         operator_headers: dict[str, str],
     ) -> dict[str, dict[str, str]]:
-        """Link dfe-admins, make jane Entra-owned and orgop acme's infra_admin; return each caller's headers."""
+        """Link dfe-admins, make jane Entra-owned and orgop acme's infra_admin. Return each caller's headers."""
         app.state.group_store.update(
             name="dfe-admins", source_id=ADMINS_SOURCE_ID, source_provider="entra"
         )
@@ -1987,7 +1987,7 @@ class TestDeleteGroup:
         assert resp.json()["code"] == "conflict"
 
 
-# ── The protected-name floor (issue #505) ────────────────────
+# -- The protected-name floor (issue #505) --------------------
 
 
 @pytest.mark.parametrize("username", ["admin", "breakglass"])

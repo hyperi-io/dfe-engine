@@ -169,7 +169,7 @@ async def list_casbin_scopes(
 ) -> CasbinScopesResponse:
     """Return assignable Casbin permission scopes for role configuration."""
     data = casbin_scope_catalog()
-    # catalog is dict[str, object] (heterogeneous values); scopes is a list[str].
+    # catalog is dict[str, object] (heterogeneous values). Scopes is a list[str].
     rows = [{"scope": s} for s in cast("list[str]", data["scopes"])]
     if prefix:
         rows = [row for row in rows if str(row["scope"]).startswith(prefix)]

@@ -99,7 +99,7 @@ class TestContentCannotForgeOverlayKeys:
         on_disk = (crud.repo_path / "values" / f"{app.overlay_name}.yaml").read_text(
             encoding="utf-8"
         )
-        # A forged key would sit at column zero; the real content is indented under
+        # A forged key would sit at column zero. The real content is indented under
         # fileSets no matter which scalar style the emitter chose.
         assert "\nreplicaCount:" not in on_disk
         assert "\nimage:" not in on_disk

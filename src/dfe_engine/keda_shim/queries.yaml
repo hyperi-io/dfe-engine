@@ -1,5 +1,5 @@
 # Built-in dfe-keda-shim query catalogue. KEDA polls GET /q/<name> (or the
-# /keda/pressure + /keda/hunt-backlog aliases); the shim runs the SQL named here
+# /keda/pressure + /keda/hunt-backlog aliases). The shim runs the SQL named here
 # and returns {"value": <int>}. OVERRIDE or EXTEND these via a YAML file at
 # DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG (deep-merged over these defaults) - change a query, or
 # add a new scaling signal, with a config edit and NO rebuild. A new query name adds
@@ -31,7 +31,7 @@ queries:
   # Each series - one metric name, one attribute set, one pod - is averaged over the
   # window and the MAX across series is returned, so the hottest pod sets the value.
   # A pushed row names its pod in the resource (service.instance.id), a scraped row
-  # in its attributes; rows that name no pod share one series. No matching row reads
+  # in its attributes. Rows that name no pod share one series. No matching row reads
   # as 0, a successful answer that replaces the cached last-good value. The window is
   # two of scalo's 60 s export intervals, so every live pod has a reading inside it.
   pressure:

@@ -45,7 +45,7 @@ SCIM_SOURCE_PROVIDER = "scim"
 
 
 def _parse_dt(value: str) -> datetime | None:
-    """Best-effort parse of an ISO 8601 timestamp; None when absent/invalid."""
+    """Best-effort parse of an ISO 8601 timestamp. None when absent/invalid."""
     if not value:
         return None
     try:

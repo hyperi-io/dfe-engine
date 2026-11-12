@@ -40,8 +40,8 @@ class TestPermissionMatches:
         assert permission_matches("config:*", "source:read") is False
 
     def test_trailing_wildcard_argo_style(self):
-        # "argo:*" has 2 segments; action "argo:applications:sync" has 3 segments
-        # Last segment is *, so it's a trailing wildcard — should match
+        # "argo:*" has 2 segments. Action "argo:applications:sync" has 3 segments
+        # Last segment is *, so it's a trailing wildcard -- should match
         assert permission_matches("argo:*", "argo:applications:sync") is True
         assert permission_matches("argo:*", "argo:applications:get") is True
         assert permission_matches("argo:*", "argo:projects:get") is True
@@ -69,13 +69,13 @@ class TestPermissionMatches:
 
     def test_segment_count_mismatch_non_wildcard_last(self):
         # "config:read" (2 segments) vs "config:read:extra" (3 segments)
-        # Last segment is NOT *, no trailing wildcard → False
+        # Last segment is NOT *, no trailing wildcard -> False
         assert permission_matches("config:read", "config:read:extra") is False
         assert permission_matches("config:read", "a:config:read") is False
 
     def test_mid_wildcard_segment_count_must_match(self):
-        # "service:*:config:read" (4 segments) vs "service:dfe-loader:config:read:extra" (5) → False
-        # Last segment is NOT *, no trailing wildcard, segment count mismatch → False
+        # "service:*:config:read" (4 segments) vs "service:dfe-loader:config:read:extra" (5) -> False
+        # Last segment is NOT *, no trailing wildcard, segment count mismatch -> False
         assert (
             permission_matches("service:*:config:read", "service:dfe-loader:config:read:extra")
             is False
@@ -86,7 +86,7 @@ class TestPermissionMatches:
         assert permission_matches("admin", "viewer") is False
 
     def test_star_only_matches_all_segment_counts(self):
-        # Bare "*" is special — matches regardless of segment count
+        # Bare "*" is special -- matches regardless of segment count
         assert permission_matches("*", "a") is True
         assert permission_matches("*", "a:b") is True
         assert permission_matches("*", "a:b:c") is True
@@ -223,7 +223,7 @@ class TestResolvePermissions:
         assert perms == {"config:read", "source:read"}
 
     def test_resolve_deduplicates_permissions(self, config):
-        # viewer and operator both have config:read — should appear once in set
+        # viewer and operator both have config:read -- should appear once in set
         perms = config.resolve_permissions(["viewer", "operator"])
         assert perms.count("config:read") if isinstance(perms, list) else "config:read" in perms
 

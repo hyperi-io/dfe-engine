@@ -17,7 +17,7 @@ mocking one - the settings->params split keeps it honest):
   3. ``run`` rechecks the lookup databases after each reload, before it fires again,
      driven past its connect with fakes.
 
-Executing ``run``/``materialise`` end-to-end needs a real CH; that is the Phase A
+Executing ``run``/``materialise`` end-to-end needs a real CH. That is the Phase A
 local-CH test, deliberately not attempted here.
 
 The logger tests replace scalo's ``setup`` with a recorder and stop the command at
@@ -46,7 +46,7 @@ class _StoppedAtSettings(Exception):
 
 @pytest.fixture
 def setup_calls(monkeypatch) -> list[dict]:
-    """Record each scalo logger ``setup`` call; the command stops at its settings load."""
+    """Record each scalo logger ``setup`` call. The command stops at its settings load."""
     calls: list[dict] = []
     monkeypatch.setattr("scalo.logger.setup", lambda **kwargs: calls.append(kwargs))
 
@@ -54,7 +54,7 @@ def setup_calls(monkeypatch) -> list[dict]:
         raise _StoppedAtSettings
 
     monkeypatch.setattr(cli, "load_settings", _stop)
-    # init_logger exports LOG_* and load_config sets scalo's global env prefix; undo both.
+    # init_logger exports LOG_* and load_config sets scalo's global env prefix. Undo both.
     for name in ("LOG_LEVEL", "LOG_FORMAT"):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)

@@ -26,7 +26,7 @@ Mounted under ``/api/v1/scim/v2``::
     GET  /Schemas
 
 Resource ``id`` == the store key (username / group name). Writes are gated
-behind the same RBAC actions as the native routers; discovery endpoints are
+behind the same RBAC actions as the native routers. Discovery endpoints are
 open (IdPs probe them before presenting a token). Responses use the SCIM
 media type and the SCIM error envelope.
 """
@@ -89,8 +89,8 @@ SCIM_MEDIA_TYPE = "application/scim+json"
 
 # Where this router is mounted (v1_router "/v1" under app "/api"). Used to build
 # absolute meta.location URLs, and by the error handlers to tell a SCIM request
-# from a native one. Kept as a constant so a resource's self-link is stable;
-# adjust here if the mount point ever moves.
+# from a native one. Kept as a constant so a resource's self-link is stable.
+# Adjust here if the mount point ever moves.
 SCIM_ROOT = "/api/v1/scim/v2"
 
 # members[value eq "alice"] -> "alice" (the value-path filter IdPs use on remove)
@@ -248,7 +248,7 @@ def _audit_details(**fields) -> dict:
 def _refuse_identifier_collision(
     *, name: str, source_id: str, store, target: str
 ) -> JSONResponse | None:
-    """Refuse a displayName that is another group's provider id or an externalId that is another group's name (:func:`identifier_holder`); pass empty for the one the write leaves alone."""
+    """Refuse a displayName that is another group's provider id or an externalId that is another group's name (:func:`identifier_holder`). Pass empty for the one the write leaves alone."""
     holder = identifier_holder(exclude=target, groups=store.list(), name=name, source_id=source_id)
     if holder is None:
         return None
@@ -370,7 +370,7 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def create_user(user: CurrentUser, request: Request) -> Response:
-    """Provision a user. IdP-owned; local password is randomised when omitted.
+    """Provision a user. IdP-owned. Local password is randomised when omitted.
 
     A password the IdP does send is held to the same length floor as every other
     password the API sets, and one under it is refused rather than replaced.
@@ -504,14 +504,14 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 
     enabled: bool | None = None
     for op in patch.operations or []:
-        # op.path may be a typed ``Path`` object; coerce to a plain string.
+        # op.path may be a typed ``Path`` object. Coerce to a plain string.
         path = str(op.path or "").lower()
         value = op.value
         if path == "active":
             enabled = bool(value)
         elif path == "" and isinstance(value, dict) and "active" in value:
             enabled = bool(value["active"])
-        # Other paths (userName is the immutable key; group membership is managed
+        # Other paths (userName is the immutable key, group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
     if enabled is not None:
         # Recovery credentials before self-deactivate: admin/breakglass stay mutability 403.
@@ -794,7 +794,7 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
         last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=removed)
         if last_admin is not None:
             return last_admin
-        # One write for the whole set; the store refuses it whole if it drops a recovery credential.
+        # One write for the whole set. The store refuses it whole if it drops a recovery credential.
         store.update(group_id, members=members)
         sync_account_groups_for_membership_change(
             account_store, group_id, added=added, removed=removed
@@ -820,7 +820,7 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     group = store.get(group_id)
     if group is None:
         return scim_error(404, f"Group '{group_id}' not found")
-    # GroupStore.delete refuses a non-empty group; detach members first and mirror
+    # GroupStore.delete refuses a non-empty group. Detach members first and mirror
     # the removal onto each Account.groups.
     members = list(group.members)
     if (members) or (group.source_id):
@@ -857,7 +857,7 @@ class _NoTargetError(ValueError):
 
 def _targets_members(op) -> bool:
     """Whether a group PatchOp operation acts on ``members``."""
-    # op.path may be a typed ``Path`` object; coerce to a plain string.
+    # op.path may be a typed ``Path`` object. Coerce to a plain string.
     path = str(op.path or "")
     if path:
         return path.lower().startswith("members")

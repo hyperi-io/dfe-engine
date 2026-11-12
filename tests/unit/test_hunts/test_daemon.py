@@ -21,7 +21,7 @@ from dfe_engine.hunts.daemon import run_loop
 def _clock_from(values: list[int]) -> tuple:
     """A clock closure that yields the given ints in order, plus the seen-list.
 
-    Returned clock returns float (as a real time.monotonic would); the loop int()s
+    Returned clock returns float (as a real time.monotonic would). The loop int()s
     it, so we recover the exact epoch ints tick was handed.
     """
     it: Iterator[int] = iter(values)
@@ -29,7 +29,7 @@ def _clock_from(values: list[int]) -> tuple:
 
 
 def test_runs_exactly_n_ticks_then_stops():
-    # tick appends the epoch it saw; stop once N are recorded.
+    # tick appends the epoch it saw. Stop once N are recorded.
     epochs = [100, 200, 300, 400, 500]
     clock, _ = _clock_from(epochs)
     seen: list[int] = []
@@ -53,7 +53,7 @@ def test_runs_exactly_n_ticks_then_stops():
 
 
 def test_sleep_not_called_after_final_tick_and_uses_poll_seconds():
-    # sleep records every duration it is asked for; a prompt stop means the tick
+    # sleep records every duration it is asked for. A prompt stop means the tick
     # that trips should_stop is NOT followed by a sleep.
     clock, _ = _clock_from([1, 2, 3])
     seen: list[int] = []
@@ -70,7 +70,7 @@ def test_sleep_not_called_after_final_tick_and_uses_poll_seconds():
         poll_seconds=7.5,
     )
 
-    # 2 ticks; sleep ran only after the first (1 fewer than ticks) - none after the
+    # 2 ticks. Sleep ran only after the first (1 fewer than ticks) - none after the
     # final tick, and always with poll_seconds.
     assert ticks == 2
     assert slept == [7.5]
@@ -134,7 +134,7 @@ def test_reload_not_called_when_callback_none():
         reload_every=2,
     )
 
-    assert ticks == 5  # loop still runs; reload simply never fires
+    assert ticks == 5  # loop still runs, reload never fires
 
 
 def test_tick_sees_exact_epoch_ints_from_deterministic_clock():

@@ -93,7 +93,7 @@ class RoutingScope(StrEnum):
     """Every source: one block for the whole stack, on a single-deployment app."""
 
     INSTANCE = "instance"
-    """The one source the instance is bound to; the engine deploys such instances."""
+    """The one source the instance is bound to. The engine deploys such instances."""
 
 
 class ReloadMode(StrEnum):
@@ -106,7 +106,7 @@ class ReloadMode(StrEnum):
     """A pod roll applies it - the chart's checksum annotation triggers one."""
 
     RESTART = "restart"
-    """Needs a manual restart; nothing in the deploy path triggers one."""
+    """Needs a manual restart. Nothing in the deploy path triggers one."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,12 +135,12 @@ class ConsumedFileSet:
 
     The other half of ``dir_path``: a set the app names table by table rather
     than by directory. The config file takes no template, so whoever writes the
-    files names each one there, under ``mount_path``; the Compose render points
+    files names each one there, under ``mount_path``. The Compose render points
     those entries at its own mount instead.
     """
 
     mount_path: str
-    """Where the deployment mounts the set; empty leaves ``entries_path`` to whoever mounts it."""
+    """Where the deployment mounts the set. Empty leaves ``entries_path`` to whoever mounts it."""
 
     suffixes: tuple[str, ...]
     """Accepted file extensions. A name outside these is refused."""
@@ -214,7 +214,7 @@ class AppDescriptor:
     """
 
     profiles: frozenset[str] = frozenset()
-    """The deployment profiles this app MAY be deployed in; empty means all.
+    """The deployment profiles this app MAY be deployed in. Empty means all.
 
     An offer the console lists, not a gate: a profile is a set of values in the
     cascade rather than a name a chart reads, so the deploy repo stays the only
@@ -246,7 +246,7 @@ class AppDescriptor:
     """
 
     reload_setting: str = ""
-    """The app's own config key that turns its watcher on; empty where it always watches.
+    """The app's own config key that turns its watcher on. Empty where it always watches.
 
     An overlay path, ``config.`` rooted. Where the engine renders the config it
     sets this true unless the deployment already set it, so ``hot_reload`` holds
@@ -287,15 +287,15 @@ class AppDescriptor:
     """
 
     config_file: str = ""
-    """The config file this app's own image reads, by name; empty where it reads none.
+    """The config file this app's own image reads, by name. Empty where it reads none.
 
     Declared because it is the app's fact, not the deployment's: the image's own
     CMD spells it. On Kubernetes the chart mounts the rendered ConfigMap under
-    that name; off it, the Compose writer renders the same content there.
+    that name. Off it, the Compose writer renders the same content there.
     """
 
     display_name: str = ""
-    """The label a console shows for this app; empty where the service id is the label.
+    """The label a console shows for this app. Empty where the service id is the label.
 
     A label only: the service id still names the chart, the routes and the
     telemetry, so nothing the engine derives reads this.
@@ -419,7 +419,7 @@ class Encoding(StrEnum):
     """Stored and transported verbatim."""
 
     BASE64 = "base64"
-    """Transported base64-encoded; the digest is taken over the decoded bytes."""
+    """Transported base64-encoded. The digest is taken over the decoded bytes."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -981,7 +981,7 @@ def _push(app: AppDescriptor) -> AppEndpoint:
 def deployed_name(app: AppDescriptor, instance: str) -> str:
     """The name this app's own chart renders the deployment under.
 
-    A stack-wide app is named for itself; a per-config app for its instance. It
+    A stack-wide app is named for itself. A per-config app for its instance. It
     is also the OTel ``service.name`` the workload reports, because a component
     names itself the way it is deployed - so a stack-wide app carries no
     ``-default`` suffix, which nothing would ever report.
@@ -1009,7 +1009,7 @@ def _mesh_host(app: AppDescriptor, instance: str, namespace: str) -> str:
 def push_endpoint(app: AppDescriptor, instance: str, mesh_namespace: str = "") -> str:
     """Where a direct-transport stage sends records for this app's *instance*.
 
-    A stack-wide app answers on its own Service; a per-config app answers on the
+    A stack-wide app answers on its own Service. A per-config app answers on the
     instance's. Both the port and any Service-name override are the manifest's,
     so a chart that moves its listener is a manifest edit.
 

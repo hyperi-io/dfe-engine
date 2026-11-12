@@ -27,7 +27,7 @@ from scalo.api import ProblemError
 from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.metrics import ApiMetrics
 
-# Token claim marking a session on an issued password; dfe-hyperdx refuses such a token.
+# Token claim marking a session on an issued password. dfe-hyperdx refuses such a token.
 PASSWORD_CHANGE_CLAIM = "password_change_required"  # noqa: S105, RUF100 - a JWT claim name
 
 # The owner's own password change, which clears the flag.

@@ -1,11 +1,11 @@
 #  Project:      dfe-engine
 #  File:         tests/integration/test_openbao_provider.py
-#  Purpose:      Live OpenBao test of the secrets seam (real provider, no mocks)
+#  Purpose:      Live OpenBao test of the secrets interface (real provider, no mocks)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The minted-secret seam against a real OpenBao (the k8s backend).
+"""The minted-secret interface against a real OpenBao (the k8s backend).
 
 Spins a dev-mode OpenBao via docker on DFE_TEST_DOCKER_HOST (ssh) or local docker,
 proves the scalo openbao provider + DfeSecrets wrapper round-trip, and tears down.
@@ -62,7 +62,7 @@ def openbao_addr():
                 "-e",
                 "BAO_DEV_ROOT_TOKEN_ID=root",
                 "-e",
-                f"BAO_API_ADDR={addr}",  # dev advertises this; must be reachable
+                f"BAO_API_ADDR={addr}",  # dev advertises this, must be reachable
                 _IMAGE,
                 "server",
                 "-dev",

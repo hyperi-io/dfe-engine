@@ -70,7 +70,7 @@ class TestBuiltinAlertsSource:
         assert Source.model_validate(_load_builtin(_NAME)).view_for("sigma") is not None
 
     def test_references_a_detection_schema_the_package_ships(self):
-        """The referenced additional_fields must resolve, not merely be a string.
+        """The referenced additional_fields must resolve, not just be a string.
 
         The engine's own copy pointed at ``hunt-results/detection.yaml``, a path
         no dfe-schemas release has ever carried.

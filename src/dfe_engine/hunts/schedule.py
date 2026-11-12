@@ -45,7 +45,7 @@ from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.schema.require import require_objects
 from dfe_engine.settings import PHASE_SPREAD_FRACTION
 
-# Unit suffix -> seconds. Ordered largest-first only for readability; the parser
+# Unit suffix -> seconds. Ordered largest-first only for readability. The parser
 # accepts the units in any order and sums compound forms ("2d12h", "1h30m").
 _UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
@@ -98,7 +98,7 @@ def cron_to_interval_seconds(expr: str, *, samples: int = 6) -> int:
     """Smallest recurring gap (seconds) between consecutive cron fire times.
 
     The runner needs ONE interval, so we take the tightest observed gap - that is
-    the interval a rate hunt must keep up with; a wider gap elsewhere just means the
+    the interval a rate hunt must keep up with. A wider gap elsewhere just means the
     hunt occasionally has slack. Clamped to >= 1 so the spread/due maths never sees
     a zero interval. Raises ValueError on a bad cron.
     """
@@ -137,7 +137,7 @@ def parse_interval(value: str | int) -> int:
     if text.isdigit():
         return int(text)
 
-    # A '-' that is not the leading sign is a cron range (e.g. "1-5"); a leading
+    # A '-' that is not the leading sign is a cron range (e.g. "1-5"). A leading
     # '-' would be a (nonsensical here) negative number, left for duration parsing
     # to reject.
     has_inner_dash = "-" in text[1:]
@@ -302,6 +302,6 @@ def due_query(database: str) -> str:
 
 
 def due_count(ch: Any, database: str) -> int:
-    """Run due_query and return the backlog count (KEDA's metric; also for the UI)."""
+    """Run due_query and return the backlog count (KEDA's metric, also for the UI)."""
     rows = ch.query(due_query(database)).result_rows
     return int(rows[0][0]) if rows else 0

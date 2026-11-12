@@ -9,7 +9,7 @@
 
 The handlers are called directly with real fakes (a file-backed secrets store, a
 list-only org registry). ``/connection`` checks ``query:execute`` inside the
-handler, so its gate is under test here; the ``/sources`` gate is a standard
+handler, so its gate is under test here. The ``/sources`` gate is a standard
 require_action dependency covered elsewhere. The invariant under test for
 ``/connection``: a caller only ever resolves to its OWN org's credential unless a
 system-scope grant says otherwise, and anything ambiguous fails closed.

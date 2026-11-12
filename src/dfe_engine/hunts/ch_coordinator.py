@@ -45,7 +45,7 @@ runner's client, which must therefore not use a ClickHouse session.
 The watermark gives crash-safe incremental resume, and hunt_state carries the
 too_aggressive / overrun signal for the UI.
 
-Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after merge):
+Tables (all ReplacingMergeTree, the first three bounded to ~1 row/hunt after merge):
   hunt_lease     - who holds a hunt now, until when (mutual exclusion + cap input),
                    plus one marker row per hunt and claiming worker
   hunt_watermark - last committed window end per hunt (incremental resume)
@@ -87,7 +87,7 @@ _LEASE_COLUMNS = ["hunt_id", "owner", "fire", "lease_until"]
 _MARKER = "#claim/"
 
 # The coordination objects this worker reads and writes, by manifest id. The
-# engine's schema phase creates them; nothing here does.
+# engine's schema phase creates them. Nothing here does.
 _COORDINATION_IDS = (
     "data.hunt_lease",
     "data.hunt_watermark",
@@ -209,7 +209,7 @@ class ChCoordinator:
         whose owner's marker for that fire has ended reads as released, lease_until 0.
         """
         rows = self._ch.query(
-            "SELECT l.owner, l.fire, if(m.owner = l.owner AND m.fire = l.fire, "  # noqa: S608 - quoted configured database; values bound
+            "SELECT l.owner, l.fire, if(m.owner = l.owner AND m.fire = l.fire, "  # noqa: S608 - quoted configured database, values bound
             "least(l.lease_until, m.lease_until), 0) "
             f"FROM (SELECT owner, fire, lease_until FROM {self._qdb}.hunt_lease FINAL "
             "WHERE hunt_id = {h:String}) AS l "
@@ -275,7 +275,7 @@ class ChCoordinator:
     def _peer_holds(self, hunt_id: str, now: int) -> bool:
         """Whether another worker's marker on *hunt_id* is live at *now*."""
         rows = self._ch.query(
-            f"SELECT count() FROM {self._qdb}.hunt_lease FINAL "  # noqa: S608 - quoted configured database; values bound
+            f"SELECT count() FROM {self._qdb}.hunt_lease FINAL "  # noqa: S608 - quoted configured database, values bound
             "WHERE startsWith(hunt_id, {prefix:String}) AND owner != {o:String} "
             "AND lease_until > {now:Int64}",
             parameters={"prefix": f"{hunt_id}{_MARKER}", "o": self._worker_id, "now": now},
@@ -286,7 +286,7 @@ class ChCoordinator:
     def _own_marker(self, hunt_id: str) -> tuple[int, int] | None:
         """This worker's marker on *hunt_id* as ``(fire, lease_until)``, 0 once ended."""
         rows = self._ch.query(
-            f"SELECT fire, lease_until FROM {self._qdb}.hunt_lease FINAL "  # noqa: S608 - quoted configured database; values bound
+            f"SELECT fire, lease_until FROM {self._qdb}.hunt_lease FINAL "  # noqa: S608 - quoted configured database, values bound
             "WHERE hunt_id = {m:String}",
             parameters={"m": self._marker(hunt_id)},
             settings=READ_SETTINGS,
@@ -359,7 +359,7 @@ class ChCoordinator:
         now = self.now() if now is None else now
         until = now + self._lease_seconds
         self._ch.command(
-            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
+            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database, values bound
             "SELECT arrayJoin([{h:String}, {m:String}]), {o:String}, {f:Int64}, {u:Int64} "
             f"WHERE (SELECT count() FROM {self._qdb}.hunt_lease FINAL "
             "WHERE hunt_id = {m:String} AND fire = {f:Int64} "
@@ -383,7 +383,7 @@ class ChCoordinator:
         was claimed by a peer writes nothing over the peer's lease.
         """
         self._ch.command(
-            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
+            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database, values bound
             "SELECT {h:String}, {o:String}, {f:Int64}, 0 "
             f"WHERE (SELECT count() FROM {self._qdb}.hunt_lease FINAL "
             "WHERE hunt_id = {h:String} AND owner = {o:String} AND fire = {f:Int64}) = 1",
@@ -447,7 +447,7 @@ class ChCoordinator:
         """
         now = self.now() if now is None else now
         rows = self._ch.query(
-            "SELECT uniqExact(substring(hunt_id, 1, position(hunt_id, {marker:String}) - 1)) "  # noqa: S608 - quoted configured database; values bound
+            "SELECT uniqExact(substring(hunt_id, 1, position(hunt_id, {marker:String}) - 1)) "  # noqa: S608 - quoted configured database, values bound
             f"FROM {self._qdb}.hunt_lease FINAL "
             "WHERE position(hunt_id, {marker:String}) > 0 AND lease_until > {now:Int64}",
             parameters={"now": now, "marker": _MARKER},
@@ -467,7 +467,7 @@ class ChCoordinator:
     def get_watermark(self, hunt_id: str) -> int | None:
         """Last committed window end for the hunt, or None if never run."""
         rows = self._ch.query(
-            f"SELECT watermark FROM {self._qdb}.hunt_watermark "  # noqa: S608 - quoted configured database; values bound
+            f"SELECT watermark FROM {self._qdb}.hunt_watermark "  # noqa: S608 - quoted configured database, values bound
             "WHERE hunt_id = {h:String} ORDER BY updated DESC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
@@ -500,7 +500,7 @@ class ChCoordinator:
     def get_state(self, hunt_id: str) -> HuntStateRow | None:
         """The hunt's persisted overrun / too-aggressive signal, if any."""
         rows = self._ch.query(
-            f"SELECT overrun_count, too_aggressive FROM {self._qdb}.hunt_state "  # noqa: S608 - quoted configured database; values bound
+            f"SELECT overrun_count, too_aggressive FROM {self._qdb}.hunt_state "  # noqa: S608 - quoted configured database, values bound
             "WHERE hunt_id = {h:String} ORDER BY updated DESC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
@@ -545,7 +545,7 @@ class ChCoordinator:
         """
         now = self.now() if now is None else now
         rows = self._ch.query(
-            "SELECT r.hunt_id, r.fire FROM ("  # noqa: S608 - quoted configured database; values bound
+            "SELECT r.hunt_id, r.fire FROM ("  # noqa: S608 - quoted configured database, values bound
             "SELECT hunt_id, fire FROM ("
             "SELECT hunt_id, fire, argMax(status, updated) AS status "
             f"FROM {self._qdb}.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
@@ -570,7 +570,7 @@ class ChCoordinator:
     def record_overrun(self, hunt_id: str) -> None:
         """Flag a hunt too-aggressive and bump its overrun count (UI signal).
 
-        Read-then-insert (CH has no atomic increment); the count is a soft UI
+        Read-then-insert (CH has no atomic increment). The count is a soft UI
         signal, so an approximate value under rare contention is acceptable.
         """
         current = self.get_state(hunt_id)

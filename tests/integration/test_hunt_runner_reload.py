@@ -10,7 +10,7 @@
 The runner's whole operating model rests on this: an operator creates a hunt in
 the UI, the engine writes the YAML to the shared config dir, and the runner that
 is already running picks it up on its next reload. Nothing restarts. The reload
-CADENCE is covered by the pure daemon tests; what was not covered is the chain
+CADENCE is covered by the pure daemon tests. What was not covered is the chain
 those tests stub out - reload -> read the directory -> rebuild the runner ->
 execute against ClickHouse -> a row in the real detection table.
 
@@ -123,7 +123,7 @@ def test_hunt_added_after_the_loop_started_runs_without_a_restart(ch_client, dfe
         reload_every=1,
     )
 
-    # Tick 1 had nothing to run; tick 2 ran the hunt that appeared between them.
+    # Tick 1 had nothing to run. Tick 2 ran the hunt that appeared between them.
     assert executed == [0, 1]
     # A different runner object served tick 2, so the reload happened INSIDE the
     # loop rather than the loop being re-entered around it.
@@ -244,7 +244,7 @@ def test_an_idle_loop_still_reads_as_a_live_runner(ch_client, dfe_db, tmp_path):
     )
     assert ticks == [0]  # nothing was due, which is the premise
 
-    # The fixture applies the heartbeat table from the manifest; ensure_schema only asserts it.
+    # The fixture applies the heartbeat table from the manifest. ensure_schema only asserts it.
     assert ch_client.command(f"EXISTS TABLE `{dfe_db}`.hunt_runner_heartbeat") == 1
     assert live_runner_count(ch_client, dfe_db, fixed_now) == 1
     # Two polls on, the same beat is stale and the runner reads as gone.

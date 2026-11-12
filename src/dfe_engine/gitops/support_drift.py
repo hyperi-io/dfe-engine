@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """SUPPORT-DRIFT: surface per-component version overrides at engine startup.
 
-The deploy repo's ``pins.yaml`` selects ONE certified stack version; its
+The deploy repo's ``pins.yaml`` selects ONE certified stack version. Its
 ``overrides`` block moves individual components off that set at the operator's
 own risk (dfe-infra docs/deployment/stack-versioning.md). The engine cannot know the
 certified values at runtime (they live in dfe-infra at the pinned tag), but it
@@ -25,7 +25,7 @@ from .pins import component_overrides, load_pins
 
 
 def log_support_drift(deploy_repo_path: str | Path) -> dict[str, str]:
-    """Log the SUPPORT-DRIFT notice for any pins.yaml overrides; returns them."""
+    """Log the SUPPORT-DRIFT notice for any pins.yaml overrides. Returns them."""
     overrides = component_overrides(load_pins(deploy_repo_path))
     if overrides:
         listed = ", ".join(f"{name}={ref}" for name, ref in sorted(overrides.items()))

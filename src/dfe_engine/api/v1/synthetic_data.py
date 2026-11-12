@@ -15,7 +15,7 @@
     GET    /synthetic-data/streams/{operation} -> poll a stream
     POST   /synthetic-data/streams/{operation}/cancel -> cancel a running stream
 
-Reads need ``synthetic-data:read``; generating or streaming needs ``synthetic-data:run``
+Reads need ``synthetic-data:read``. Generating or streaming needs ``synthetic-data:run``
 (generation injects data into the pipeline, so it is a write-grade action).
 A stream is an operation, polled at the ``Location`` its start answers.
 """

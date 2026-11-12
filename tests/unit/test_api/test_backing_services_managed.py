@@ -231,7 +231,7 @@ class TestStatedFacts:
     def test_a_poll_inside_the_window_does_not_dial_again(
         self, client, app, admin_headers, tmp_path, down_ch
     ):
-        """A console polls the card; the size is held per service rather than re-read."""
+        """A console polls the card. The size is held per service rather than re-read."""
         _wire_gitcrud(app, tmp_path)
         _state(app, ch=CH_EXTERNAL)
 

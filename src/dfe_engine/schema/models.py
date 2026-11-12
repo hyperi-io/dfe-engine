@@ -230,7 +230,7 @@ class MetaSchema(BaseModel):
     Attributes:
         current: Current version of the schema.
         versions: Dictionary of versions and their metadata.
-        path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk.
+        path: Registry path key (e.g. ``aws/cloudtrail``). Omitted from YAML on disk.
     """
 
     model_config = ConfigDict(extra="ignore")

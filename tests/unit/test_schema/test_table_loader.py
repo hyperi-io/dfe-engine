@@ -52,7 +52,7 @@ versions:
 def _schemas_tree(tmp_path, monkeypatch):
     """An empty tree complete enough to resolve, with ``tables/`` to write into.
 
-    The manifest is what marks a tree whole; without it the loader reads past
+    The manifest is what marks a tree whole. Without it the loader reads past
     this one to the installed package.
     """
     (tmp_path / "common-header").mkdir()

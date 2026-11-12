@@ -8,7 +8,7 @@
 """End-to-end sigma propagation API via TestClient - real gitcrud + registries.
 
 A local-files provider (no network) imports a rule into the real gitcrud
-catalogue; the rule is selected, then POST /sigma/propagate generates a DFE rule
+catalogue. The rule is selected, then POST /sigma/propagate generates a DFE rule
 over the source's {source}_sigma view + a per-source hunt. No live ClickHouse.
 """
 
@@ -219,7 +219,7 @@ def test_get_binding_404_for_missing(client, app, admin_headers, tmp_path):
 
 
 class _RecordingForge:
-    """ForgeProvider seam double: one PR per review branch, numbered in order."""
+    """ForgeProvider double: one PR per review branch, numbered in order."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []

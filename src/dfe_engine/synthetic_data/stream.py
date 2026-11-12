@@ -12,7 +12,7 @@ process at a modest configured rate (interarrival = expovariate draw), which
 reads as live telemetry in a tail view - bursts and gaps, no metronome.
 
 Sinks are tiny async callables. ``CollectSink`` gathers in memory (tests,
-API responses); ``HttpPostSink`` posts JSON to dfe-receiver so a demo stream
+API responses). ``HttpPostSink`` posts JSON to dfe-receiver so a demo stream
 exercises the real default data path end to end.
 """
 
@@ -106,7 +106,7 @@ class HttpPostSink:
         return self._client
 
     async def flush(self) -> None:
-        """POST the buffered batch; failures are counted, never fatal."""
+        """POST the buffered batch. Failures are counted, never fatal."""
         if not self._buffer:
             return
         batch, self._buffer = self._buffer, []

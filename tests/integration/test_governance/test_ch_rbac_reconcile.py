@@ -7,7 +7,7 @@ reconciler itself minted.
 
 A reconcile is cluster-global: it sweeps stale `dfe_org_*` users and
 `dfe_rowpol_*` policies. On the harness's own per-test ClickHouse nothing else is
-there to sweep; on a shared cluster, run this serially (`-n 0`), and the fixture
+there to sweep. On a shared cluster, run this serially (`-n 0`), and the fixture
 refuses to run where it would destroy objects it did not create.
 
 No mocks (project policy): a real CH, a real file-backed secrets store.
@@ -82,7 +82,7 @@ def reconciled_world(ch_client, ch_params, tmp_path):
         SimpleNamespace(name=g_analyst, scope_org="", org_ids=[org_a], roles=["data_analyst"]),
         SimpleNamespace(name=g_admin, scope_org="", org_ids=[], roles=["admin"]),
     ]
-    # A uid-scoped tier so the users can read the test table; the seeded tiers'
+    # A uid-scoped tier so the users can read the test table. The seeded tiers'
     # names are not uid-scoped. Mirrors the seeded analyst tiers (D9): a BROAD grant
     # on the whole data db `dfe` (so a platform user reads every source table incl
     # dfe.otel_*) PLUS the uid test db that holds this fixture's own events table.
@@ -101,7 +101,7 @@ def reconciled_world(ch_client, ch_params, tmp_path):
         f"dfe_grp_{g}" for g in (g_scoped, g_open, g_analyst, g_admin)
     ]
     # The otel telemetry tables live in the `dfe` data db (dfe.otel_*), not a
-    # standalone `otel` db. A platform user reads them via the broad dfe.* grant; a
+    # standalone `otel` db. A platform user reads them via the broad dfe.* grant. A
     # fenced tenant user reaches dfe.* too, but the `USING 0` deny policy on the
     # non-_org_id otel table returns zero rows.
     otel_table = f"dfe.otel_probe_{uid}"
@@ -267,7 +267,7 @@ class TestReconcilerPinsTheTenant:
             client.close()
 
     def test_benign_query_settings_stay_usable(self, reconciled_world):
-        """BI clients send output settings with every query; the tier must not
+        """BI clients send output settings with every query. The tier must not
         reject them (readonly=2, not 1) or every hyperdx UI query 500s."""
         import clickhouse_connect
 

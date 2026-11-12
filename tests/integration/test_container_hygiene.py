@@ -60,7 +60,7 @@ def test_two_tests_wanting_one_service_do_not_collide():
 def test_same_named_tests_in_two_modules_do_not_collide():
     """Two modules may define a test of the same name, so the name carries the node id.
 
-    ``test_text_override_is_a_hard_error`` exists in both RBAC modules; named from
+    ``test_text_override_is_a_hard_error`` exists in both RBAC modules. Named from
     ``request.node.name`` the two collided whenever xdist ran them together.
     """
     isolation = "tests/integration/test_ch_rbac_isolation.py::test_text_override_is_a_hard_error"
@@ -288,7 +288,7 @@ def test_a_started_container_carries_the_name_and_labels(ch_params, request):
     assert inspect('{{index .Config.Labels "io.hyperi.test.owner-pid"}}') == str(os.getpid()), (
         "owner-pid must name THIS test process, or it cannot answer whose run left it"
     )
-    # ch_params is the fixture under test; touching it keeps the dependency honest.
+    # ch_params is the fixture under test. Touching it keeps the dependency honest.
     assert ch_params["port"] > 0
 
 

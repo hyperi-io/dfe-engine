@@ -76,7 +76,7 @@ class TestCelCheckEndpoint:
     def test_tier3_regex_classified_but_marked_opt_in(
         self, client: TestClient, admin_headers: dict[str, str]
     ) -> None:
-        # Default check_profile=False — Tier 3 expressions are CLASSIFIED,
+        # Default check_profile=False -- Tier 3 expressions are CLASSIFIED,
         # not REJECTED. The UI uses opt_in_required to warn the user.
         resp = client.post(
             "/api/v1/cel/check",
@@ -123,7 +123,7 @@ class TestCelCheckEndpoint:
     ) -> None:
         # When check_profile=True, the DFE profile rejects per-element
         # iteration functions (exists, all, map, filter, timestamp, duration).
-        # Note: scalo's profile permits matches() — only iteration/time
+        # Note: scalo's profile permits matches() -- only iteration/time
         # functions are blocked at the profile level. The classifier still
         # marks matches() as Tier 3 for performance gating.
         resp = client.post(

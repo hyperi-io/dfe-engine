@@ -35,7 +35,7 @@ Every mutation is a git commit into the deploy repo through the same gitcrud pat
 unchanged, and every write reports the same state Argo later acts on.
 
 Optimistic concurrency runs on the deploy repo's revision. Every read that backs a
-write carries it as ``etag``; send it back as ``If-Match`` and the write is refused
+write carries it as ``etag``. Send it back as ``If-Match`` and the write is refused
 with a 409 if anything has been committed since. It is ONE repo-wide value rather
 than a per-resource one, because that is what the gitcrud guard compares against -
 an instance's own newest commit goes stale the moment any other resource is written,
@@ -399,7 +399,7 @@ class ConfigFieldModel(BaseModel):
     )
     dial: str | None = Field(default=None, description="Not resolved yet; always null")
     protected: bool = Field(description="Whether the protected-var policy covers this path")
-    # `set` is the wire name; the attribute is named around the builtin.
+    # `set` is the wire name. The attribute is named around the builtin.
     is_set: bool = Field(alias="set", description="Whether this instance has a value at all")
 
 
@@ -1423,7 +1423,7 @@ def set_app_config(
     A secret is written like any other option: it goes into the overlay as the rest
     of this surface writes one, and neither this response nor a read route on this
     surface says what it is. A masked value written back as it was read keeps the
-    stored credential; the mask where nothing is stored is a 400 ``masked_value``.
+    stored credential. The mask where nothing is stored is a 400 ``masked_value``.
     A changed field beside a stored credential, in the same mapping or with the
     credential one mapping down (``brokers`` beside ``sasl.password``), is a 400
     ``credential_reentry_required`` until that mapping is written whole with its
@@ -1816,7 +1816,7 @@ def relink_app_files(
 ) -> RelinkResult:
     """Re-resolve every link in the set to what its target now names.
 
-    A tag link follows its tag; a version-pinned link advances to the artefact's
+    A tag link follows its tag. A version-pinned link advances to the artefact's
     current version. This is the fix-once-roll-everywhere half of the library.
     """
     app = _resolve(service, instance)
@@ -1863,7 +1863,7 @@ def copy_app_files(
 ) -> CopyFilesResult:
     """Copy this instance's authored files onto another instance of the same app.
 
-    A transform is written against one source; reusing it on another should not mean
+    A transform is written against one source. Reusing it on another should not mean
     retyping it. Only the files move - the target keeps its own source binding,
     scaling and identity.
     """
@@ -1953,7 +1953,7 @@ async def _read_file_write(request: Request) -> FileWriteRequest:
     """The write's body, refused with 413 before a file over the object cap is buffered.
 
     The stream bound allows every character to arrive escaped, so a file that fits
-    is never refused for its encoding; the content is then measured exactly.
+    is never refused for its encoding. The content is then measured exactly.
     """
     limit = request.app.state.settings.repository.max_object_bytes
     raw = await body_limits.read_body_capped(
@@ -2272,7 +2272,7 @@ async def dry_run_app_file(
     """Run an authored file over real events from the source, and report each one.
 
     Nothing is written: no topic, no table, no commit. ``content`` runs unsaved
-    content, which is what makes this useful in an editor; omitted, the file
+    content, which is what makes this useful in an editor. Omitted, the file
     already in the overlay runs instead.
     """
     app = _resolve(service, instance)

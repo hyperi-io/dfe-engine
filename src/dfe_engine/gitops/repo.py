@@ -75,7 +75,7 @@ _BOUNDABLE_SCHEMES = ("http://", "https://")
 # would otherwise get.
 _MIN_ATTEMPT_TIMEOUT_SECONDS = 0.05
 
-# dulwich reports a non-200 answer only in its message; these are the ones a forge or
+# dulwich reports a non-200 answer only in its message. These are the ones a forge or
 # its proxy gives while restarting or overloaded.
 _TRANSIENT_HTTP_STATUS = re.compile(r"unexpected http resp (?:408|429|5\d\d)\b")
 
@@ -156,7 +156,7 @@ def _is_transient(exc: BaseException, *, outer: BaseException | None = None) -> 
     return False
 
 
-# The clones whose head this scope has already taken; None outside a scope.
+# The clones whose head this scope has already taken. None outside a scope.
 _READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_scope", default=None)
 
 
@@ -166,7 +166,7 @@ def read_scope() -> Iterator[None]:
 
     A request reads many documents and a listing reads them all, so without this
     each one pays its own ref advertisement. The first read takes the remote's head
-    and the rest of the block reuses it; the next block asks again. Outside a scope
+    and the rest of the block reuses it. The next block asks again. Outside a scope
     -- the CLI, background work -- every read asks, which is what they want.
     """
     # Restored by setting the previous value, not by resetting a token: a token
@@ -359,7 +359,7 @@ class GitopsRepo:
     ``{path: content}`` artifact map, stages, commits only on change, and pushes
     when ``push`` is set and a remote is configured. ``read`` bounds a read's remote
     calls, and None takes the ``gitops.read`` defaults. ``write`` bounds and retries
-    the fetch and push a write makes, and sets when its breaker opens; None takes
+    the fetch and push a write makes, and sets when its breaker opens. None takes
     the ``gitops.write`` defaults. ``pack`` sets when a commit packs the loose
     objects and when :meth:`consolidate_if_due` consolidates the packs, and None
     takes the ``gitops.pack`` defaults.
@@ -566,7 +566,7 @@ class GitopsRepo:
     def _authed_url(self) -> str:
         """Embed HTTPS credentials in the remote URL.
 
-        dulwich.porcelain clone/push take no username/password kwargs; HTTPS auth
+        dulwich.porcelain clone/push take no username/password kwargs. HTTPS auth
         is carried in the URL. SSH URLs auth via the agent/keys (no creds here).
         The credentialed URL is supplied per op and never left in ``.git/config``
         -- :meth:`_scrub_remote` rewrites the stored remote back to the bare URL.
@@ -586,7 +586,7 @@ class GitopsRepo:
         the original exception's own text is the thing carrying the token.
         """
         # A retry runs inside scalo's handler for the first failure, and a caller may
-        # call from inside its own handler; neither exception is this op's.
+        # call from inside its own handler. Neither exception is this op's.
         outer = sys.exception()
         stream = RedactingErrStream()
         try:
@@ -660,7 +660,7 @@ class GitopsRepo:
         return result
 
     def _record_forge(self, *, reachable: bool) -> bool:
-        """Feed one write call's outcome to the breaker; returns whether it is now open.
+        """Feed one write call's outcome to the breaker. Returns whether it is now open.
 
         Called under the writer lock, so nothing moves the breaker between the reads
         of its state either side of the record.
@@ -709,7 +709,7 @@ class GitopsRepo:
         """Rewrite the stored remote back to the credential-free URL.
 
         ``porcelain.clone`` persists the URL it cloned from, so a credentialed
-        clone leaves the deploy token in ``.git/config`` in plaintext; every push
+        clone leaves the deploy token in ``.git/config`` in plaintext. Every push
         and fetch re-supplies the credentials explicitly, so the stored remote
         never needs them. Best-effort: a clone that keeps its credential is a
         hardening miss, not a reason to fail the op.
@@ -901,14 +901,14 @@ class GitopsRepo:
         return manager  # ty: ignore[invalid-return-type]
 
     def refresh(self) -> bool:
-        """Take the remote's head when it has moved; returns whether this clone moved.
+        """Take the remote's head when it has moved. Returns whether this clone moved.
 
         Every engine replica reads its OWN clone, so a resource another replica wrote
         is invisible here until this runs -- the read half of read-your-writes across
         replicas. Cheap when nothing moved: one ref advertisement and no fetch.
 
         Inside a :func:`read_scope` the head is taken once and the rest of the scope
-        reuses it, so a listing of N documents costs one round trip rather than N; a
+        reuses it, so a listing of N documents costs one round trip rather than N. A
         publish reopens the check, and a remote this clone cannot reach costs one
         failed connection per scope instead of one per read.
 
@@ -1067,7 +1067,7 @@ class GitopsRepo:
         return result.refs.get(b"refs/heads/" + self._branch.encode())
 
     def _move_onto(self, remote_head: bytes | None, *, discard_local: bool) -> bool:
-        """Fast-forward the tracked branch to a fetched remote head; returns whether it moved.
+        """Fast-forward the tracked branch to a fetched remote head. Returns whether it moved.
 
         ``discard_local`` drops a local commit the remote never took (a rejected push)
         so the caller can re-apply the write on the remote head. Caller holds the
@@ -1278,12 +1278,12 @@ class GitopsRepo:
     ) -> PublishResult:
         """Write artifacts, optionally remove files, commit-if-changed, push-if-set.
 
-        Text is written UTF-8 with LF endings; ``bytes`` is written verbatim, so a
+        Text is written UTF-8 with LF endings. ``bytes`` is written verbatim, so a
         binary artefact is stored as itself rather than as an encoding of itself.
 
         ``branch`` selects the target:
         - ``None`` (default): commit straight onto the tracked branch and push it
-          (the direct-to-main path; Argo auto-syncs).
+          (the direct-to-main path, Argo auto-syncs).
         - a name: PR mode. Commit onto a short-lived ``branch`` OFF the current
           HEAD, push only that branch, and leave the tracked branch untouched
           locally and remotely -- a reviewer merges the PR. This is how a
@@ -1318,7 +1318,7 @@ class GitopsRepo:
         the remote has moved on.
 
         Raises:
-            GitopsDivergedError: the remote holds commits this clone does not; nothing
+            GitopsDivergedError: the remote holds commits this clone does not. Nothing
                 was pushed and the local commits are kept.
             GitopsUnavailableError: the forge stayed unreachable for the write budget.
             GitopsRemoteError: the fetch or the push failed.
@@ -1537,7 +1537,7 @@ class GitopsRepo:
         deletions: list[str] | None,
         message: str,
     ) -> tuple[str | None, list[str]]:
-        """Write and stage the artifacts; commit when anything changed.
+        """Write and stage the artifacts. Commit when anything changed.
 
         Returns the commit SHA (None when nothing was staged) and the paths touched.
         """
@@ -1672,7 +1672,7 @@ class GitopsRepo:
 
         A transient failure pushes the same commit again, never a new one. When the
         remote took the first attempt and only its answer was lost, the retry finds
-        the ref already at this commit and sends nothing; when a peer has written on
+        the ref already at this commit and sends nothing. When a peer has written on
         top since, the retry is refused and :meth:`_push_tracked` sees the commit in
         the remote's history.
 

@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Sampler API tests - unified submit/poll contract + RBAC.
 
-Fast modes (recent/random) come back ``completed`` with the result inline; gated
+Fast modes (recent/random) come back ``completed`` with the result inline. Gated
 modes (smart/anomaly) come back ``pending`` for polling. The ClickHouse client is
 overridden with a fake so no real CH is needed.
 """

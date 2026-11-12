@@ -7,17 +7,16 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """ClickHouse RBAC: quota tiers + pinned-setting tenant isolation.
 
-Every CH identity composes from (see
-docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md):
+Every CH identity composes from:
 
 - a TIER role (consumption: grants + settings profile + quota), and
 - the tenant axis (visibility): ONE shared role + one restrictive row policy per
   ``_org_id`` table, whose predicate reads the caller's ``SQL_current_tenant_id``
   setting. An org-tied user carries that setting PINNED READONLY, so a
   ``SETTINGS`` override in attacker-authored query text is a hard 452. Platform
-  identities simply do not hold the tenant role and read unrestricted.
+  identities do not hold the tenant role and read unrestricted.
 
-The catalogue is gitcrud config, not code; the reconciler renders whatever tiers
+The catalogue is gitcrud config, not code. The reconciler renders whatever tiers
 + orgs exist into idempotent ClickHouse DDL.
 """
 

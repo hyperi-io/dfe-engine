@@ -65,7 +65,7 @@ router = APIRouter(prefix="/kafka/topics", tags=["Kafka Topics"])
 
 
 class TopicFailure(BaseModel):
-    """One topic the broker would not do the thing to; the broker's own text is in the log."""
+    """One topic the broker would not do the thing to. The broker's own text is in the log."""
 
     name: str
     error: str
@@ -108,7 +108,7 @@ class TopicUpdateResponse(BaseModel):
     """Outcome of a converge pass.
 
     ``refused`` is what DFE declined to do (a partition decrease, a replication
-    factor change); ``failed`` is what the broker rejected. They are different
+    factor change). ``failed`` is what the broker rejected. They are different
     problems with different fixes, so they are different lists.
     """
 

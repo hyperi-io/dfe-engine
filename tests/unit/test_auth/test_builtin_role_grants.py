@@ -25,7 +25,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.governance.models import ActionDef
 
-# A governed action derives the action it requires from its name; any name stands for all.
+# A governed action derives the action it requires from its name. Any name stands for all.
 _GOVERNED_ACTION = ActionDef(name="probe").required_action
 
 
