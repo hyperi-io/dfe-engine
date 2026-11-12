@@ -75,7 +75,7 @@ A recurring query stresses two resources with two very different failure modes:
   shedding queries is exactly what the server limit is for. A true OS/cgroup OOM-KILL
   of the CH process (a crash/restart) is a separate, catastrophic mode, but it takes
   a misconfiguration (no OS headroom, wrong cgroup detection, limits above real RAM),
-  not merely concurrent heavy queries.
+  not concurrent heavy queries alone.
 
 So the smoother optimises a weighted composite of both, but memory still gets extra
 protection: its failure is a cliff (a spike fails *many* co-running queries at once),
@@ -289,7 +289,7 @@ stopped, not smoothed forever. The escalation ladder:
 
 1. **Smooth** (phase drift) - resolve co-scheduling peaks. Fixes contention.
 2. **Back off** (interval) - give a slow hunt room when it runs into itself. Fixes a
-   merely-slow hunt.
+   hunt that is only slow.
 3. **Auto-disable** - if it still fails, it is unfixable by scheduling: stop it and
    flag a human. The terminal "cannot be fixed" state.
 
