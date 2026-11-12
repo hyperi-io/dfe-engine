@@ -201,8 +201,8 @@ Source: filebeat
 
 The type registry (dfe-schemas `registries/types.yaml`) maps primitives to ClickHouse types
 and is global, not per-source. The schema section feeds the `SchemaBuilder` /
-`ClickHouseSchema` pipeline; what the Source changed is that create, migrate
-and drop are triggered from the source's state rather than from a standalone
+`ClickHouseSchema` pipeline. Create and migrate
+are triggered from the source's state rather than from a standalone
 schema config.
 
 ```yaml
@@ -229,8 +229,8 @@ full type system, the primitive-to-ClickHouse mapping and the use cases are in
 | created / active | `CREATE TABLE IF NOT EXISTS` (idempotent) |
 | schema YAML updated | `ALTER TABLE` via SchemaModifier (add/modify columns) |
 | dormant | none -- the table is retained, pre-positioned for reactivation |
-| disabled | guarded reclaim -- the table is dropped behind the caller's guard |
-| deleted | the table is retained; drop it by hand if the data is not wanted |
+| disabled | none -- routing and transforms turn off, the table and its data stay |
+| deleted | none -- the table is retained. Drop it by hand if the data is not wanted |
 
 Migrating off Elastic starts from the index template rather than from nothing:
 the converter maps Elastic types to primitives and analyzers to use cases and

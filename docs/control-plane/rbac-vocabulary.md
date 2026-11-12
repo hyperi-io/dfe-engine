@@ -5,13 +5,6 @@ dfe-infra, dfe-deploy, dfe-schemas, and the test environments. If a role
 or group name appears in two repos it means the same thing in both, or it is a
 bug.
 
-This exists because the alternative is what we had: ArgoCD knowing about
-`dfe-admins` but not `dfe-infra`, a second control plane calling the analyst role
-`ANALYST_USER`, and a test fixture inventing `dfe-infra-admins` alongside the
-`dfe-infra` the engine already seeds. Every one of those is a silent
-authorisation gap - a user who looks authorised in one system and is invisible to
-the next.
-
 > **dfe-engine owns this vocabulary.** Roles are defined in
 > [`src/dfe_engine/auth/resources/roles.yaml`](../../src/dfe_engine/auth/resources/roles.yaml)
 > and default groups in
