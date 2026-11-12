@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.90](https://github.com/hyperi-io/dfe-engine/compare/v1.22.89...v1.22.90) (2026-11-12)
+
+### Bug Fixes
+
+* **api:** describe the base path and login in the OpenAPI spec ([2368e1b](https://github.com/hyperi-io/dfe-engine/commit/2368e1b5853ff5406b1f2c81e54ec31f11ddaf6c))
+* **appmgmt:** run every fetcher source in one Compose fetcher ([4fee29e](https://github.com/hyperi-io/dfe-engine/commit/4fee29e0090008cc1974e497dda8cfefc6bf193b))
+* **e2e:** give the alert hunt its source and allow batch redelivery ([5ec9e57](https://github.com/hyperi-io/dfe-engine/commit/5ec9e57264f176102536704a3b016d93125c40f1))
+* **e2e:** read the app catalogue as a page in the flows suite ([494e914](https://github.com/hyperi-io/dfe-engine/commit/494e91487f3e4ec9f9c8c98cf2e8ac223dc38cfa))
+
 ## [1.22.89](https://github.com/hyperi-io/dfe-engine/compare/v1.22.88...v1.22.89) (2026-11-11)
 
 ### Bug Fixes
