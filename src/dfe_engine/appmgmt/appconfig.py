@@ -27,6 +27,10 @@ files, which is the one host-visible thing the engine writes on Compose: the
 deployer reads it to declare a container per instance, the way the layer2-apps
 ApplicationSet reads an Application per overlay on Kubernetes.
 
+A per-config app declaring ``shared_instance`` runs ONE container for every
+instance instead, so it gets one file at its app directory with each instance's
+block at that path merged into it, and no index.
+
 Two facts make it generic. Which file an app reads is the manifest's
 ``consumes.config``, and how a rendered file set reaches the app is the file
 set's ``dir_setting`` (one directory) or ``entries_path`` (one entry per file),
@@ -43,9 +47,11 @@ with the command that applies it, because a Compose stack's supervisor is the
 operator and an engine holding the docker socket would be a second one.
 """
 
+import copy
 import os
 import shutil
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,7 +59,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.gitcrud import GitCrud
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path, set_path
 from dfe_engine.yaml_utils import (
     YAMLError,
     deep_merge,
@@ -63,8 +69,15 @@ from dfe_engine.yaml_utils import (
 )
 
 from . import files, instances
-from .catalogue import APP_CATALOGUE, AppDescriptor, ConsumedFileSet, Multiplicity, ReloadMode
-from .scaling import DeployTarget
+from .catalogue import (
+    APP_CATALOGUE,
+    AppDescriptor,
+    ConsumedFileSet,
+    Multiplicity,
+    ReloadMode,
+    render_source_binding,
+)
+from .scaling import DeployTarget, runs_fixed_containers
 
 CONFIG_ROOT = "config"
 """The overlay key holding what becomes the app's own config file.
@@ -108,10 +121,10 @@ per-source container this render has only just declared, which a plain
 chains.
 """
 
-RESTART_HINT = f"restart required: {APPLY_COMMAND}"
+RESTART_HINT = "restart required: {command}"
 """What an operator runs to apply a write the running app cannot take in place."""
 
-RECREATE_HINT = f"recreate required: {APPLY_COMMAND}"
+RECREATE_HINT = "recreate required: {command}"
 """Compose reads env_file at up time, so a restart keeps the old environment."""
 
 REMOVE_HINT = "removal required: make apply"
@@ -120,6 +133,43 @@ REMOVE_HINT = "removal required: make apply"
 
 class AppConfigError(RuntimeError):
     """Raised when a rendered config cannot be written."""
+
+
+class SharedInstanceConflictError(ValueError):
+    """Raised when an overlay write would give a shared container an instance it cannot run beside the others."""
+
+    code = "shared_instance_conflict"
+    """The refusal code a route answers with."""
+
+
+_write_settings: Callable[[], Any] | None = None
+"""The deployment settings an overlay write is judged by, set by the process that writes."""
+
+
+def judge_writes_by(settings: Callable[[], Any] | None) -> None:
+    """Set where an overlay write reads the deployment settings from, or stop judging with None.
+
+    The engine and the local CLI set it once they hold their settings, so the
+    deploy repo's own write check knows which containers this deployment runs.
+    """
+    global _write_settings
+    _write_settings = settings
+
+
+def require_shared_fit(gc: GitCrud, name: str, doc: dict) -> None:
+    """Refuse an instance overlay the one container its app shares here cannot take.
+
+    Raises:
+        SharedInstanceConflictError: The instance clashes with one the container runs.
+    """
+    if _write_settings is None or not instances.is_deployed_overlay(name):
+        return
+    app = instances.parse_overlay_name(name)
+    if app is None:
+        return
+    refusal = shared_refusal(gc, app.descriptor, app.instance, doc, _write_settings())
+    if refusal:
+        raise SharedInstanceConflictError(refusal)
 
 
 def container_name(service: str, instance: str) -> str:
@@ -153,6 +203,12 @@ class RenderedApp:
     removed: bool = False
     """Whether this instance left the deploy repo, so its container has no config left to read."""
 
+    not_run: str = ""
+    """Why the shared container this instance would run in cannot take it. Empty where it runs."""
+
+    apply_command: str = APPLY_COMMAND
+    """The command that applies a render to one service, ``{service}`` where its name goes."""
+
     @property
     def container(self) -> str:
         """The Compose service carrying this render, which is what an operator acts on."""
@@ -161,15 +217,19 @@ class RenderedApp:
     @property
     def restart_hint(self) -> str:
         """The command that applies this change, or empty when none is needed."""
+        if self.not_run:
+            return f"not run: {self.not_run}"
         if self.removed:
-            return REMOVE_HINT
+            if self.apply_command == APPLY_COMMAND:
+                return REMOVE_HINT
+            return f"removal required: stop and remove the {self.container} container"
         # A changed env file changes the service definition, which `up` recreates
         # on, and `up` is also what CREATES the container a new instance lacks.
         if self.custom_env_changed or self.created:
-            return RECREATE_HINT.format(service=self.container)
+            return RECREATE_HINT.format(command=self.apply_command.format(service=self.container))
         if not self.restart_required:
             return ""
-        return RESTART_HINT.format(service=self.container)
+        return RESTART_HINT.format(command=self.apply_command.format(service=self.container))
 
 
 def enabled(settings: Any) -> bool:
@@ -183,6 +243,16 @@ def enabled(settings: Any) -> bool:
     if DeployTarget(settings.deployment.target) is not DeployTarget.DOCKER:
         return False
     return bool(str(settings.deployment.app_config_dir or "").strip())
+
+
+def apply_command(settings: Any) -> str:
+    """The command an operator runs to apply a render to one service here.
+
+    A deployer with no checkout names its own, so the hint never sends an operator
+    to a Makefile that is not there.
+    """
+    named = str(settings.deployment.apply_command or "").strip()
+    return named or APPLY_COMMAND
 
 
 def _out_root(settings: Any) -> Path:
@@ -573,6 +643,173 @@ def _clear_app_level_custom_env(settings: Any, app: AppDescriptor) -> None:
         )
 
 
+def shares_one_container(app: AppDescriptor, settings: Any) -> bool:
+    """Whether every instance of *app* runs in one container here, from one merged file."""
+    return bool(app.shared_instance) and runs_fixed_containers(
+        DeployTarget(settings.deployment.target)
+    )
+
+
+def _merge_disjoint(into: dict[str, Any], block: dict[str, Any], prefix: str) -> str:
+    """Merge *block* into *into* in place, or name the first key both set differently.
+
+    A mapping both carry is merged key by key, so two instances of a keyed family
+    meet under one family. Any other value set on both sides must be the same,
+    because one process reads one. *into* is left part-merged on a clash, so pass
+    a copy.
+    """
+    for key, value in block.items():
+        path = f"{prefix}.{key}"
+        if key not in into:
+            into[key] = copy.deepcopy(value)
+        elif isinstance(into[key], dict) and isinstance(value, dict):
+            clash = _merge_disjoint(into[key], value, path)
+            if clash:
+                return clash
+        elif into[key] != value:
+            return path
+    return ""
+
+
+def _shared_merge(
+    app: AppDescriptor, docs: list[tuple[str, dict]]
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Merge instance overlays, in the order given, into the one overlay a shared container runs.
+
+    Each instance's block at ``shared_instance`` is merged in. The rest of its
+    config and its ``extraEnv`` must match the first instance's, because the one
+    process reads one value of each. The bindings tie an instance to its source,
+    so the shared container binds to the app's own name instead.
+
+    Returns:
+        The merged overlay, empty where no instance merged, and why each
+        instance left out could not be, by instance name.
+    """
+    merge_at = _inner_path(app.shared_instance)
+    bindings = [_inner_path(path) for path in app.source_binding]
+    merged: dict[str, Any] = {}
+    agreed: dict[str, Any] | None = None
+    first = ""
+    refused: dict[str, str] = {}
+    for name, doc in docs:
+        config = _config_block(doc)
+        block = get_path(config, merge_at, default=None)
+        rest = copy.deepcopy(config)
+        for path in (merge_at, *bindings):
+            del_path(rest, path)
+        held = {CONFIG_ROOT: rest, ENV_ROOT: custom_env(doc)}
+        candidate = copy.deepcopy(merged)
+        reason = ""
+        if agreed is not None and held != agreed:
+            reason = f"its {', '.join(_differing_keys(held, agreed))} differs from {first}'s"
+        elif isinstance(block, dict):
+            clash = _merge_disjoint(candidate, block, app.shared_instance)
+            if clash:
+                reason = f"its {clash} is already set by another source"
+        if reason:
+            refused[name] = (
+                f"source {name!r} cannot share the one {app.service} this deployment runs: {reason}"
+            )
+            continue
+        merged = candidate
+        if agreed is None:
+            agreed, first = held, name
+    if agreed is None:
+        return {}, refused
+    config = copy.deepcopy(agreed[CONFIG_ROOT])
+    set_path(config, merge_at, merged)
+    for path, value in render_source_binding(app, app.service).items():
+        set_path(config, _inner_path(path), value)
+    return {CONFIG_ROOT: config, ENV_ROOT: agreed[ENV_ROOT]}, refused
+
+
+def _contains(outer: Any, inner: Any) -> bool:
+    """Whether every value *inner* sets is set the same in *outer*."""
+    if isinstance(inner, dict):
+        if not isinstance(outer, dict):
+            return False
+        return all(key in outer and _contains(outer[key], value) for key, value in inner.items())
+    return outer == inner
+
+
+def _running_first(
+    gc: GitCrud, app: AppDescriptor, settings: Any, *, leave_out: str = ""
+) -> list[tuple[str, dict]]:
+    """Every instance overlay of *app*, the ones its container already runs first.
+
+    An instance runs when the file rendered last carries its whole block, so a
+    newcomer that clashes is the one left out and never evicts a running one.
+    Name order breaks the tie, so a render with no file yet is stable too.
+    """
+    merge_at = _inner_path(app.shared_instance)
+    target = _out_root(settings) / app.service / app.config_file
+    running: Any = None
+    if target.is_file():
+        try:
+            running = get_path(yaml_load_string(target.read_text(encoding="utf-8")) or {}, merge_at)
+        except YAMLError:  # an unreadable last render shows nothing running
+            running = None
+    docs: list[tuple[bool, str, dict]] = []
+    for instance in instances.list_instances(gc, service=app.service):
+        if instance.instance == leave_out:
+            continue
+        try:
+            doc = instances.read_overlay(gc, instance)
+        except ResourceNotFoundError:
+            continue
+        block = get_path(_config_block(doc), merge_at, default=None)
+        runs = running is not None and block is not None and _contains(running, block)
+        docs.append((not runs, instance.instance, doc))
+    return [(name, doc) for _, name, doc in sorted(docs, key=lambda d: (d[0], d[1]))]
+
+
+def shared_refusal(gc: GitCrud, app: AppDescriptor, instance: str, doc: dict, settings: Any) -> str:
+    """Why the one container this deployment runs for *app* cannot take *instance*, empty where it can.
+
+    Judged against the instances already there, the running ones first, with
+    *doc* as the overlay the instance would carry, so a save is refused where a
+    render would leave it out.
+    """
+    if not shares_one_container(app, settings) or not enabled(settings):
+        return ""
+    docs = [*_running_first(gc, app, settings, leave_out=instance), (instance, doc)]
+    _, refused = _shared_merge(app, docs)
+    return refused.get(instance, "")
+
+
+def _merged_overlay(
+    gc: GitCrud, app: AppDescriptor, settings: Any
+) -> tuple[dict[str, Any], list[RenderedApp]]:
+    """The one overlay a shared container runs, and a ``not_run`` render per instance left out."""
+    merged, refused = _shared_merge(app, _running_first(gc, app, settings))
+    app_dir = _out_root(settings) / app.service
+    not_run = [
+        RenderedApp(
+            service=app.service,
+            instance=name,
+            directory=app_dir,
+            changed=True,
+            restart_required=False,
+            not_run=reason,
+        )
+        for name, reason in sorted(refused.items())
+    ]
+    return merged, not_run
+
+
+def _differing_keys(held: dict[str, dict], agreed: dict[str, dict]) -> list[str]:
+    """Each ``<root>.<key>`` whose value differs between two instances' shared halves."""
+    differs: list[str] = []
+    for root, block in held.items():
+        other = agreed[root]
+        differs.extend(
+            f"{root}.{key}"
+            for key in sorted(set(block) | set(other))
+            if block.get(key) != other.get(key)
+        )
+    return differs
+
+
 def _render_one(
     gc: GitCrud,
     app: AppDescriptor,
@@ -580,14 +817,21 @@ def _render_one(
     settings: Any,
     out_root: Path,
     mount_root: str,
+    *,
+    doc: dict | None = None,
 ) -> RenderedApp:
-    """Write one instance's config file and file sets, and report what taking it costs."""
-    doc: dict = {}
-    if instance is not None:
-        try:
-            doc = instances.read_overlay(gc, instance)
-        except ResourceNotFoundError:
-            doc = {}
+    """Write one instance's config file and file sets, and report what taking it costs.
+
+    ``doc`` stands in for the instance's overlay, which is how a shared container's
+    merged overlay is rendered at the app's own directory.
+    """
+    if doc is None:
+        doc = {}
+        if instance is not None:
+            try:
+                doc = instances.read_overlay(gc, instance)
+            except ResourceNotFoundError:
+                doc = {}
 
     # A per-config app's container reads its OWN instance directory, so two
     # sources of one connector never share a config file.
@@ -635,6 +879,7 @@ def _render_one(
         custom_env_changed=env_changed,
         per_instance=per_instance,
         created=per_instance and first_write,
+        apply_command=apply_command(settings),
     )
 
 
@@ -730,6 +975,43 @@ def _prune_custom_env(settings: Any, service: str, keep: list[str]) -> None:
             _report_unwritable(target.name, directory, exc)
 
 
+def _retire_instance_containers(
+    settings: Any, app: AppDescriptor, out_root: Path
+) -> list[RenderedApp]:
+    """Take away what a per-instance render left for an app now run by one shared container.
+
+    A leftover index would have the deployer declare those containers beside the
+    shared one, so the same sources would be polled twice. Each one named is
+    reported for removal, because its container may still be running.
+    """
+    directory = custom_env_dir(settings)
+    index = directory / f"{app.service}{INSTANCE_INDEX_SUFFIX}" if directory else None
+    listed: set[str] = set()
+    if index is not None and index.is_file():
+        listed = {line.strip() for line in index.read_text(encoding="utf-8").splitlines()}
+    dropped = _prune_instance_dirs(out_root / app.service, [fs.name for fs in app.files])
+    if index is not None and index.is_file():
+        _prune_custom_env(settings, app.service, [])
+        try:
+            index.unlink()
+        except OSError as exc:
+            _report_unwritable(index.name, index.parent, exc)
+    names = sorted(name for name in listed | set(dropped) if name)
+    return [
+        RenderedApp(
+            service=app.service,
+            instance=name,
+            directory=out_root / app.service / name,
+            changed=True,
+            restart_required=False,
+            per_instance=True,
+            removed=True,
+            apply_command=apply_command(settings),
+        )
+        for name in names
+    ]
+
+
 def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
     """Render every app's config from the deploy repo. Returns what was written.
 
@@ -744,6 +1026,12 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
     out_root.mkdir(parents=True, exist_ok=True)
     written: list[RenderedApp] = []
     for app in renderable(settings):
+        if shares_one_container(app, settings):
+            merged, not_run = _merged_overlay(gc, app, settings)
+            written.append(_render_one(gc, app, None, settings, out_root, mount_root, doc=merged))
+            written.extend(not_run)
+            written.extend(_retire_instance_containers(settings, app, out_root))
+            continue
         found = _instances_for(gc, app)
         written.extend(
             _render_one(gc, app, instance, settings, out_root, mount_root) for instance in found
@@ -764,6 +1052,7 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
                 restart_required=False,
                 per_instance=True,
                 removed=True,
+                apply_command=apply_command(settings),
             )
             for name in dropped
         )
@@ -793,6 +1082,14 @@ def render_and_report(gc: GitCrud | None, settings: Any) -> list[str]:
         return []
     for entry in rendered:
         if not entry.changed:
+            continue
+        if entry.not_run:
+            logger.warning(
+                "An instance is not run: the shared container cannot take its config",
+                app=entry.service,
+                instance=entry.instance,
+                reason=entry.not_run,
+            )
             continue
         if entry.removed:
             logger.info(

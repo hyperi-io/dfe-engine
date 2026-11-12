@@ -192,6 +192,7 @@ class SetupContext:
                 namespace=getattr(deployment, "namespace", "") or "",
                 secret_name=getattr(local, "admin_secret_name", "") or "",
                 secret_key=getattr(local, "admin_secret_key", "") or "",
+                deployer_command=getattr(deployment, "credential_command", "") or "",
             ),
             default_engine=default_engine,
             default_ttl_days=default_ttl_days,

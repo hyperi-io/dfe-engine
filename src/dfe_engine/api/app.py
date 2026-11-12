@@ -185,6 +185,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
         gitcrud = None
     app.state.gitcrud = gitcrud
+    from dfe_engine.appmgmt import appconfig
+
+    # The deploy repo's own write check judges an overlay by this deployment.
+    appconfig.judge_writes_by(lambda: app.state.settings)
 
     # Forge client for opening review PRs when a production+team write may not
     # commit straight to main (gitcrud/routing.py). None -> that posture refuses.
@@ -320,6 +324,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from dfe_engine.api.deps import get_source_registry_optional
 
     source_registry = get_source_registry_optional()
+    from dfe_engine.orgs.tenancy import Tenancy
+    from dfe_engine.source.registry import read_tenancy_from
+
+    # A source save checks a fetched source's org against the one shared fetcher.
+    read_tenancy_from(functools.partial(Tenancy.read, app.state.org_registry))
     # Ahead of the reconcile, which compiles the profiles a source binds.
     if gitcrud is not None:
         from dfe_engine.ingest.store import IngestStore
@@ -693,6 +702,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         await asyncio.gather(*autostart_tasks, return_exceptions=True)
     shutdown_registries()
+    appconfig.judge_writes_by(None)
+    from dfe_engine.source.registry import read_tenancy_from
+
+    read_tenancy_from(None)
     logger.info("DFE Engine API stopped")
 
 

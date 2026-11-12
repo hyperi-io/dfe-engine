@@ -806,6 +806,19 @@ class TestDeploymentHints:
         assert credential_fetch_command(DOCKER) == "make creds"
         assert "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD" in credential_fetch_command(LOCAL)
 
+    @pytest.mark.parametrize(
+        ("deployer_command", "expected"),
+        [
+            # A published compose install has no checkout, so it names its own way.
+            ("log in with the first-login password", "log in with the first-login password"),
+            # A checkout names none, and blank is the same as unset.
+            ("", "make creds"),
+            ("   ", "make creds"),
+        ],
+    )
+    def test_a_docker_deployer_s_own_command_wins(self, deployer_command, expected):
+        assert credential_fetch_command(DOCKER, deployer_command=deployer_command) == expected
+
     def test_rotation_command_is_a_store_operation(self):
         assert "patch secret" in rotation_store_command(
             KUBERNETES, namespace="dfe", secret_name="dfe-engine", secret_key="admin-password"

@@ -153,19 +153,18 @@ class TestShippedManifest:
         assert "config.destinations" in receiver.restart_paths
         assert "config.routing" not in receiver.restart_paths
 
-    def test_every_block_the_engine_writes_into_a_fetcher_reports_a_restart_but_its_org(self):
-        # A fetcher reload adds no source and rebuilds no output, so a Compose
-        # operator told nothing would keep running the old source. The org it
-        # stamps is re-read every fetch cycle, so it needs no restart.
+    def test_a_fetcher_reloads_its_sources_and_org_and_restarts_for_its_output(self):
+        # A reload starts, stops and rebuilds sources and re-reads the org each
+        # fetch cycle. The output's transport connections are built at startup.
         fetcher = catalogue.descriptor("dfe-fetcher")
 
         written = set(fetcher.routing_paths.values())
-        stamped_org = {"config.org_id", "config.default_org_id"}
+        reloaded = {"config.sources", "config.org_id", "config.default_org_id"}
 
         assert fetcher.hot_reload is True
-        assert stamped_org <= written
-        assert written - stamped_org <= set(fetcher.restart_paths)
-        assert not stamped_org & set(fetcher.restart_paths)
+        assert reloaded <= written
+        assert written - reloaded <= set(fetcher.restart_paths)
+        assert not reloaded & set(fetcher.restart_paths)
 
     def test_vector_reloads_its_transform_files_in_place(self):
         # It SIGHUPs Vector when only the transform files changed. The enrichment
@@ -502,6 +501,28 @@ class TestManifestParsing:
 
         with pytest.raises(CatalogueError, match=r"must be a config\. overlay path"):
             load_catalogue(path)
+
+    @pytest.mark.parametrize(
+        ("app", "refusal"),
+        [
+            ({"shared_instance": "config.sources"}, "needs multiplicity per_config"),
+            (
+                {"multiplicity": "per_config", "shared_instance": "sources"},
+                r"must be a config\. overlay path",
+            ),
+        ],
+    )
+    def test_a_shared_instance_that_cannot_be_merged_is_refused(self, tmp_path, app, refusal):
+        with pytest.raises(CatalogueError, match=refusal):
+            load_catalogue(self._manifest(tmp_path, app))
+
+    def test_only_the_fetcher_ships_a_shared_instance(self):
+        # A transform runs one source per process, so it declares none.
+        shared = {
+            s: a.shared_instance for s, a in catalogue.APP_CATALOGUE.items() if a.shared_instance
+        }
+
+        assert shared == {"dfe-fetcher": "config.sources"}
 
     def test_an_idle_when_that_is_not_a_list_is_refused(self, tmp_path):
         with pytest.raises(CatalogueError, match="idle_when must be a list"):

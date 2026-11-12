@@ -18,6 +18,8 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
+from scalo.cli.openapi import Credential
+
 from dfe_engine.query.models import (
     AuthContext,
     QueryMetadata,
@@ -26,11 +28,34 @@ from dfe_engine.query.models import (
 from dfe_engine.query.result import QueryResult
 
 
+def _refuse_unsendable(credential: Credential | None) -> None:
+    """Refuse a credential no header can carry, naming the fault and never the value.
+
+    The HTTP stack quotes a rejected header whole in its error, so a value with a
+    trailing newline would put the token in a traceback and a log.
+
+    Raises:
+        ValueError: The value holds a CR, LF or another control character.
+    """
+    value = credential.value if credential is not None else None
+    if value is None:
+        return
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        kind = "API key" if credential is not None and credential.is_api_key else "token"
+        raise ValueError(
+            f"the {kind} holds a control character (CR, LF or another), so no header can "
+            "carry it: strip the whitespace it was read with"
+        )
+
+
 class QueryClient:
     """Client for DFE Query API.
 
     Supports both direct (in-process) and HTTP modes.
     Clients specify query labels and parameters -- never raw SQL.
+
+    HTTP mode sends ``credential`` the way the ``dfe`` CLI does: an API key in
+    ``api_key_header``, a token as ``Authorization: Bearer``.
     """
 
     def __init__(
@@ -38,13 +63,19 @@ class QueryClient:
         base_url: str | None = None,
         direct: bool = False,
         timeout_seconds: int = 30,
+        *,
+        credential: Credential | None = None,
+        api_key_header: str = "X-API-Key",
     ):
         if not base_url and not direct:
             raise ValueError("Must specify base_url or direct=True")
+        _refuse_unsendable(credential)
 
         self.base_url = base_url
         self.direct = direct
         self.timeout_seconds = timeout_seconds
+        self.credential = credential
+        self.api_key_header = api_key_header
         self._http_client = None
         self._view_executor = None
 
@@ -58,6 +89,7 @@ class QueryClient:
                 base_url=self.base_url,
                 timeout=self.timeout_seconds + 10,
                 retries=3,
+                headers=self._auth_headers(),
             )
         return self._http_client
 
@@ -76,7 +108,6 @@ class QueryClient:
         time_from: str | None = None,
         time_to: str | None = None,
         timeout_seconds: int | None = None,
-        store: str | None = None,
         cache: bool = True,
     ) -> QueryResult:
         """Execute query and return result.
@@ -96,11 +127,23 @@ class QueryClient:
             time_from=time_from,
             time_to=time_to,
             timeout_seconds=timeout_seconds,
-            store=store,
             cache=cache,
         )
 
         return self._execute(query_label, params, options)
+
+    def _auth_headers(self) -> dict[str, str]:
+        """The headers the engine authenticates this client by, built as the CLI builds them."""
+        from scalo.cli.openapi import ScaloHttpTransport
+        from scalo.cli.openapi.client import Client
+
+        cli_client = Client(
+            self.base_url or "",
+            self.credential,
+            ScaloHttpTransport(),
+            api_key_header=self.api_key_header,
+        )
+        return cli_client.credentials()
 
     def _execute(
         self,

@@ -290,7 +290,7 @@ class TestATargetThatCannotConfigureAPerSourceApp:
                 declared = shape.refusal(
                     transport, (transport,), EVERY_APP, PER_CONFIG, applies_routing=False
                 )
-                assert declared == "cannot configure one", f"{shape.name}: {declared}"
+                assert declared == "would be saved and never run", f"{shape.name}: {declared}"
 
     def test_a_shape_needing_none_is_untouched(self) -> None:
         for shape in shapes.load_shapes():

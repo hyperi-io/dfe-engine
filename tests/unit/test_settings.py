@@ -13,6 +13,7 @@ from dfe_engine.settings import (
     DFESettings,
     HuntsSettings,
     load_settings,
+    parse_hosted_instances,
     reset_settings,
 )
 from dfe_engine.transport import SourceTransport
@@ -818,6 +819,47 @@ def _config_file(tmp_path, path: str, value: list) -> str:
     target = tmp_path / "dfe.yaml"
     target.write_text(yaml_dump_string(doc), encoding="utf-8")
     return str(target)
+
+
+class TestFixedContainerDeployment:
+    """What a deployer with no checkout tells the engine about the containers it runs."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("", {}),
+            (
+                "dfe-transform-elastic=demo-syslog, cisco-asa;dfe-transform-vrl=",
+                {
+                    "dfe-transform-elastic": frozenset({"demo-syslog", "cisco-asa"}),
+                    "dfe-transform-vrl": frozenset(),
+                },
+            ),
+        ],
+    )
+    def test_hosted_instances_are_read_per_app(self, raw, expected):
+        assert parse_hosted_instances(raw) == expected
+
+    @pytest.mark.parametrize(
+        ("deployment", "refusal"),
+        [
+            ({"hosted_instances": "demo-syslog,cisco-asa"}, "is not <app>=<instance>"),
+            ({"hosted_instances": "a=x;a=y"}, "name a twice"),
+            ({"apply_command": "docker compose restart"}, r"must carry \{service\}"),
+            # An escaped placeholder formats to a literal {service}.
+            ({"apply_command": "docker compose up -d {{service}}"}, r"must carry \{service\}"),
+            ({"apply_command": "up {service} {project}"}, "no other field"),
+            ({"apply_command": "up {service}" * 2}, "once"),
+            ({"apply_command": "up {service"}, "is not a template"),
+            ({"apply_command": "up {service} }"}, "is not a template"),
+            ({"apply_command": "up {service:{other}}"}, "no conversion or format spec"),
+            ({"apply_command": "up {service!x}"}, "no conversion or format spec"),
+            ({"apply_command": "up {service:>9}"}, "no conversion or format spec"),
+        ],
+    )
+    def test_a_declaration_the_engine_cannot_act_on_stops_startup(self, deployment, refusal):
+        with pytest.raises(ValidationError, match=refusal):
+            DFESettings(env="dev", deployment=deployment)
 
 
 class TestListsAcrossLayers:

@@ -13,6 +13,7 @@ behaviour, so a deployment can override them.
 """
 
 from collections.abc import Iterable
+from typing import Any
 
 from .models import Layout, ResourceClass
 
@@ -30,6 +31,18 @@ def _check_app_overlay(name: str, doc: dict) -> None:
 
     if is_deployed_overlay(name):
         check_overlay(doc)
+
+
+def _check_shared_container(repo: Any, name: str, doc: dict) -> None:
+    """Refuse an instance overlay the one container its app shares here cannot run.
+
+    At the write itself, so every writer of the class meets it: the API, an action,
+    the generic key routes, the seeds and the local CLI.
+    """
+    # At call time: appmgmt reads the deploy repo through this package.
+    from dfe_engine.appmgmt.appconfig import require_shared_fit
+
+    require_shared_fit(repo, name, doc)
 
 
 class UnknownResourceClassError(KeyError):
@@ -83,7 +96,13 @@ def default_registry() -> ResourceClassRegistry:
     return ResourceClassRegistry(
         [
             # helmvars class - deployment overlays
-            ResourceClass("helmvars", "values", rbac_prefix="helmvars", check=_check_app_overlay),
+            ResourceClass(
+                "helmvars",
+                "values",
+                rbac_prefix="helmvars",
+                check=_check_app_overlay,
+                repo_check=_check_shared_container,
+            ),
             # The same class for the charts that are NOT app instances - the
             # backing-service and platform overlays. A separate DIRECTORY because
             # anything under values/ becomes an Argo application: the appset's

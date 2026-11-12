@@ -219,12 +219,13 @@ class GitCrud:
         Raises:
             Exception: Whatever the class's check raises for a doc its reader refuses.
         """
-        refuse = self._cls(cls_name).check
-        if refuse is not None:
-            refuse(name, doc)
+        cls = self._cls(cls_name)
+        if cls.check is not None:
+            cls.check(name, doc)
+        if cls.repo_check is not None:
+            cls.repo_check(self, name, doc)
 
-    @staticmethod
-    def _yaml(resource_class: ResourceClass, name: str, rel: str, doc: dict) -> str:
+    def _yaml(self, resource_class: ResourceClass, name: str, rel: str, doc: dict) -> str:
         """*doc* as YAML that reads back as *doc*, the one way a resource reaches a commit.
 
         The class's ``check`` runs first, so no writer commits a doc its reader refuses.
@@ -236,6 +237,8 @@ class GitCrud:
         """
         if resource_class.check is not None:
             resource_class.check(name, doc)
+        if resource_class.repo_check is not None:
+            resource_class.repo_check(self, name, doc)
         return yaml_dump_string(doc, target=f"deploy-repo:{rel}")
 
     def reading(self) -> AbstractContextManager[None]:

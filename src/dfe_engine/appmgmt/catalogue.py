@@ -261,6 +261,13 @@ class AppDescriptor:
     app declares both halves rather than spending ``hot_reload`` on one.
     """
 
+    shared_instance: str = ""
+    """The overlay path one container merges across every instance, where a target runs a fixed container set.
+
+    ``config.`` rooted. Empty where one process runs one instance only, so such
+    a target cannot run a second.
+    """
+
     endpoints: dict[str, AppEndpoint] = field(default_factory=dict)
     """The listeners this app runs, by name. Absent means the app has none."""
 
@@ -530,6 +537,9 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
             service, raw.get("reload_setting"), hot_reload=hot_reload
         ),
         restart_paths=_restart_paths_from(service, raw.get("restart_paths"), hot_reload=hot_reload),
+        shared_instance=_shared_instance_from(
+            service, raw.get("shared_instance"), multiplicity=multiplicity
+        ),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
         mode_path=str(raw.get("mode_path", "")),
@@ -668,6 +678,28 @@ def _restart_paths_from(service: str, raw: object, *, hot_reload: bool) -> tuple
                 "because it is compared in the app's own config file"
             )
     return paths
+
+
+def _shared_instance_from(service: str, raw: object, *, multiplicity: Multiplicity) -> str:
+    """The overlay path a shared container merges across instances, empty when it names none.
+
+    Refused on a single-deployment app, which has one instance to share already,
+    and anywhere but under ``config.``: it is merged inside the app's own file.
+    """
+    if raw is None:
+        return ""
+    path = str(raw)
+    if multiplicity is not Multiplicity.PER_CONFIG:
+        raise CatalogueError(
+            f"{service}: shared_instance {path!r} needs multiplicity per_config, "
+            "because a single-deployment app runs one instance already"
+        )
+    if not path.startswith("config.") or path == "config.":
+        raise CatalogueError(
+            f"{service}: shared_instance {path!r} must be a config. overlay path, "
+            "because it is merged inside the app's own config file"
+        )
+    return path
 
 
 def _routing_paths_from(service: str, raw: object) -> dict[str, str]:

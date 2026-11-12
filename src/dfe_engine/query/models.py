@@ -80,12 +80,6 @@ class QueryOptions(BaseModel):
     # Caching
     cache: bool = Field(default=True, description="Allow cached results")
 
-    # Store override (only if query definition allows store: '*')
-    store: str | None = Field(
-        default=None,
-        description="Target store (database/schema/topic) - only if query allows",
-    )
-
 
 # =============================================================================
 # Query Response Models
