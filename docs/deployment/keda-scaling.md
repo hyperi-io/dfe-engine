@@ -44,7 +44,7 @@ The rule lives in `src/dfe_engine/scaling_pressure.py` and is substituted into b
 
 ## Per-app defaults
 
-Read from dfe-infra `argocd/values/apps/<app>/` and `apps.yaml` at 2.2.2. The profile-slim tier clears the ScalingPressure trigger, so on slim every KEDA app scales on CPU alone.
+Read from dfe-infra `argocd/values/apps/<app>/` and `apps.yaml` at the stack the build pins. The profile-slim tier clears the ScalingPressure trigger, so on slim every KEDA app scales on CPU alone.
 
 The docs site fills the table below from the dfe-infra chart renders at the build's own stack, so the published copy carries each app's replica bounds, CPU target and pressure trigger per profile.
 
