@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Configuration, scheduling and query API for the Data Fusion Engine.\n\nEvery route sits under `/api/v1` on the engine URL your deployment publishes. Get a token with `POST /api/v1/auth/login` (JSON body `username` and `password`, the console's accounts work here), then send it as `Authorization: Bearer <token>` on every other call.",
-    "version": "1.22.89"
+    "version": "1.22.90"
   },
   "paths": {
     "/api/v1/auth/login": {
