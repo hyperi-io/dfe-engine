@@ -32,6 +32,7 @@ from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, get_clickhouse_client
 from dfe_engine.appmgmt import instances
 from dfe_engine.appmgmt.operations import (
+    ACTIVE_CONNECTIONS,
     CPU_SECONDS,
     OPEN_FDS,
     RECORDS_DELIVERED,
@@ -579,19 +580,35 @@ def test_an_instance_that_is_not_deployed_is_not_found(ch_client, otel_db, conso
 # -- Latest gauges: a stuck stream beside the live one -----------------------
 
 
-def _gauge(*, age: int = 0, base: int, ch_client, db: str, started: int, value: float) -> None:
-    """One ``process_open_fds`` reading ``age`` seconds before ``base``, from a stream begun ``started`` seconds before ``base``."""
+def _gauge(
+    *,
+    age: int = 0,
+    attributes: dict[str, str] | None = None,
+    base: int,
+    ch_client,
+    db: str,
+    metric: str = OPEN_FDS,
+    pod: str = "pod-a",
+    started: int,
+    value: float,
+) -> None:
+    """One ``metric`` reading from ``pod``, ``age`` seconds before ``base``, from a stream begun ``started`` seconds before ``base``."""
+    attributes = attributes or {}
     ch_client.command(
         f"INSERT INTO `{db}`.otel_metrics_gauge "
-        "(ServiceName, MetricName, ResourceAttributes, StartTimeUnix, TimeUnix, Value) "
+        "(ServiceName, MetricName, Attributes, ResourceAttributes, StartTimeUnix, TimeUnix, Value) "
         "SELECT {service:String}, {metric:String}, "
-        "mapFromArrays(['service.instance.id'], ['pod-a']), "
+        "mapFromArrays({attr_keys:Array(String)}, {attr_values:Array(String)}), "
+        "mapFromArrays(['service.instance.id'], [{pod:String}]), "
         "toDateTime({base:UInt32} - {started:UInt32}), "
         "toDateTime({base:UInt32} - {age:UInt32}), {value:Float64}",
         parameters={
             "age": age,
+            "attr_keys": list(attributes),
+            "attr_values": list(attributes.values()),
             "base": base,
-            "metric": OPEN_FDS,
+            "metric": metric,
+            "pod": pod,
             "service": _SERVICE,
             "started": started,
             "value": value,
@@ -617,6 +634,43 @@ def test_a_stuck_stream_on_one_pod_never_wins_a_gauge_reading(
     gauges = OperationalReader(manager_client, otel_db).metrics(_SERVICE).gauges
 
     assert gauges[OPEN_FDS] == 26.0
+
+
+@pytest.mark.parametrize(
+    ("metric", "readings", "expected"),
+    [
+        # Two listeners on one pod add up
+        (ACTIVE_CONNECTIONS, [("pod-a", "http", 0, 2.0), ("pod-a", "grpc", 0, 3.0)], 5.0),
+        # Two replicas exporting 45 seconds apart add up
+        (ACTIVE_CONNECTIONS, [("pod-a", "http", 0, 2.0), ("pod-b", "http", 45, 4.0)], 6.0),
+        # A replaced pod drops out once it misses an export
+        (ACTIVE_CONNECTIONS, [("pod-a", "http", 120, 7.0), ("pod-b", "http", 0, 1.0)], 1.0),
+        # Only a listener's latest reading counts
+        (ACTIVE_CONNECTIONS, [("pod-a", "http", 60, 9.0), ("pod-a", "http", 0, 0.0)], 0.0),
+        # Any other gauge still reads the hottest pod
+        (OPEN_FDS, [("pod-a", "http", 0, 20.0), ("pod-b", "http", 0, 30.0)], 30.0),
+    ],
+    ids=["listeners", "replicas", "replaced-pod", "latest-only", "hottest-pod"],
+)
+def test_a_count_spread_across_series_reads_as_their_total(
+    base, ch_client, manager_client, otel_db, metric, readings, expected
+):
+    for pod, transport, age, value in readings:
+        _gauge(
+            age=age,
+            attributes={"transport": transport},
+            base=base,
+            ch_client=ch_client,
+            db=otel_db,
+            metric=metric,
+            pod=pod,
+            started=7185,
+            value=value,
+        )
+
+    gauges = OperationalReader(manager_client, otel_db).metrics(_SERVICE).gauges
+
+    assert gauges[metric] == expected
 
 
 def test_the_hour_table_reads_only_the_live_stream(ch_client, manager_client, otel_db, base):
