@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_secrets_seam.py
+#  File:         tests/unit/test_secrets_interface.py
 #  Purpose:      The scalo.secrets interface - real file backend, no mocks
 #  Language:     Python
 #

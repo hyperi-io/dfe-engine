@@ -297,7 +297,7 @@ async def test_valhalla_backoff_retries_on_429(monkeypatch):
     assert outcomes == []  # 429 exception then 200 both consumed
 
 
-def test_auth_secret_resolves_via_seam():
+def test_auth_secret_resolves_via_the_secrets_interface():
     """A git_token provider pulls its token from the DfeSecrets interface."""
 
     class _FakeSecrets:

@@ -127,7 +127,7 @@ async def test_the_breaker_reprobes_once_its_window_has_passed():
 
 
 @pytest.mark.usefixtures("reprobe_at_once", "short_timeout")
-async def test_a_cancelled_probe_does_not_wedge_the_breaker(audit_events: list[dict]):
+async def test_a_cancelled_probe_still_lets_the_next_call_probe(audit_events: list[dict]):
     listener = CountingListener(hold=True)
     try:
         client = HyperDXClient(base_url=f"http://127.0.0.1:{listener.port}", api_key="k")
