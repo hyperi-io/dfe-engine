@@ -250,7 +250,7 @@ The two compose - proactive shaping plus reactive guard - and the CH tag is the 
 
 A control loop you cannot see is one you cannot trust. Every input the smoother
 decides on, every change it makes, and everything it gives up on is emitted as a
-scalo metric through the standard OTel seam (see
+scalo metric through the standard OTel exporter (see
 [OBSERVABILITY-STANDARD.md](../deployment/observability-standard.md); default sink HyperDX). Three
 buckets:
 

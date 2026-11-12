@@ -1,25 +1,25 @@
 <!--
   Project:   dfe-engine
   File:      docs/deployment/backing-services.md
-  Purpose:   DFE backing services - every backend swaps at a seam
+  Purpose:   DFE backing services - every backend swaps by config
   License:   BUSL-1.1
   Copyright: (c) 2026 HYPERI PTY LIMITED
 -->
 
-# DFE Backing Services - swap every backend at a seam
+# DFE Backing Services - swap every backend by config
 
 DFE is a generic product that ships into clusters we never touch. So every backing
 service it stands on - the secrets store, the streaming bus, the object store, the
 load balancer, the IdP - has to be swappable without rewriting the product. This
-document is the itemised list of those backing services, the seam each one swaps
-at, and which concrete backend fills that seam per target.
+document is the itemised list of those backing services, the standard interface and setting each
+one swaps through, and which concrete backend fills it per target.
 
 ("Backing services" is the Twelve-Factor term: attached resources treated as
 swappable, bound by config, never hardcoded.)
 
 ## The one rule
 
-**Every backing service has its own seam, so each swaps without touching the others
+**Every backing service has its own interface and setting, so each swaps without touching the others
 or the engine.** There is no monolithic "on-prem build" vs "cloud build" - there is
 a per-service choice, and any mix is valid ("hybrid" is not a special case, it is
 just picking cells from different columns).
@@ -28,13 +28,13 @@ Two ownership lanes, applied to every backing service:
 
 - **dfe-infra** deploys or wires the concrete backend, and injects the config that
   selects it.
-- **dfe-engine** codes only to the seam (a standard interface + config), never to a
+- **dfe-engine** codes only to a standard interface plus config, never to a
   named product.
 
 ```mermaid
 flowchart LR
     cfg["dfe-infra: injects config<br/>(provider = openbao | aws | file ...)"]
-    eng["dfe-engine: codes to the seam<br/>(e.g. scalo.secrets.from_config)"]
+    eng["dfe-engine: codes to the interface<br/>(e.g. scalo.secrets.from_config)"]
     be[("concrete backend<br/>deployed/wired by dfe-infra")]
     cfg -->|selects| eng
     eng -->|talks to| be
@@ -43,15 +43,15 @@ flowchart LR
 
 ## Design FOR, build WITH (on-prem only, now) - strict YAGNI
 
-- **Design FOR** the swap: pick a seam that is *already* a standard, multi-backend
+- **Design FOR** the swap: pick an interface that is *already* a standard, multi-backend
   interface (scalo.secrets, the S3 API, OTel, the cert-manager Issuer, the k8s
   Gateway API, Argo). Choosing the standard interface and not hardcoding a product
   IS most of the design work - there is almost no bespoke abstraction to build.
 - **Build WITH** on-prem only, now: implement and wire just the on-prem column. The
-  cloud cells are real seams with deferred implementations - we fill them when we
+  cloud cells already name their standard interface and have a deferred implementation - we fill them when we
   actually do AWS, then GCP, then Azure, not before.
 - **YAGNI**: no speculative plugin framework, no factory-of-factories, no cloud code
-  paths for clouds we have not built. The seam is the thinnest thing that makes the
+  paths for clouds we have not built. The abstraction is the thinnest thing that makes the
   swap a *config* change.
 - **The engine carries no per-cloud branches.** Any `if aws: ... elif gcp: ...`
   belongs in dfe-infra config/wiring, never in dfe-engine. The engine stays
@@ -60,7 +60,7 @@ flowchart LR
 ## Two axes (do not conflate them)
 
 Size and platform are orthogonal. Size sets *composition*; platform sets *which
-product* fills each seam.
+product* fills each row of the matrix below.
 
 ```mermaid
 flowchart TB
@@ -68,7 +68,7 @@ flowchart TB
         direction LR
         d["dfe-docker<br/>(dev desktop)"] --- s1["slim"] --- s2["single"] --- s3["scale"]
     end
-    subgraph B["Axis 2 - platform (which backend product fills each seam)"]
+    subgraph B["Axis 2 - platform (which backend product fills each row)"]
         direction LR
         p0["on-prem / Rancher<br/>(built now)"] --- p1["AWS"] --- p2["GCP"] --- p3["Azure"]
     end
@@ -76,17 +76,17 @@ flowchart TB
 
 - **Size** = the three dfe-infra profiles (`argocd/values/profile-slim|single|scale.yaml`)
   plus the non-k8s `dfe-docker`. It changes replica counts, single-node vs cluster,
-  which optional apps run - not which product a seam binds to.
+  which optional apps run - not which product a row binds to.
 - **Platform** = the swap dimension (`argocd/values/local|aws|gcp|azure.yaml`).
   `terraform/environments/` has only `local` today: on-prem is the one built target.
 
 ## The matrix
 
-Rows are backing services; the seam is what the engine/infra codes to; the platform
-columns are the concrete backend. On-prem is built now; cloud cells are seam-ready,
+Rows are backing services; "Coded to" is the interface the engine/infra uses; the platform
+columns are the concrete backend. On-prem is built now; cloud cells have the interface chosen,
 implementation deferred (YAGNI).
 
-| Backing service | Seam | on-prem / Rancher (now) | AWS | GCP | Azure | dfe-docker |
+| Backing service | Coded to | on-prem / Rancher (now) | AWS | GCP | Azure | dfe-docker |
 |---|---|---|---|---|---|---|
 | Cluster / compute | k8s API | RKE2 / Rancher | EKS | GKE | AKS | single host |
 | Secrets | `scalo.secrets` provider | **OpenBao** | Secrets Manager | Secret Manager | Key Vault | `file` |
@@ -107,7 +107,7 @@ Priority backing services for the first swap passes: secrets, DNS,
 PCA/TLS, k8s, Kafka, ClickHouse. The rest are mostly dfe-infra config with little or
 no engine code.
 
-## Worked seam - secrets (the pattern for all of them)
+## Worked example - secrets (the pattern for all of them)
 
 The engine builds one manager from config and never names a product. dfe-infra sets
 the provider per target. This is the whole trick, applied to every row above.
@@ -133,7 +133,7 @@ dfe-receiver reads its ingest bearer tokens from the same backend, so the backen
 
 dfe-docker is the primary developer-desktop use case and is Kaz's repo (changes go
 via branch + PR). It must stay as small as possible: it is never production, so
-every seam takes its lightest backend - no OpenBao, no ESO, no Argo, no dfe-hyperdx
+every backing service takes its lightest backend - no OpenBao, no ESO, no Argo, no dfe-hyperdx
 dependency unless a dev opts in.
 
 ```mermaid
@@ -152,12 +152,12 @@ entirely), single-node ClickHouse, the `file` secrets provider, host ports inste
 of a gateway, self-signed TLS. Adding a heavier backend to dfe-docker is a smell -
 push weight to the k8s profiles, not the desktop.
 
-## Build order + seam status
+## Build order + status
 
-| Backing service | Seam status | Now (on-prem) | Deferred (cloud) |
+| Backing service | Interface status | Now (on-prem) | Deferred (cloud) |
 |---|---|---|---|
 | Secrets | ready (scalo.secrets) - the engine mints through it | file / OpenBao | aws built; gcp/azure refused |
-| ClickHouse | partial - the CH gateway consolidation is the seam | DFE CH modes | Cloud endpoints |
+| ClickHouse | partial - the CH gateway consolidation is still to do | DFE CH modes | Cloud endpoints |
 | Kafka | ready (scalo.kafka) | Strimzi / Redpanda | MSK / Confluent / Event Hubs |
 | Object store | ready (S3 API) | MinIO | S3 / GCS / Blob |
 | Auth / OIDC | ready (X-Oidc-* contract) | Keycloak / local | cloud IdPs |
@@ -169,8 +169,8 @@ real engine work. Everything else is "use the standard interface + dfe-infra con
 
 ## Next - reduce swap complexity and exception handling
 
-With the seams itemised, the follow-on work is to drive down the cost of a swap:
+With the backing services itemised, the follow-on work is to drive down the cost of a swap:
 keep every swap a config change, not a code branch; centralise the few genuine
 per-platform exceptions in dfe-infra values, not in dfe-engine; and delete any
-existing per-product coupling that bypasses a seam. That design pass is tracked
+existing per-product coupling that bypasses the standard interface. That design pass is tracked
 separately.

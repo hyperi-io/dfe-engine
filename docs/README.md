@@ -9,7 +9,7 @@ The DFE engine's documentation: the architecture, data evolution and local devel
 - [Data evolution -- the acceptance path](data-evolution-acceptance.md)
 - [Data evolution](data-evolution.md)
 - [Data plane](data-plane/README.md)
-- [Deployment seam](deployment/README.md)
+- [Deployment](deployment/README.md)
 - [Integrations](integrations/README.md)
 - [Running dfe-engine locally](local-dev.md)
 - [Reference](reference/README.md)

@@ -83,7 +83,7 @@ We honour it via the RBAC + protected-var policy, not by blocking the engine:
 - **PR mode** (prod env / protected vars / `governance` (RBAC) class / any class
   flagged `require_pr`): engine creates a short-lived branch
   `dfe/<class>/<resource>/<request-id>`, commits, and OPENS A PR via the git
-  PROVIDER API (Forgejo/GitHub/GitLab - provider-agnostic seam; REST via
+  PROVIDER API (Forgejo/GitHub/GitLab - provider-agnostic; REST via
   AsyncHttpClient, NOT git CLI). A required approval (human or policy bot) merges
   to `main`; protected-branch rules + approvals are configured at the GIT level.
 - Mode is resolved per change from: environment x class x protected-var-policy x a
@@ -130,7 +130,7 @@ Implemented in the gitcrud engine (see [[governed-ops-api]] Phase 1):
 - `CommitPolicy` builds every message + trailers from the request context (actor,
   role, class, action, request-id, base-SHA, audit-id) - callers cannot hand-write
   messages.
-- Mode resolver (direct vs PR) from env x class x policy; PR via the provider seam.
+- Mode resolver (direct vs PR) from env x class x policy; PR via the provider API.
 - Pre-commit validators: ASCII-only, subject <= 50, type in the allowed set, image/
   chart refs pinned (reject `latest`/floating), no controller-owned fields.
 - Signing + `sourceIntegrity` config emitted for Argo.
