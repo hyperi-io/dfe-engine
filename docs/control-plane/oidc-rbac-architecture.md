@@ -220,8 +220,8 @@ What a deployment must provide (dfe-infra owns these; the engine consumes them).
 - **Network egress** to IdP directory APIs for api-mode group resolution
   (`admin.googleapis.com`, `graph.microsoft.com`, `{org}.okta.com`).
 - **Envoy Gateway SecurityPolicy - the FALLBACK path only.** The Envoy
-  header-trust path (injecting `X-Oidc-Subject`/`X-Oidc-Groups`) is retained as
-  the edge posture where the engine sits strictly behind Envoy; it is NOT the
+  header-trust path (injecting `X-Oidc-Subject`/`X-Oidc-Groups`) is kept for
+  deployments where the engine sits strictly behind Envoy. It is NOT the
   primary login path (the native RP is). When used, the engine MUST be reachable
   only via Envoy (NetworkPolicy), or headers are forgeable.
 

@@ -68,7 +68,7 @@ outside it is not drift and a converge never proposes to undo it.
 
 `kafka.ensure_topics` set true also runs one ensure pass over every source at
 startup, so a deployment restored from its config repo has its topics before
-anything produces into them. Left unset it does not: a deployment that merely
+anything produces into them. Left unset it does not: a deployment that only
 carries a bus may not have been told where the broker is, and every boot would
 spend the admin timeout finding that out.
 
