@@ -19,8 +19,7 @@ not gate or defer firing - we nudge phases and let the fleet settle.
 > nothing drifts phases. What ships is the static part: each rate hunt fires at a fixed
 > phase offset hashed from its id (`hunts/schedule.py`), that offset is written to
 > `hunt_schedule` for the KEDA due count, and every hunt query carries a JSON
-> `log_comment` that `query_log_archive` attributes back to the hunt. The adaptive loop
-> is tracked for a later version in hyperi-io/dfe-engine#864.
+> `log_comment` that `query_log_archive` attributes back to the hunt.
 
 ## The picture (intuition first)
 
@@ -231,20 +230,19 @@ d_i ≈ p95( query_duration_ms ) / Δ     "
 ```
 
 Because it is a trailing p95 refreshed each cycle, the model tracks data-shape drift
-automatically - a table that grows or a join that gets heavier simply raises c_i/m_i
+automatically - a table that grows or a join that gets heavier raises c_i/m_i
 and the smoother re-drifts. This same telemetry feeds the interval-backoff loop
 (runs-into-itself) described in HUNT-RUNNER-SCALING.md.
 
-## ClickHouse-native backstop (defence in depth)
+## ClickHouse-native backstop (planned)
 
-The smoother *optimises* the curve proactively; it can still mis-predict when data
-shape jumps. So hunt queries also run inside a ClickHouse `WORKLOAD 'hunts'` with a
-weight (fair-share against ingestion / UI) and, per query, `max_memory_usage`. That
-gives a hard ceiling and reactive fair-share independent of our loop: our maths
-shapes the load, CH guarantees no single hunt query exceeds its memory cap - so a
-bad one fails on its own rather than starving co-runners or feeding an OS OOM-kill.
-The two compose - proactive shaping plus reactive guard - and the CH tag is the same
-`workload='hunts'` we set for attribution anyway.
+Hunt queries set no `WORKLOAD` in this release. The planned backstop: the smoother
+*optimises* the curve proactively but can still mis-predict when data shape jumps,
+so hunt queries would also run inside a ClickHouse `WORKLOAD 'hunts'` with a weight
+(fair-share against ingestion / UI) and, per query, `max_memory_usage`. That gives a
+hard ceiling and reactive fair-share independent of our loop: our maths shapes the
+load, CH guarantees no single hunt query exceeds its memory cap - so a bad one fails
+on its own rather than starving co-runners or feeding an OS OOM-kill.
 
 ## Metrics (scalo) - the controller is fully observable
 
@@ -256,9 +254,9 @@ buckets:
 
 **1. What it is running** (runner/daemon operational state):
 
-- `dfe_hunt_runner_due` - the due-but-unclaimed backlog (also the KEDA signal),
-  `dfe_hunt_runner_active_leases`, `..._claimed_total`, `..._executed_total`,
-  `..._deferred_total` (overrun), `..._lease_reclaims_total`, `..._tick_seconds`.
+- These ship today: `dfe_hunt_backlog` (the due-but-unclaimed backlog, also the KEDA
+  signal), `dfe_hunt_claims_total`, `dfe_hunt_runs_total`, `dfe_hunt_overruns_total`
+  and `dfe_hunt_tick_duration_seconds`.
 
 **2. What it changes** (the actuations - so every adjustment is auditable in metrics
 as well as in git):
@@ -269,7 +267,7 @@ as well as in git):
 - `dfe_hunt_autodisabled{hunt,reason}` (see below).
 
 **3. The combined/derived metrics it decides ON** - the novel bit: the controller's
-own inputs and objective are first-class metrics, so you can watch it work and prove
+own inputs and objective are metrics in their own right, so you can watch it work and prove
 it converges:
 
 - per-hunt cost model (trailing p95): `dfe_hunt_cost_cpu_us{hunt}`,
@@ -326,7 +324,7 @@ Planned, not built: none of these settings exist in the engine today.
 
 | Knob | Default | Meaning |
 |---|---|---|
-| `smoothing.enabled` | off (v1) | master switch for the adaptive loop |
+| `smoothing.enabled` | off | master switch for the adaptive loop |
 | `smoothing.weights` | `{cpu: 0.5, mem: 0.5}` | w_c / w_m in the composite P |
 | `smoothing.bucket_seconds` | 30 | Δ, the curve resolution |
 | `smoothing.max_step` | (period-relative) | Δφ_max, the per-cycle drift clamp |
@@ -340,12 +338,11 @@ Planned, not built: none of these settings exist in the engine today.
 
 ## Where it sits
 
-This is the v3 capability, tracked in hyperi-io/dfe-engine#864. v1 ("make the runner
-runnable") ships the static phase offsets and the JSON `log_comment` tagging. The offset
+What ships is the static phase offsets and the JSON `log_comment` tagging. The offset
 in `hunt_schedule` is read only by the KEDA due count: the runner, materialise and the
 API's next-due each compute the hash offset themselves, so the smoother first needs one
 offset source that all of them read, and materialise must stop overwriting learned
-offsets. The cost model (v2) comes before that.
+offsets. The cost model comes before that.
 
 ## Useful Links and References
 

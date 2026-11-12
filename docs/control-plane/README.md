@@ -22,12 +22,11 @@ flowchart TB
     engine -->|reads| schemas
     engine -->|commits config| deploy
     infra -->|deploys + syncs| deploy
-    ai(["dfe-ai<br/>peer service - NOT control-plane"]) -.->|calls the engine API| engine
 
     classDef cp fill:#cfe2ff,stroke:#084298;
     classDef ext fill:#e2e3e5,stroke:#41464b;
     class engine,schemas,ui,infra cp;
-    class deploy,ai ext;
+    class deploy ext;
 ```
 
 | Repo | Role in the layer |
@@ -47,9 +46,9 @@ ONE write path - so a change is auditable and consumers can never diverge.
 
 | SSoT | Lives in | Consumed by | Only written by |
 |---|---|---|---|
-| **API surface** - `openapi.json` | dfe-engine `openapi/` | dfe CLI, dfe-ui types, dfe-ai, contract mock, reference docs | the FastAPI routes via `generate.py` (never hand-edited) |
+| **API surface** - `openapi.json` | dfe-engine `openapi/` | dfe CLI, dfe-ui types, contract mock, reference docs | the FastAPI routes via `scripts/generate_openapi.py` (never hand-edited) |
 | **Schema** - event header, hunt-results DDL, profiles | dfe-schemas (the `dfe-schemas` wheel, pinned in `uv.lock`) | the engine (auto-creates the CH objects at startup), the CLI, dfe-ui | dfe-schemas commits |
-| **Deployment shape** - Helm charts + values | dfe-infra `helm/` (base charts) + the deploy-repo overlays | Argo CD, the cluster | base charts by dfe-infra; the overlays by the engine, one `values/<service>-<instance>-values.yaml` per app instance, each write a gitops commit. Where no chart runs (Compose), `appmgmt/appconfig.py` merges an overlay's `config:` over the deployment's base config into the app's config file |
+| **Deployment shape** - Helm charts + values | each app's thin chart, built from its deployment contract, plus dfe-infra values + the deploy-repo overlays | Argo CD, the cluster | the thin charts by each app's release, the values by dfe-infra, the overlays by the engine, one `values/<service>-<instance>-values.yaml` per app instance, each write a gitops commit. Where no chart runs (Compose), `appmgmt/appconfig.py` merges an overlay's `config:` over the deployment's base config into the app's config file |
 | **Deployed state** - the gitops YAML | dfe-deploy (per deployment) | Argo CD (syncs to the cluster), the engine (reads current state) | the engine API - every mutation is a git commit (governed ops); `dfe local` break-glass when the daemon is down |
 | **AuthZ** - RBAC roles + scopes | dfe-engine `auth/` (YAML) | the API (`require_action`), the CLI | the engine (governed writes) |
 
@@ -64,7 +63,7 @@ flowchart LR
     end
 
     routes["API routes"] -->|generate| api
-    api --> consumers["dfe CLI / dfe-ui / dfe-ai / docs"]
+    api --> consumers["dfe CLI / dfe-ui / docs"]
     schema --> engine["dfe-engine<br/>(auto-creates CH objects)"]
     engine -->|compiles + commits| helm
     engine -->|every mutation = a commit| state
@@ -106,7 +105,6 @@ flowchart TB
 
     spec -->|"command tree at runtime<br/>(x-scalo.cli.hidden opts out)"| cli["dfe CLI"]
     spec -->|"openapi-typescript<br/>-> @dfe/dfe-engine-types"| ui["dfe-ui"]
-    spec -->|"HTTP client + MCP tool schemas"| ai["dfe-ai peer service"]
     spec -->|"Prism"| mock["contract mock (dev + CI)"]
     spec -->|"Swagger UI"| refdocs["API reference docs"]
 
@@ -120,7 +118,6 @@ flowchart TB
   add an endpoint and the CLI grows a command, with no CLI code. An endpoint
   opts out via `x-scalo.cli.hidden`.
 - **dfe-ui** generates its TypeScript types from the same spec.
-- **dfe-ai** (the peer service) reads the spec for its client + MCP tool schemas.
 
 So when the API changes: change the routes, regenerate `openapi.json`, and every
 consumer follows. Never edit `openapi.json` by hand or let a consumer drift from
@@ -128,11 +125,6 @@ it.
 
 ## What is NOT in this layer
 
-- **dfe-ai** is a **peer service**, not control-plane - a single modular service
-  (all AI capability + an MCP layer in one deployable, sharing the scalo
-  foundation with the engine). It is a compute peer the control plane
-  orchestrates; it owns no config and calls the engine API for data. See the
-  dfe-ai service spec.
 - The data-plane repos (receivers, loaders, transforms, fetchers, archiver,
   hunt-runner) are downstream services the control plane configures - not part
   of it.
@@ -143,7 +135,7 @@ it.
 |---|---|
 | [governed-ops-design.md](governed-ops-design.md) | GitCrud + governance layer + curated actions |
 | [gitops-commit-standard.md](gitops-commit-standard.md) | machine-commit conventions for gitops repos |
-| [oidc-rbac-architecture.md](oidc-rbac-architecture.md) | OIDC + RBAC SSoT - auth model, the two RBAC planes, provider registry + adapters, management API, infra requirements, test emulation |
+| [oidc-rbac-architecture.md](oidc-rbac-architecture.md) | OIDC + RBAC SSoT - auth model, the two RBAC planes, provider registry + adapters, management API, infra requirements |
 | [rbac.md](rbac.md) | auth paths, RBAC model, multi-tenant ClickHouse, stores |
 | [rbac-sign-in.md](rbac-sign-in.md) | identity resolution, the sign-in allowlist, first login and password changes |
 | [rbac-groups.md](rbac-groups.md) | IdP group sync, linking a group to an IdP group, the checks on a link |

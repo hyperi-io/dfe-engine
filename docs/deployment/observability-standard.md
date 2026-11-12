@@ -57,6 +57,16 @@ Stdout is the log path, so an app needs no OTLP logging SDK to reach `otel_logs`
 - On Kubernetes, the collector daemonset's `filelog` receiver reads `/var/log/pods` on each node and forwards to the gateway. A record with no `service.name` takes the container name, then the workload, then the pod.
 - On Docker, the `fluentd` log driver sends each DFE container's stdout to the collector's `fluentforward` receiver on port 24224, and the container name becomes `service.name`. `DFE_CONTAINER_LOGS_ENABLED=false` puts every service back on `json-file`.
 
+The infra provider's own logs are a second feed into the same otel tables, off the DFE ingest path. The cluster annotation `dfe.hyperi.io/provider_logs_flavour` picks the receiver, run in a collector of its own so a failed receiver restarts alone:
+
+| Flavour | Receiver and source |
+|---|---|
+| `none` (default) | nothing renders |
+| `aws` | `aws_cloudwatch`, polling the EKS audit and CloudTrail log groups |
+| `azure` | `azure_event_hub`, fed by a diagnostic setting |
+| `gcp` | `googlecloudpubsub`, fed by a log sink into a Pub/Sub subscription |
+| `rancher` | `filelog` on the control-plane nodes, reading the kube-apiserver audit log |
+
 ## Metrics, traces and identity
 
 Apps push metrics and traces over OTLP to the endpoint `telemetry.mode` resolves. In the Rust apps this comes from scalo-rs, whose `metrics` feature includes `otel-metrics` and `otel-tracing`.
@@ -96,8 +106,6 @@ Both deployments ship a self-monitoring check beside the core data-path test.
 
 - Kubernetes: dfe-infra's post-deploy smoke test (`bootstrap/smoke-test-integration.sh`, CORE 1) polls for up to 180s for an `otel_logs` row newer than 600s in the DFE database, by default. It proves the pipeline is streaming. It does not say which services report.
 - Docker: dfe-docker's `make post` asserts `dfe.otel_*` rows newer than five minutes, and an `otel_logs` row from each of `dfe-engine`, `dfe-loader` and `dfe-receiver` written since that container started.
-
-Required, not yet built: the Kubernetes check asserting rows by `service.name`, dfe-engine and dfe-ui included, within the freshness window.
 
 ## References
 

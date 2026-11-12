@@ -109,7 +109,7 @@ minted password.
 `kubernetes` | `local`, from `DFE_ENGINE_DEPLOYMENT_TARGET` else scalo's runtime
 detection) and `credential_fetch_command`: `make creds` for docker, `kubectl -n
 <ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d` for kubernetes,
-the environment file for local. Both survive setup completion (#301) -- that is
+the environment file for local. Both survive setup completion -- that is
 when an operator has lost the password.
 
 ---

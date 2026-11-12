@@ -1,43 +1,24 @@
-# DFE Query API - Python SDK
+# DFE Query API - Python client
 
-**Version:** 2.0.0
-**Last Updated:** 2026-07-13
-
-This document specifies how to consume the DFE Query API from Python applications.
+`dfe_engine.query.QueryClient` ships inside the dfe-engine image. dfe-engine is not published to PyPI, so code outside the image calls the [HTTP API](query-api.md) with its own HTTP client and a bearer token or API key.
 
 ---
 
 ## Overview
 
-The Query API provides a **secure, label-based interface** for querying multiple datasources (ClickHouse, PostgreSQL, Prometheus). Key security features:
-
-- **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
-- **Mandatory tenant isolation** - `_org_id` injected from the org the session's account or API key is bound to, cannot be overridden
-- **Role-based access control** - Queries can require specific roles/permissions
-- **Parameter validation** - All parameters validated against server-side schemas
+- **No raw SQL from clients** - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
+- **Mandatory tenant isolation** - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
+- **Scope-based access control** - `query:read` browses the views and `query:execute` runs them
 - **Native JSON responses** - dict rows via clickhouse-connect, no Arrow/pyarrow dependency
 
 ---
 
 ## Requirements
 
-### Minimum Versions
-
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `httpx` | ≥0.27.0 | HTTP client (for HTTP mode) |
-| `pandas` | ≥2.2.0 | DataFrame conversion (optional) |
-| Python | ≥3.12 | Runtime |
-
-### Installation
-
-```bash
-# If using dfe-engine directly
-pip install dfe-engine>=2.0.0
-
-# If consuming API externally
-pip install httpx>=0.27.0
-```
+| `pandas` | >=2.2.0 | DataFrame conversion (optional) |
+| Python | >=3.14 | Runtime |
 
 ---
 
@@ -45,7 +26,7 @@ pip install httpx>=0.27.0
 
 ### Direct Mode (In-Process)
 
-Use when the Query API is in the same process (e.g. inside the dfe-engine API server):
+Use inside the engine process. Direct mode runs the view through the engine's own `ViewExecutor` with an admin context:
 
 ```python
 from dfe_engine.query import QueryClient
@@ -66,17 +47,14 @@ df = result.to_pandas()
 df.groupby("event_type").count()
 ```
 
-### HTTP Mode (External Consumer)
+### HTTP Mode
 
-Use when consuming the API over HTTP:
+HTTP mode posts to `/api/v1/queries/views/{label}/execute` and sends no credentials, so it is answered only by an engine with auth disabled (a dev `DFE_ENGINE_ENV`):
 
 ```python
 from dfe_engine.query import QueryClient
 
-# Create client with API URL
 client = QueryClient(base_url="http://localhost:8000")
-
-# Same API as direct mode - always use query labels, never raw SQL
 result = client.query(
     "analytics/user_activity",
     params={"event_types": ["login"]},
@@ -88,40 +66,14 @@ df = result.to_pandas()
 
 ## Security Model
 
-### Key Principles
-
-1. **Query labels, not SQL** - Clients reference pre-defined queries by label
-2. **Server-side SQL** - SQL templates stored in registry, clients cannot modify
-3. **Automatic tenant isolation** - `_org_id` taken from the session's bound org and injected
-4. **Parameter validation** - All params validated against schema before execution
-5. **Role-based access** - Queries can require specific roles/permissions
-
-### Example Security Flow
+A view is a ClickHouse parameterised view deployed through the governed DDL path and discovered by the engine's `ViewCatalog`. There is no YAML query registry and no per-query role list. The executor passes on only the parameters the view declares, unvalidated, and injects `org_id` from the auth context. A missing or mistyped parameter fails in ClickHouse.
 
 ```python
-# Client sends:
 result = client.query(
-    "hunts/active_threats",  # Query label
-    params={"severities": ["critical", "high"]},  # Validated parameters
+    "hunts/active_threats",                         # view label
+    params={"severities": ["critical", "high"]},    # the view's parameters
     limit=500,
 )
-
-# Server-side query definition (not visible to client):
-# queries:
-#   hunts/active_threats:
-#     sql: |
-#       SELECT alert_id, severity, timestamp
-#       FROM {{ store }}.alerts
-#       WHERE org_id = {{ _org_id }}  -- INJECTED, cannot be overridden
-#       AND severity IN {{ severities | sql_array }}
-#       LIMIT {{ limit }}
-#     parameters:
-#       severities:
-#         type: array
-#         items: string
-#         required: true
-#     tenant_isolated: true
-#     required_roles: [analyst]
 ```
 
 ---
@@ -165,12 +117,6 @@ result = client.query(
     time_to="2024-01-31T23:59:59Z",
     timeout_seconds=120,
 )
-
-# With store override (only if query definition allows store='*')
-result = client.query(
-    "admin/table_stats",
-    store="analytics_db",  # Target store
-)
 ```
 
 **Parameters:**
@@ -178,7 +124,7 @@ result = client.query(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `query_label` | `str` | Query identifier (e.g., `"analytics/user_activity"`) |
-| `params` | `dict` | Query parameters (validated against schema) |
+| `params` | `dict` | The view's parameters. Undeclared names are dropped, and values are not validated |
 | `limit` | `int` | Maximum rows (clamped to query/global max) |
 | `offset` | `int` | Skip first N rows (offset-based pagination); not combinable with `after_key` |
 | `order_by` | `str` | Column to order and page by (keyset pagination) |
@@ -189,7 +135,7 @@ result = client.query(
 | `time_from` | `str` | Start time (ISO8601) for time-bounded queries |
 | `time_to` | `str` | End time (ISO8601), defaults to now |
 | `timeout_seconds` | `int` | Query timeout (clamped to query/global max) |
-| `store` | `str` | Target store (only if query allows) |
+| `store` | `str` | Accepted and ignored: the view executor always runs in the data database |
 | `cache` | `bool` | Allow cached results (default: `True`) |
 
 To get a pandas DataFrame directly, call `.to_pandas()` on the `QueryResult`:
@@ -329,7 +275,7 @@ class ExplainStep(BaseModel):
 
 ## Pagination
 
-The Query API supports three pagination modes for different use cases.
+The Query API supports two pagination modes, offset and keyset.
 
 ### Offset-Based Pagination
 
@@ -393,164 +339,35 @@ while result.metadata.has_more:
 
 ## Storage Listing
 
-Query API provides built-in queries for listing files in S3, MinIO, and local filesystems.
-
-### S3 Bucket Listing
-
-```python
-# List S3 bucket contents
-result = client.query(
-    "storage/s3_list",
-    params={
-        "bucket": "my-bucket",
-        "prefix": "logs/2024/",
-    },
-    limit=1000,
-)
-
-df = result.to_pandas()
-# Columns: name, path, type, size, modified, etag, storage_class, content_type
-print(df[["name", "type", "size"]])
-```
-
-### MinIO Listing
-
-```python
-# List MinIO bucket (same API as S3)
-result = client.query(
-    "storage/minio_list",
-    params={
-        "bucket": "my-bucket",
-        "prefix": "data/",
-    },
-)
-```
-
-### Filesystem Listing
-
-```python
-# List local directory
-result = client.query(
-    "storage/file_list",
-    params={
-        "path": "reports/2024",
-        "recursive": True,
-        "pattern": "*.json",
-    },
-)
-
-df = result.to_pandas()
-for _, row in df.iterrows():
-    print(f"{row['type']:10} {row['size']:>10} {row['name']}")
-```
-
-### Storage Listing Schema
-
-All storage adapters return a consistent JSON schema:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `name` | `string` | File or directory name |
-| `path` | `string` | Full path within storage |
-| `type` | `string` | `"file"` or `"directory"` |
-| `size` | `integer` | Size in bytes (0 for directories) |
-| `modified` | `datetime \| None` | Last modified time, `None` for directories |
-| `etag` | `string \| None` | Object ETag (S3/MinIO) |
-| `storage_class` | `string \| None` | Storage class (S3/MinIO) |
-| `content_type` | `string \| None` | MIME type |
-
-### Storage Pagination
-
-Storage listings page with `limit` and `offset`:
-
-```python
-# Page through large bucket
-result = client.query(
-    "storage/s3_list",
-    params={"bucket": "my-bucket", "prefix": "logs/"},
-    limit=1000,
-)
-
-all_files = []
-while True:
-    all_files.extend(result.to_pylist())
-    if not result.metadata.has_more:
-        break
-    result = client.query(
-        "storage/s3_list",
-        params={"bucket": "my-bucket", "prefix": "logs/"},
-        offset=result.metadata.next_offset,
-        limit=1000,
-    )
-
-print(f"Total files: {len(all_files)}")
-```
+S3, MinIO and filesystem listings run on the raw route (`POST /api/v1/queries/raw`, scope `raw_query:execute`), which `QueryClient` does not call. The request shape and listing columns are in [query-api.md](query-api.md#storage-listing).
 
 ---
 
 ## Error Handling
 
+Direct mode raises the executor's `ViewExecutionError` (`ViewRequestError` for bad parameters or options) and `KeyError` for an unknown label. HTTP mode raises the HTTP client's status error, carrying the problem response's `code` (see [query-api.md](query-api.md#error-handling)).
+
 ```python
 from dfe_engine.query import QueryClient
-from dfe_engine.query.registry import QueryNotFoundError
-from dfe_engine.query.validator import (
-    ParameterValidationError,
-    AuthorizationError,
-)
-import httpx
+from dfe_engine.query.executor import ViewExecutionError, ViewRequestError
 
-client = QueryClient(base_url="http://localhost:8000")
+client = QueryClient(direct=True)
 
 try:
-    result = client.query(
-        "hunts/active_threats",
-        params={"severities": ["critical"]},
-    )
-except QueryNotFoundError as e:
-    print(f"Query not found: {e}")
-except ParameterValidationError as e:
-    print(f"Invalid parameter '{e.param}': {e}")
-except AuthorizationError as e:
-    print(f"Not authorized: {e}")
-except httpx.HTTPStatusError as e:
-    if e.response.status_code == 504:
-        print("Query timed out")
-    else:
-        raise
-except httpx.ConnectError:
-    print("Cannot connect to Query API")
+    result = client.query("hunts/active_threats", params={"severities": ["critical"]})
+except KeyError:
+    print("No view with that label")
+except ViewRequestError as e:
+    print(f"Bad parameters or options: {e}")
+except ViewExecutionError as e:
+    print(f"ClickHouse failed the view: {e}")
 ```
-
-### Common Errors
-
-| Error | Cause | Resolution |
-|-------|-------|------------|
-| `QueryNotFoundError` | Invalid query label | Check query label spelling |
-| `ParameterValidationError` | Invalid or missing parameter | Check parameter schema |
-| `AuthorizationError` | Missing required role/permission | Contact admin for access |
-| `HTTP 504` | Query timeout | Increase timeout or optimize query |
 
 ---
 
 ## Query Labels
 
-Queries are referenced by labels in `namespace/name` format:
-
-```python
-# Analytics namespace
-client.query("analytics/user_activity")
-client.query("analytics/conversion_funnel")
-client.query("analytics/retention_cohorts")
-
-# Hunts namespace
-client.query("hunts/active_threats")
-client.query("hunts/ioc_matches")
-client.query("hunts/anomaly_detection")
-
-# System namespace (requires admin role)
-client.query("system/health_check")
-client.query("system/table_stats")
-```
+A view is referenced by a label in `namespace/name` form. `GET /api/v1/queries/views` lists the labels a deployment has.
 
 ---
 
@@ -606,7 +423,7 @@ while True:
 ```python
 from fastapi import FastAPI, Depends, HTTPException
 from dfe_engine.query import QueryClient
-from dfe_engine.query.validator import AuthorizationError
+from dfe_engine.query.executor import ViewRequestError
 
 app = FastAPI()
 
@@ -634,8 +451,8 @@ async def get_threats(
                 "cached": result.metadata.cached,
             },
         }
-    except AuthorizationError:
-        raise HTTPException(status_code=403, detail="Not authorized")
+    except ViewRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 ```
 
 ### CLI Tool
