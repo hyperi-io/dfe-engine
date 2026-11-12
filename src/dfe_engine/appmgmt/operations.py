@@ -77,6 +77,9 @@ GAUGE_METRICS = (
     PIPELINE_READY,
 )
 
+# Counts spread across listeners and pods, read as their total rather than the hottest series.
+SUMMED_GAUGES = (ACTIVE_CONNECTIONS,)
+
 # Counters forming the scalo pipeline contract, shared by every data-path app.
 RECORDS_RECEIVED = "records_received_total"
 RECORDS_PROCESSED = "records_processed_total"
@@ -358,7 +361,10 @@ class OperationalReader:
         )
 
     def _gauges(self, service: str) -> dict[str, float]:
-        rows = self._run("latest_gauges", {"service": service, "names": list(GAUGE_METRICS)})
+        rows = self._run(
+            "latest_gauges",
+            {"names": list(GAUGE_METRICS), "service": service, "summed": list(SUMMED_GAUGES)},
+        )
         return {str(name): float(value) for name, value in rows}
 
     def _rates(self, service: str) -> dict[str, float]:

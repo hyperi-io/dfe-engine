@@ -29,21 +29,32 @@ queries:
   # runs scalo-rs#331 and none before it, a scraped row in its attributes. Rows that
   # name no pod share one series.
   # A scalo-rs pod exports a gauge's stuck first stream in the same second as its live one, so the newer start wins the tie.
+  # A gauge in `summed` is a count spread across series, such as open connections per listener on each pod, so it reads as the sum of the series still reporting: those seen within `fresh_seconds` of the newest, so a replaced pod drops out once it misses an export.
   latest_gauges:
     database: otel
     sql: >
-      SELECT metric, max(value) AS value
+      SELECT
+        metric,
+        if(metric IN {summed:Array(String)},
+           sumIf(value, seen + {fresh_seconds:UInt32} >= newest),
+           max(value)) AS value
       FROM (
-        SELECT __PRESSURE_NAME__ AS metric, argMax(Value, (TimeUnix, StartTimeUnix)) AS value
-        FROM __DB__.otel_metrics_gauge
-        WHERE ServiceName = {service:String}
-          AND (MetricName IN {names:Array(String)} OR __PRESSURE_MATCH__)
-          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
-        GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']
+        SELECT metric, value, seen, max(seen) OVER (PARTITION BY metric) AS newest
+        FROM (
+          SELECT __PRESSURE_NAME__ AS metric,
+                 argMax(Value, (TimeUnix, StartTimeUnix)) AS value,
+                 max(TimeUnix) AS seen
+          FROM __DB__.otel_metrics_gauge
+          WHERE ServiceName = {service:String}
+            AND (MetricName IN {names:Array(String)} OR __PRESSURE_MATCH__)
+            AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+          GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']
+        )
       )
       GROUP BY metric
     params: [service]
     binds:
+      fresh_seconds: 90
       window_seconds: 300
     timeout_seconds: 10
 
