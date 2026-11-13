@@ -68,7 +68,7 @@ nothing.
 ## 5. How it deploys
 
 Every dfe-ui release publishes the image `ghcr.io/hyperi-io/dfe-ui` and the Helm chart
-`oci://ghcr.io/hyperi-io/charts/dfe-ui` at the same version (1.7.12 as of 2026-10-11).
+`oci://ghcr.io/hyperi-io/charts/dfe-ui` at the same version.
 hyperi-ci renders the chart from dfe-ui's committed deployment contract,
 `deploy/contract.json`.
 

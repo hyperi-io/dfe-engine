@@ -263,7 +263,7 @@ Protocol surface: token issue, OIDC or SCIM (RFC 7644) fixes its shape.
 
 ## Frozen: sigma
 
-Inert for 2.2.1 and hidden from the CLI and MCP. Placed when sigma returns.
+Inert and hidden from the CLI and MCP. Placed when sigma returns.
 
 | Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
 |---|---|---|---|---|---|---|---|
