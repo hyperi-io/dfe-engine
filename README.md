@@ -61,7 +61,7 @@ The image bakes the dfe-schemas trees in at `/app/schemas` and an empty `/app/co
 - [docs/deployment/](docs/deployment/README.md): the chart, the image and the deployment contract.
 - [docs/reference/](docs/reference/README.md): the API and CLI reference.
 
-The suite's published docs are at https://dfe.docs.hyperi.io, and [dfe-infra](https://github.com/hyperi-io/dfe-infra) deploys the whole suite.
+The suite's published docs are at <https://dfe.docs.hyperi.io>, and [dfe-infra](https://github.com/hyperi-io/dfe-infra) deploys the whole suite.
 
 ## Help and contributing
 
