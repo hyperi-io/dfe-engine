@@ -26,10 +26,10 @@ cd dfe-engine
 uv sync   # pulls dfe-schemas, which carries the schema and DDL trees
 ```
 
-Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`, without which the engine refuses to start on the placeholder JWT secret, and `DFE_CONFIG_DIR=./config`, without which it tries to create `/app/config`. `/livez` answers on port 8000:
+Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`, without which the engine refuses to start on the placeholder JWT secret, and `DFE_CONFIG_DIR=./config`, without which it tries to create `/app/config`. The API answers on port 8000 and `/livez` and `/readyz` on the observability listener, port 9090:
 
 ```bash
-env DFE_ENGINE_ENV=dev DFE_CONFIG_DIR=./config uv run dfe-engine
+env DFE_ENGINE_ENV=dev DFE_CONFIG_DIR=./config uv run dfe-engine run
 ```
 
 With no ClickHouse reachable it retries for a minute, then serves with `/readyz` reporting `clickhouse: false`. The local ClickHouse settings, the observability port and the other repos are in [docs/local-dev.md](docs/local-dev.md).
