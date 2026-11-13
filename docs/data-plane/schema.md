@@ -527,7 +527,7 @@ at validation time with a clear error.
 
 You don't need to know this to use the schema system. This section is for
 engine developers and anyone curious about what happens behind the scenes. It
-is what the engine emits today, on ClickHouse 26.3 -- not part of the
+is what the engine emits today, on the ClickHouse the stack pins -- not part of the
 vocabulary.
 
 | Use Case | ClickHouse Index Generated | Granularity | Notes |
@@ -538,7 +538,7 @@ vocabulary.
 | `word_search` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
 | `substring_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
 | `key_search` | two indexes, `text(tokenizer=array)` over `mapKeys(col)` and `mapValues(col)` | 1 | A text index refuses a `Map` column itself, so the keys and the values are indexed apart |
-| `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 1 | `hnsw` is the only method 26.3 implements |
+| `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 1 | `hnsw` is the only method the pinned ClickHouse implements |
 | *(empty)* | No index | -- | |
 
 **Note on text indexes:** `word_search` and `substring_search` generate the GA

@@ -98,7 +98,7 @@ env OTEL_EXPORTER_OTLP_ENDPOINT=" " DFE_ENGINE_ENV=dev uv run dfe-engine run
 ## On a Mac, in VS Code
 
 Front-end developers run the engine and the console as plain processes on a Mac
-and keep the Rust apps in docker. The engine needs `uv` (it fetches Python 3.14)
+and keep the Rust apps in docker. The engine needs `uv` (it fetches the Python `.python-version` pins)
 and `make`. One command boots it with the e2e helpers the console journeys call:
 
 ```sh

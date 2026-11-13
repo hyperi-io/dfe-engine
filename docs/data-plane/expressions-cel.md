@@ -4,10 +4,12 @@ DFE uses **CEL (Common Expression Language)** for conditions across the Python e
 
 **Packages:**
 
-| Language | Package | Version | Notes |
-|----------|---------|---------|-------|
-| Rust | `cel` (renamed from `cel-interpreter`) | 0.14 | Native implementation, through `scalo::expression` |
-| Python | `common-expression-language` | 0.10 | PyO3 bindings, through `scalo.expression` |
+| Language | Package | Notes |
+|----------|---------|-------|
+| Rust | `cel` (renamed from `cel-interpreter`) | Native implementation, through `scalo::expression` |
+| Python | `common-expression-language` | PyO3 bindings, through `scalo.expression` |
+
+scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
 
 **References:**
 

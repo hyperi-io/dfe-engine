@@ -16,8 +16,8 @@ turned on, KEDA scales the pod count on the deterministic-due backlog this doc
 explains, via the fail-safe `dfe-keda-shim` - never the engine, and no longer
 a MySQL-on-ClickHouse scaler (retired, see "KEDA ScaledObject" below).
 
-**Keep autoscaling off (the default) on 2.2.2.** It reads the due backlog from
-the `hunt_schedule` table, and nothing in the 2.2.2 charts writes that table:
+**Keep autoscaling off (the default).** It reads the due backlog from
+the `hunt_schedule` table, and nothing in the charts writes that table:
 there is no materialise Job, so the backlog always reads 0. With autoscaling on
 the runner never scales out, and at `minReplicaCount: 0` no hunt ever fires.
 To try it anyway, run `dfe-hunt-runner materialise` after every hunt-config
@@ -134,7 +134,7 @@ only ClickHouse:
   not the live `dfe-engine` API service). No call to the running engine API.
 - **The engine's only role is at CONFIG-DEPLOY time**, not runtime: materialise
   `hunt_schedule` when the hunt config changes, with the one-shot, idempotent
-  `dfe-hunt-runner materialise`. The 2.2.2 charts do not run it (see below).
+  `dfe-hunt-runner materialise`. The charts do not run it (see below).
 
 So if the engine pod is down, hunts keep firing, and so does KEDA scaling once
 the schedule is materialised. The only
@@ -160,7 +160,7 @@ schedule state is shared across nodes (<https://github.com/hyperi-io/dfe-schemas
 
 `schedule.publish_schedule(ch, db, specs)` is the ONLY writer of `hunt_schedule`, and
 `dfe-hunt-runner materialise` is its only caller. It is idempotent and diff-aware
-(tombstones hunts that vanished from config). The 2.2.2 charts run no Job for it,
+(tombstones hunts that vanished from config). The charts run no Job for it,
 so on Kubernetes the table stays empty unless an operator runs the command after
 each hunt-config change. Run that way, a brand-new hunt added while scaled to zero
 still gets a `hunt_schedule` row, so KEDA can wake a worker for it.
@@ -271,8 +271,8 @@ deliberately simple:
 - **`huntRunner.enabled` (default `true` on every tier):** deploys `dfe-hunt-runner` as ONE steady pod
   (`replicas: 1`, no ScaledObject at all). This is the resting state for the
   large majority of deployments - a single always-on pod, not scale-to-zero.
-- **`huntRunner.autoscaling.enabled` (default `false`, BETA, keep it off on
-  2.2.2 - see the top of this page):** opts into the ScaledObject described above. `replicas` is then omitted from the
+- **`huntRunner.autoscaling.enabled` (default `false`, BETA, keep it off,
+  see the top of this page):** opts into the ScaledObject described above. `replicas` is then omitted from the
   Deployment (KEDA owns the count) and the pod count floats between
   `minReplicaCount` (default **1**, not 0 - set it to `0` explicitly via
   values to additionally opt into scale-to-zero) and `maxReplicaCount`

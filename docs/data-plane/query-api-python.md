@@ -15,10 +15,12 @@
 
 ## Requirements
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `pandas` | >=2.2.0 | DataFrame conversion (optional) |
-| Python | >=3.14 | Runtime |
+| Package | Purpose |
+|---------|---------|
+| `pandas` | DataFrame conversion (optional) |
+| Python | Runtime |
+
+`pyproject.toml` carries the version floors.
 
 ---
 
