@@ -26,10 +26,10 @@ cd dfe-engine
 uv sync   # pulls dfe-schemas, which carries the schema and DDL trees
 ```
 
-Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`. Without it the engine refuses to start on the placeholder JWT secret. `/livez` answers on port 8000:
+Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`, without which the engine refuses to start on the placeholder JWT secret, and `DFE_CONFIG_DIR=./config`, without which it tries to create `/app/config`. `/livez` answers on port 8000:
 
 ```bash
-env DFE_ENGINE_ENV=dev uv run dfe-engine
+env DFE_ENGINE_ENV=dev DFE_CONFIG_DIR=./config uv run dfe-engine
 ```
 
 With no ClickHouse reachable it retries for a minute, then serves with `/readyz` reporting `clickhouse: false`. The local ClickHouse settings, the observability port and the other repos are in [docs/local-dev.md](docs/local-dev.md).
@@ -48,7 +48,7 @@ Every setting is an environment variable with the `DFE_ENGINE_` prefix, apart fr
 
 | Variable | Image default | Local-dev default | What it holds |
 |----------|---------------|-------------------|---------------|
-| `DFE_CONFIG_DIR` | `/app/config` | `./config` | The deployment's config: a mounted volume or ConfigMap on Kubernetes, a checkout of the deployment's config repo for local dev. Its `sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `rules/`, `alert-destinations/` and `queries/` subdirectories are found from it. |
+| `DFE_CONFIG_DIR` | `/app/config` | `./config` with `make dev`, else `/app/config` | The deployment's config: a mounted volume or ConfigMap on Kubernetes, a checkout of the deployment's config repo for local dev. The engine finds `sources/`, `source-builds/`, `source-plans/`, `source-deploys/`, `fieldmaps/`, `services/`, `hunts/`, `rules/` and `alert-destinations/` under it. |
 | `DFE_ENGINE_SCHEMAS_DIR` | `/app/schemas` | unset | The schema tree root. Unset, the engine reads the trees from the installed `dfe-schemas` package. |
 
 The image bakes the dfe-schemas trees in at `/app/schemas` and an empty `/app/config`, so neither directory variable needs setting in a container. The deployment supplies the config by mount and the secrets and connection settings by env, and a container with none of those refuses to start on the placeholder JWT secret. A per-registry variable such as `DFE_ENGINE_SOURCES_DIR` wins over the subdirectory derived from `DFE_CONFIG_DIR`. The names are exact: a bare `CONFIG_DIR` is not read. ClickHouse and Kafka connection settings follow the same prefix.
