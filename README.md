@@ -32,7 +32,7 @@ Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`, without 
 env DFE_ENGINE_ENV=dev DFE_CONFIG_DIR=./config uv run dfe-engine run
 ```
 
-With no ClickHouse reachable it retries for a minute, then serves with `/readyz` reporting `clickhouse: false`. The local ClickHouse settings, the observability port and the other repos are in [docs/local-dev.md](docs/local-dev.md).
+With no ClickHouse reachable it waits up to 180 seconds for the schema bootstrap (`DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`), then serves with `/readyz` reporting `clickhouse: false`. The local ClickHouse settings, the observability port and the other repos are in [docs/local-dev.md](docs/local-dev.md).
 
 Run the unit tests, which need no backing service:
 
