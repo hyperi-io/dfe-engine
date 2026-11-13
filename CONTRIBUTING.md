@@ -161,26 +161,15 @@ If you stack anyway, two things will bite:
 - Retarget every child to `main` BEFORE merging its parent, then push the child so the `pull_request` run fires. Merging a parent with `--delete-branch` deletes the child's base and GitHub closes the child. The two states deadlock: you cannot reopen a PR whose base branch is gone, and you cannot retarget a closed PR. Recovery is to recreate the base ref at any commit, reopen, retarget to `main`, then delete the ref again.
 - A squash merge rewrites the history the child sits on, so replay only the child's own commits: `git rebase --onto main <old-base-head> <child-branch>`.
 
-## Testing your branch in a full stack (branch previews)
+## Testing your branch in a full stack
 
-> Status: in development. This section describes the intended contributor
-> workflow; the tooling is being built (see dfe-infra
-> `docs/plans/2026-07-08-branch-preview-cycle.md`).
-
-DFE is a product suite of several repos (engine, infra, schemas, ui, hyperdx, the
-Rust data-plane apps). To test a change that spans more than one repo, or to
-eyeball a running stack, you deploy a **preview**: a full DFE stack built from the
-branches you nominate.
-
-- **Local by default.** A preview runs on a local `k3d`/`helm` cluster on your own
-  machine - no cloud account and no access to anyone's infrastructure required. An
-  external contributor can build and run a preview entirely on a laptop.
-- **One manifest describes it.** A preview is a `DeployContext` (see the schema in
-  the plan above): which branch/ref of each repo, a footprint profile, and where
-  it lands. The same object drives a local preview and a production install.
-- **Deploy tooling lives in dfe-infra** (the deploy layer). An org that operates a
-  shared cluster can point the same tooling at it instead of local `k3d`; that
-  configuration is that org's own private concern, never committed here.
+DFE is a suite of several repos (engine, infra, schemas, ui, hyperdx, the Rust
+data-plane apps). A change that spans more than one of them, or one you want to
+see running, gets a full stack: on one host with
+[dfe-docker](https://github.com/hyperi-io/dfe-docker), or on a Kubernetes cluster
+with [dfe-infra](https://github.com/hyperi-io/dfe-infra/blob/main/docs/deployment/README.md).
+Both take the image tag or branch you nominate for each app. Where that stack
+runs is your own concern and is never committed here.
 
 ## Run the checks locally before you push
 
@@ -196,7 +185,7 @@ hyperi-ci check
 it once with `uv tool install hyperi-ci` (or `pipx install hyperi-ci`), or run it
 ad hoc with `uvx hyperi-ci check`. It runs the project's full local validation --
 the same suite CI runs -- and reports what to fix. Run it before every push and before opening a
-pull request; it is the single best way to give your change the best chance of
+pull request. It is the single best way to give your change the best chance of
 surviving CI.
 
 ## CI/CD Workflow
@@ -214,3 +203,102 @@ This happens automatically - no manual intervention required.
 ## Questions
 
 If you have questions about contributing, please open an issue or contact us.
+
+## Context
+
+### What this is
+
+The control plane for a DFE deployment: a Python library plus an API server that
+owns configuration, schema and app lifecycle. It is NOT the data path -- records
+never flow through here. They go receiver -> Kafka or gRPC -> loader ->
+ClickHouse, and this engine decides what those components are configured to do.
+
+System design and why it is shaped this way:
+[docs/architecture.md](docs/architecture.md).
+
+### Where things live
+
+| path | what |
+|---|---|
+| `src/dfe_engine/api/` | FastAPI routers, four auth paths, RBAC |
+| `src/dfe_engine/appmgmt/` | one generic per-app surface, and the catalogue is DATA |
+| `src/dfe_engine/schema/` | ClickHouse DDL planning and apply |
+| `src/dfe_engine/source/` | Source definitions. Receiver and loader routing is COMPILED from these |
+| `src/dfe_engine/gitops/` | every mutation is a git commit, and the deploy repo is the authority |
+| `docs/superpowers/` | specs and plans, including designs that are NOT built yet |
+
+### Commands that prove a change
+
+```bash
+uv sync                       # deps, from the committed uv.lock
+uv run pytest                 # the suite
+uv run ruff check src tests   # lint
+hyperi-ci check --quick       # what CI will say, faster
+```
+
+`ruff format` is available but the repo has not adopted it, and there is no `black`.
+
+**`uv run pytest` does not run everything.** The default `addopts` deselects the
+`integration`, `live` and `upstream` markers, so a green local run has not
+touched a backing service. Pass `-m integration` to include them.
+
+Green locally is not green in CI. **A CI run is not atomic against hyperi-ci**:
+reusable workflows resolve `@main` per JOB, so a push-event run reports success
+with every real job SKIPPED. Read the `pull_request` run, per job, and check the
+durations -- a test job that "passed" in 0s did not run.
+
+### What tends to bite
+
+| Don't | Do | Why |
+|---|---|---|
+| Hardcode an app name in engine code | Add it to `dfe-infra/apps.yaml` | What an app IS is DATA. Adding one is a manifest edit plus a chart, never an engine release. |
+| Treat this as an internal tool | Code to the injected config and interface | It is a PRODUCT other organisations deploy. Env-specifics -- cluster refs, cred paths, our fleet -- belong in private config repos, never here. |
+| Hand-edit compiled routing | Change the Source | Receiver and loader routing is derived, so the API reports a hand edit as DRIFT and re-syncs over it. |
+| Mock a backing service | testcontainers, a real one | No mocks as proof. `pass` and `TODO` are not functionality. |
+| `from typing import List, Dict, Optional` | `list[str]`, `str \| None` | Built-in generics, and `requires-python = ">=3.14"`. |
+| `datetime.utcnow()` | `datetime.now(UTC)` | Deprecated since 3.12. |
+| stdlib `logging` | `from scalo.logger import logger` | House rule, so every service emits one structured JSON shape. |
+| Raw `httpx` with hand-rolled retry | `scalo.http.HttpClient` | House rule. Importing httpx for its exception and response TYPES is correct and expected. |
+| `yaml.safe_load` | `dfe_engine.yaml_utils` | ruamel, YAML 1.2. YAML 1.1 reads `no` as boolean false. |
+| `except Exception:` then a silent fallback | Catch the specific error, log with context, re-raise | 12 sites already return `False`/`None`/`[]` with no trace, out of 251 `except Exception:` sites in `src/`. An operator cannot tell failure from empty. |
+| Assume a config key does something | Grep for its consumer | Config that parses and is never read is a recurring defect here. |
+| Trust `gh issue list` | `gh issue view <n>` | It caps at 30 without `--limit`, so absence is not evidence of closure. |
+
+Two traps that are not style:
+
+**`rg` and `fd` respect `.gitignore`**, so `.env` and `CLAUDE.md` are invisible
+to a default search. Pass `--no-ignore` or you will conclude they do not exist.
+
+**Every container this repo starts comes down the same session.** Stray
+containers caused a host OOM. Only ever stop what you started.
+
+### Where this sits
+
+Membership and every edge below are declared in `dfe-infra/suite.yaml`. Read it
+rather than trusting this table, and regenerate any claim from
+`dfe-stack suite --consumer dfe-engine` (inbound) or `--producer dfe-engine`
+(outbound). Both print the interaction kind and what to re-run when the edge
+moves.
+
+**What dfe-engine depends on:**
+
+| repo | how it interacts |
+|---|---|
+| dfe-infra | Deploys this engine, and owns `apps.yaml` -- a byte copy is vendored here at `appmgmt/apps.yaml` as the last resort in the resolution order. Lockstep: a catalogue entry the engine does not carry is not reflected by its management API. |
+| dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_ENGINE_SCHEMAS_DIR` points elsewhere. |
+| scalo-py | The shared Python library, plus a contract guard: this repo overrides scalo's runtime base image with its own literal, and its own test fails when the committed Dockerfile stops matching. |
+| the Rust apps | Each emits its config schema (`<app> config-schema`), and the deployment mounts it at `DFE_ENGINE_APP_CONTRACT_DIR`. `/api/v1/services` takes every default and type from it, so nothing of an app's config is restated here. |
+| logreducer | A declared dependency (`logreducer[enhanced]`). The sampler's `smart` mode, its default, and `anomaly` mode run it, imported lazily so the scikit-learn stack loads only when one of them does. |
+
+**What depends on dfe-engine:**
+
+| repo | how it interacts |
+|---|---|
+| dfe-infra | Pins this engine's image in TWO places: the dfe-engine chart and the hyperdx chart, which runs the engine image as its dashboards init container. Both move together. There is no schema-apply workload, because the engine applies schema at its own startup. |
+| dfe-ui | Vendors this repo's OpenAPI spec and generates its scope types from an engine module. A workflow here re-vendors it by PR on a push to main. |
+
+**The consequence, and it is the reason this section exists:** dfe-engine is the
+ONLY controller of ClickHouse objects and Kafka topics. A change to schema,
+source compilation or topic naming is a SUITE-WIDE move, not a local one --
+every Rust service reads configuration this engine writes, and infra and docker
+wait on it. A one-line change here can land in five other repositories.
