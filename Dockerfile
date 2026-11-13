@@ -91,8 +91,8 @@ LABEL org.opencontainers.image.created="${OCI_CREATED}"
 
 # Copy the uv-built virtualenv from the builder and put it on PATH.
 COPY --from=builder /app /app
-# Every Python dependency's licence and notice, generated from uv.lock by hyperi-ci. Debian packages carry theirs under /usr/share/doc.
-COPY LICENSE NOTICE THIRD-PARTY-NOTICES /app/
+# Every Python dependency's licence and notice, written to dist/ by the hyperi-ci Build (`hyperi-ci licenses notices -o dist/THIRD-PARTY-NOTICES` by hand). Debian packages carry theirs under /usr/share/doc.
+COPY LICENSE NOTICE dist/THIRD-PARTY-NOTICES /app/
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Runtime WORKDIR (#106): without it CWD is / and any relative default path
