@@ -54,7 +54,7 @@ env DFE_ENGINE_ENV=dev \
 - Accounts and groups are YAML files under `DFE_CONFIG_DIR/auth`.
 - Attribute request bodies are wrapped. `PUT
   /api/v1/auth/accounts/{username}/attributes` takes `{"attributes": {...}}`, not
-  the bare object, and the `GET` returns the same shape. A bare object is a 422.
+  the bare object, and the `GET` returns the same wrapped object. A bare object is a 422.
 
 With a local ClickHouse, the client is clickhouse-connect over HTTP, so the port is the HTTP one and a
 plain docker ClickHouse is not TLS:

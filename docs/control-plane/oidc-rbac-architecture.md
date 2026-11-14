@@ -5,7 +5,7 @@ external OIDC, group->role mapping, the two RBAC planes, the management API
 and the infrastructure it needs. The RBAC/multi-tenant ClickHouse detail lives in
 [rbac.md](rbac.md), and this doc references it rather than repeating it.
 
-Exhaustive reference (exact request/response shapes, tofu outputs, secret
+Exhaustive reference (exact request/response bodies, tofu outputs, secret
 keys) lives with its source of truth - `openapi.json`, the code
 (`src/dfe_engine/auth/oidc/`), and the dfe-infra tofu modules - not
 transcribed here where it would drift.
@@ -116,7 +116,7 @@ serving a provider configured that way.
 
 Which fields each provider type accepts and requires in each mode is enforced by the provider admin API, from the rules in `auth/oidc/field_rules.py`. A `generic` provider has no `api` mode and a `google` provider has only `api` mode, with `enrich_on_login` on.
 
-### The normalized shape
+### The normalized group
 
 Every provider's groups normalise to `NormalizedGroup { id, name, source }`.
 `GroupInfo { id, name, email, description }` (models.py) already provides this

@@ -23,7 +23,7 @@ not gate or defer firing - we nudge phases and let the fleet settle.
 
 ## The picture (intuition first)
 
-The whole job is one shape change. On the left, a fleet of recurring hunts that all fire
+The whole job is one change in the load curve. On the left, a fleet of recurring hunts that all fire
 at the top of their period, so their cost pulses STACK into a few tall peaks on the shared
 ClickHouse, with idle troughs between. On the right, after the loop drifts each hunt's
 phase (WHEN it fires, never how often), the same total work SPREADS into the troughs and
@@ -229,7 +229,7 @@ m_i ≈ p95( peak_memory_usage )         "
 d_i ≈ p95( query_duration_ms ) / Δ     "
 ```
 
-Because it is a trailing p95 refreshed each cycle, the model tracks data-shape drift
+Because it is a trailing p95 refreshed each cycle, the model tracks data drift
 automatically - a table that grows or a join that gets heavier raises c_i/m_i
 and the smoother re-drifts. This same telemetry feeds the interval-backoff loop
 (runs-into-itself) described in HUNT-RUNNER-SCALING.md.
@@ -237,10 +237,10 @@ and the smoother re-drifts. This same telemetry feeds the interval-backoff loop
 ## ClickHouse-native backstop (planned)
 
 Hunt queries set no `WORKLOAD` in this release. The planned backstop: the smoother
-*optimises* the curve proactively but can still mis-predict when data shape jumps,
+*optimises* the curve proactively but can still mis-predict when the data changes abruptly,
 so hunt queries would also run inside a ClickHouse `WORKLOAD 'hunts'` with a weight
 (fair-share against ingestion / UI) and, per query, `max_memory_usage`. That gives a
-hard ceiling and reactive fair-share independent of our loop: our maths shapes the
+hard ceiling and reactive fair-share independent of our loop: our maths smooths the
 load, CH guarantees no single hunt query exceeds its memory cap - so a bad one fails
 on its own rather than starving co-runners or feeding an OS OOM-kill.
 

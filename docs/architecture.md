@@ -2,7 +2,7 @@
 
 DFE is a deployable product suite: event-data ingest, ClickHouse storage,
 scheduled detection, and exploration, all governed through one git-backed
-control plane. This page is the map - where each repo sits, the two shapes
+control plane. This page is the map - where each repo sits, the two principles
 that define the system, the invariants, and links into the depth docs. It
 describes how DFE works today, grounded in code, not a proposal.
 
@@ -59,7 +59,7 @@ flowchart TB
 | dfe-receiver/loader/archiver/fetcher/transform-* | Rust runtime services | read YAML config the engine writes |
 | dfe-deploy | example deploy/overlay repo | the GitOps hand-off surface |
 
-## The two shapes that define DFE
+## The two principles that define DFE
 
 ### 1. Orchestration over infra: helm through Argo, never hands on the cluster
 

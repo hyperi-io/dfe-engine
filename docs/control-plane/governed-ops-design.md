@@ -81,7 +81,7 @@ file.
 
 A class storing authored CONTENT declares `BUNDLE`: a directory per resource,
 holding a `manifest.yaml` plus payload files. `library` is the first consumer, and
-its shape is the general one:
+its layout is the general one:
 
 ```text
 config/library/<name>/manifest.yaml

@@ -73,9 +73,9 @@ columns.
 
 Two things to settle before building:
 
-- **Input shape.** Our VRL consumes the DFE 2.1 Kafka shape
+- **Input format.** Our VRL consumes the DFE 2.1 Kafka format
   (`{message, tags, timestamp}`) with a raw syslog line in `message`.
-  transform-elastic works on Elastic's ingest-pipeline shape. If those differ,
+  transform-elastic works on Elastic's ingest-pipeline format. If those differ,
   one corpus cannot feed all three unchanged.
 - **Known divergence.** `scripts/filebeat/extract.py` strips geoip from the
   ported VRL, so transform-elastic emits geo fields the other two never will.

@@ -139,7 +139,7 @@ are not manifest data:
 - an operator's own quota tiers and the per-org and per-group ClickHouse users,
   reconciled by `src/dfe_engine/governance/ch/`
 
-Both go through `SchemaApplier`, so the one DDL shape cannot be bypassed.
+Both go through `SchemaApplier`, so the one DDL gate cannot be bypassed.
 `tests/unit/test_schema/test_one_ddl_gate.py` fails the build on any rendered table
 that is not `Replicated*` and any table statement carrying `ON CLUSTER`. A guard test
 (`tests/unit/test_schema/test_schema_control_rules.py`) fails the build on a

@@ -213,7 +213,7 @@ owns configuration, schema and app lifecycle. It is NOT the data path -- records
 never flow through here. They go receiver -> Kafka or gRPC -> loader ->
 ClickHouse, and this engine decides what those components are configured to do.
 
-System design and why it is shaped this way:
+System design and why it is built this way:
 [docs/architecture.md](docs/architecture.md).
 
 ### Where things live
@@ -257,7 +257,7 @@ durations -- a test job that "passed" in 0s did not run.
 | Mock a backing service | testcontainers, a real one | No mocks as proof. `pass` and `TODO` are not functionality. |
 | `from typing import List, Dict, Optional` | `list[str]`, `str \| None` | Built-in generics, and `requires-python = ">=3.14"`. |
 | `datetime.utcnow()` | `datetime.now(UTC)` | Deprecated since 3.12. |
-| stdlib `logging` | `from scalo.logger import logger` | House rule, so every service emits one structured JSON shape. |
+| stdlib `logging` | `from scalo.logger import logger` | House rule, so every service emits one structured JSON format. |
 | Raw `httpx` with hand-rolled retry | `scalo.http.HttpClient` | House rule. Importing httpx for its exception and response TYPES is correct and expected. |
 | `yaml.safe_load` | `dfe_engine.yaml_utils` | ruamel, YAML 1.2. YAML 1.1 reads `no` as boolean false. |
 | `except Exception:` then a silent fallback | Catch the specific error, log with context, re-raise | 12 sites already return `False`/`None`/`[]` with no trace, out of 251 `except Exception:` sites in `src/`. An operator cannot tell failure from empty. |

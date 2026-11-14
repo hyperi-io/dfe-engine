@@ -33,7 +33,7 @@ This part is genuinely well done:
   a machine-readable description of every endpoint, its inputs and outputs.
 - dfe-ui runs a tool (`openapi-typescript`) that turns that spec into TypeScript
   **types** (`packages/dfe-engine-types`). So the UI code knows, at compile time,
-  the exact shape of every request and response. If the engine changes an endpoint
+  the exact fields of every request and response. If the engine changes an endpoint
   and the spec updates, the UI fails to compile rather than breaking silently.
 - A small hand-written client (`createApiClient`) uses those types for `get/post/
   put/delete`. List screens use TanStack Query's `useInfiniteQuery` against the

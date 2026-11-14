@@ -123,9 +123,9 @@ one - `member` is a refusal where a missing claim would be a pass. `owner` is in
 the fork's accepted set and the engine never mints it, having no team-owner role
 to map onto.
 
-## Reference config shape (illustrative)
+## Reference config (illustrative)
 
-This is a reference shape of the shared filter chain. The `jwt_authn` provider
+This is a reference layout of the shared filter chain. The `jwt_authn` provider
 block and the route table are identical across modes; the **only** per-mode delta
 is the cluster endpoints (Service DNS vs container names).
 

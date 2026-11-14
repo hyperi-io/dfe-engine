@@ -10,7 +10,7 @@
 
 The engine emits the receiver's and the loader's own native config -- not a DFE
 wrapper the services then translate. This is what to read when a deployed pod's
-behaviour has to be traced back to a source definition. The shape of the flow
+behaviour has to be traced back to a source definition. The flow
 is [source-flow.md](source-flow.md); the fields are
 [source-definition.md](source-definition.md).
 
