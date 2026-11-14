@@ -8,8 +8,7 @@
 
 """What the deployment tells the schema phase, and what the phase applied.
 
-The table LIST used to live here as three Python tuples. It is now
-``manifest.yaml`` in dfe-schemas, read by :mod:`dfe_engine.schema.plan` and
+The table LIST is ``manifest.yaml`` in dfe-schemas, read by :mod:`dfe_engine.schema.plan` and
 applied by :mod:`dfe_engine.schema.phase`, so adding a table is a manifest edit
 and never an engine release.
 

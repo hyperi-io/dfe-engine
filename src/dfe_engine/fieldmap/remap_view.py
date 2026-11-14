@@ -12,8 +12,7 @@ source's PHYSICAL columns as the field names of a naming standard (Sigma, ECS,
 Splunk CIM, ... - the same pattern for every standard). The view is named
 ``{table}_{standard}``.
 
-This is the generalisation of what used to live only in ``sigma/views.py``: each
-column maps a standard ``field`` (the alias the view exposes) to EITHER a real
+Each column maps a standard ``field`` (the alias the view exposes) to EITHER a real
 table column (``source_column``) OR a dotted path inside the source's ``_json``
 column (``json_path``, extracted with the dynamic-subcolumn idiom
 ``assumeNotNull(_json).`path```), read as text or as a declared ClickHouse type.

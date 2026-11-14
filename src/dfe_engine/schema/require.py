@@ -8,11 +8,9 @@
 
 """Assert the tables a runtime path needs, rather than creating them.
 
-The hunt runner, the repository store and the alert-cooldown path each used to
-create their own tables through the applier. Three appliers against one database
-race on ``ALTER TABLE ADD COLUMN``, and each was a second definition of when an
-object comes into existence. The schema phase is the one that makes them, so
-these paths assert and fail loud instead.
+The hunt runner, the repository store and the alert-cooldown path assert their
+tables and fail loud. More than one applier against a database races on
+``ALTER TABLE ADD COLUMN``, so the schema phase alone makes them.
 
 Failing loud is the point: a missing coordination table means the phase has not
 run or did not converge, and a path that silently created its own would hide

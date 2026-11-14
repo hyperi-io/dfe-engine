@@ -75,9 +75,8 @@ def engine_deployment_contract() -> DeploymentContract:
         health=HealthContract(
             # /livez + /readyz are the WHOLE probe surface scalo's observability
             # server serves, on the 9090 port rather than the 8000 API port
-            # (#106). The aliases these used to be (/health/live, /health/ready)
-            # were retired in scalo 2.29.12: they 404 now, so a probe still
-            # aimed at one fails liveness and crashloops a healthy pod.
+            # (#106). /health/live and /health/ready 404, so a probe aimed at
+            # one fails liveness and crashloops a healthy pod.
             liveness_path="/livez",
             readiness_path="/readyz",
             metrics_path="/metrics",

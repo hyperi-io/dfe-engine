@@ -3,7 +3,7 @@
 
 """The sources the engine owns rather than an operator.
 
-One today: `main`, fronting the catch-all landing table. Its definition is
+`main` fronts the catch-all landing table. Its definition is
 authored in dfe-schemas under ``sources/`` and reaches the deployment the way
 every other schema resource does, through the image-baked seed tree that
 ``bootstrap.ensure_storage`` copies into the schemas directory.
