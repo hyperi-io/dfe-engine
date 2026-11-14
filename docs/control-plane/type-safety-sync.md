@@ -70,4 +70,4 @@ Note: Changing only Python API files without regenerating and committing the Ope
 
 ## Developer workflow (dfe-ui)
 
-Consume **`packages/dfe-engine-types`** (generated API types, `RbacScope` among them). Do not copy scope strings or path shapes by hand—import from the package so renames and new endpoints fail at compile time instead of at runtime.
+Consume **`packages/dfe-engine-types`** (generated API types, `RbacScope` among them). Do not copy scope strings or paths by hand—import from the package so renames and new endpoints fail at compile time instead of at runtime.

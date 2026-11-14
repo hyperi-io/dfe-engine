@@ -52,7 +52,7 @@ with the deploy access summary (URLs, how to log in, where to fetch creds).
 ## Scenario 2 - standalone docker
 
 **What it proves:** the product works on a single host with no Kubernetes -
-the dfe-docker shape. This is the lower bound a new adopter can stand up
+the dfe-docker setup. This is the lower bound a new adopter can stand up
 quickly, and what we learn here (compose wiring, env, image needs) feeds back
 into dfe-docker.
 
