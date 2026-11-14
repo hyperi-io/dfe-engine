@@ -16,7 +16,6 @@ and the daemon-free ``local``, ``schema`` and ``kafka client-config``.
 
 import os
 import re
-import secrets
 from typing import Any
 
 from scalo.cli.openapi import ScaloHttpTransport, SpecCli, Store, Transport
@@ -34,8 +33,9 @@ def load_live_spec() -> dict[str, Any]:
     jwt_secret, which a schema Job does not carry. A throwaway one satisfies that check.
     """
     from dfe_engine.api.app import create_app
+    from dfe_engine.secrets import KEY_LENGTH, mint_value
 
-    os.environ.setdefault("DFE_ENGINE_API_JWT_SECRET", secrets.token_urlsafe(32))
+    os.environ.setdefault("DFE_ENGINE_API_JWT_SECRET", mint_value(KEY_LENGTH))
 
     return create_app().openapi()
 
