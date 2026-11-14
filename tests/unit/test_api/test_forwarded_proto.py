@@ -21,7 +21,7 @@ gateway forwards unchanged.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
@@ -54,7 +54,7 @@ class _EchoRedirectUriRp:
 
 
 @contextmanager
-def _proxied_client(api_settings: DFESettings, forwarded_allow_ips: str) -> Iterator[TestClient]:
+def _proxied_client(api_settings: DFESettings, forwarded_allow_ips: str) -> Generator[TestClient]:
     """A TestClient whose peer is the gateway address, over the given trust setting."""
     settings = api_settings.model_copy(
         update={
