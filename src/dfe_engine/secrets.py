@@ -18,6 +18,8 @@ under the configured name prefix.
 The engine never imports a backend SDK - scalo owns that (see docs/deployment/backing-services.md).
 """
 
+import secrets as _stdlib_secrets
+import string
 import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -40,6 +42,23 @@ _ROOTED = {"file"}
 
 # AWS finishes a forced delete in the background, so a write to that name waits up to 30s for it.
 FORCED_DELETE_BACKOFF: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 15.0)
+
+# Letters and digits only, because shells, .env files and URL-form DSNs rewrite `$`, `-` and `_`
+_MINT_ALPHABET = string.ascii_letters + string.digits
+PASSWORD_LENGTH = 32
+KEY_LENGTH = 64
+
+
+def mint_value(length: int = PASSWORD_LENGTH) -> str:
+    """A random string of letters and digits.
+
+    Args:
+        length: PASSWORD_LENGTH for a password, KEY_LENGTH for a signing key.
+
+    Returns:
+        The minted value.
+    """
+    return "".join(_stdlib_secrets.choice(_MINT_ALPHABET) for _ in range(length))
 
 
 class SecretNameHeldError(ProviderError):

@@ -23,9 +23,12 @@ from scalo.secrets.exceptions import (
 
 from dfe_engine.secrets import (
     FORCED_DELETE_BACKOFF,
+    KEY_LENGTH,
+    PASSWORD_LENGTH,
     DfeSecrets,
     SecretNameHeldError,
     build_secrets,
+    mint_value,
 )
 from dfe_engine.settings import SecretsSettings
 
@@ -197,3 +200,14 @@ def test_tags_reach_aws_only(provider, tags):
     _scripted_store(manager, provider=provider).create("ch/groups/soc", "pw")
 
     assert manager.created_tags == [tags]
+
+
+@pytest.mark.parametrize(
+    ("length", "expected"), [((), 32), ((KEY_LENGTH,), 64), ((PASSWORD_LENGTH,), 32)]
+)
+def test_a_minted_value_is_letters_and_digits_at_its_length(length, expected):
+    """A `$`, `-` or `_` in a minted value would be rewritten by a shell, a .env file or a DSN."""
+    values = {mint_value(*length) for _ in range(50)}
+
+    assert len(values) == 50
+    assert all(len(value) == expected and value.isascii() and value.isalnum() for value in values)

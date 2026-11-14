@@ -29,7 +29,6 @@ Identity conventions:
 SCIM face so downstream tooling can tell IdP-owned records apart.
 """
 
-import secrets
 from datetime import datetime
 from typing import TypedDict
 
@@ -39,6 +38,7 @@ from scim2_models import User as ScimUser
 
 from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.groups import Group
+from dfe_engine.secrets import mint_value
 
 # Marker written to ``source_provider`` for anything the SCIM face provisions.
 SCIM_SOURCE_PROVIDER = "scim"
@@ -126,7 +126,7 @@ def generate_provisioning_password() -> str:
     IdP-provisioned users authenticate via the IdP, not a local password, but
     the store requires a bcrypt-hashable secret. This mints one they never use.
     """
-    return secrets.token_urlsafe(32)
+    return mint_value()
 
 
 # -- Group <-> SCIM Group -------------------------------------
