@@ -116,7 +116,7 @@ The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets a
 
 dfe-receiver reads its ingest bearer tokens from the same backend, so the backend has to be one the receiver reaches too. On `openbao` and `aws` it reads them where the engine wrote them, given a policy or role granting `ingest/bearer-tokens/*` and nothing else. The `file` directory sits on the engine's own volume, so the deployment mounts `<DFE_ENGINE_SECRETS_PATH>/ingest/bearer-tokens` read-only into the receiver at `/var/run/secrets/dfe/ingest-bearer-tokens`, as a directory so a rewrite reaches it, never the whole secrets root. On Kubernetes no receiver pod can mount the engine's volume. There `DFE_ENGINE_INGEST_BEARER_SECRET` names a Secret the engine also writes each listener's lines into, one key per listener, through scalo's `kubernetes` provider with `get` and `update` on that one Secret, and the receiver mounts the Secret read-only at the same path.
 
-## The dfe-docker special case - keep it small
+## The dfe-docker special case - kept small by design
 
 dfe-docker is the single-host Compose deployment. It must stay as small as possible: it
 is never production, so every backing service takes its lightest backend - no OpenBao,
