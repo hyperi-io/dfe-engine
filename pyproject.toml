@@ -11,77 +11,14 @@ requires-python = ">=3.14"
 readme = "README.md"
 
 dependencies = [
-    # scalo (Apache-2.0) for logging + common utils
-    # >=2.29.5:  scalo.crypto CryptoProfile posture + TLS escape valves (SCALO_TLS_*)
-    # >=2.29.6:  scalo.resilience ReconnectingResilience (+ OutageState/ResilienceConfig/ServiceUnavailable)
-    # >=2.29.12: expression.validate() enforces the CEL profile as an ALLOWLIST.
-    #            Below this, a function in neither the allowed nor the disallowed
-    #            set reached no check at all and validate() returned no errors, so
-    #            a misspelt filter passed the UI's live validation (which calls
-    #            straight through dfe_engine.cel.check_syntax) and then failed in
-    #            the pipeline.
-    # >=2.29.15: [metrics] now carries the OTel SDK, so a missing SDK no longer
-    #            leaves a disabled backend that still reports backend=opentelemetry.
-    #            This is the fix for the metrics bug the extras note below describes.
-    # >=2.30.2:  SecretsConfig.exclude_rules, and scalo's internal Kafka consumer
-    #            group ids derived from config.
-    # >=2.30.7:  gauges export as OTel Gauges on every collection, so app status
-    #            keeps seeing the engine's info and start time; ResourceMetrics
-    #            (memory, CPU, fds) and HttpServerMetricsMiddleware, which api/app.py
-    #            imports.
-    # >=2.31.3:  deployment contract schema 4, the version the scalo-service
-    #            library chart validates the published thin chart against.
-    # >=2.31.4:  secrets: enabled=False disables every cache tier, and an OpenBao
-    #            login that is rate limited, redirected or unreachable raises
-    #            ProviderError rather than AuthenticationError.
-    # >=2.31.5:  a retried HTTP error keeps the socket error under it, which
-    #            http_errors.describe_http_error reads as transport_failure.
-    # >=2.31.8:  OpenTelemetry spans flush on exit, bounded at 2s. Under SDK 1.45
-    #            earlier releases flushed nothing, so the last spans were lost.
-    # >=2.31.9:  importing scalo loads no .env, so init_scalo_logger loads it
-    #            through get_config() before it reads LOG_LEVEL and LOG_FORMAT.
-    # >=2.31.10: each OTel metrics backend takes its meter from its own provider,
-    #            so a second metrics manager no longer lands on the first's readers.
-    # >=2.31.11: scalo.logger.filters.is_credential_name, the one credential-name
-    #            matcher appmgmt/contract.py and source/models.py ask.
-    # >=2.31.12: scalo.logger.filters.mask_url_userinfo, the URL password masker
-    #            dfe_engine.masking calls.
-    # >=2.31.13: scalo.logger.filters.url_passwords, which dfe_engine.masking reads
-    #            a written URL's passwords with.
-    # >=2.31.14: the AWS secrets provider takes kms_key_id and recovery_window_days,
-    #            has no us-east-1 default region, and raises SecretPendingDeletionError.
-    # >=2.31.18: the HTTP histogram labels a request by its full route template,
-    #            /api/v1 included, and run_blocking forwards its arguments' types.
-    # >=2.31.21: scalo.api (the [api] extra), which names every operation, writes
-    #            x-scalo and runs the conformance check; and existsOne validates as
-    #            the iteration macro it is.
-    # >=2.32.4:  scalo.deployment.test_support.pytest_plugin, the run's one shared
-    #            ClickHouse the integration tier tests on.
-    # >=2.32.5:  the one API contract: token-paged Page lists, problem+json errors,
-    #            Operation for 202s and Preconditions.guard.
-    # >=2.32.7:  transpile_to_clickhouse(json_columns=...), which reads a JSON path
-    #            through its typed sub-columns, and the strimzi-no-tls and
-    #            redpanda-no-tls Kafka providers kafka.contract takes from scalo.
-    # [kafka]: importing scalo.kafka.providers loads the scalo.kafka package, which
-    # needs the extra's genson.
-    # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
-    # to Renovate -- the constraint is satisfied by every future release, so no PR
-    # is ever raised and the version moves silently in the lock.
-    # [metrics]: scalo's default metrics backend dual-exports -- Prometheus (/metrics)
-    # AND OTLP -- and from 2.29.15 the single [metrics] extra pulls in both
-    # prometheus_client and the OTel SDK, so it honours both. WITHOUT it scalo logs
-    # "Prometheus metrics disabled (prometheus_client not installed)" yet still reports
-    # "backend=prometheus" -- the engine looks instrumented while exporting nothing and
-    # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
-    # goes green while reporting nothing. [opentelemetry] is no longer a separate
-    # extra: [metrics] carries the SDK.
+    # The floor is the oldest scalo carrying every API the engine calls. <3 is the
+    # API-stability boundary, and a bound keeps Renovate raising PRs.
+    # [kafka]: scalo.kafka.providers needs the extra's genson. [metrics] carries
+    # prometheus_client and the OTel SDK: without it /metrics 404s while the
+    # backend still reports prometheus.
     "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.7,<3",
-    # The DFE schema trees as package data under dfe_schemas/data/, replacing
-    # the `schemas` git submodule. schema_loader resolves them through
-    # importlib.resources. The Dockerfile bakes its seed from the installed
-    # wheel. Floor is the first release that ships the source catalogue under
-    # catalogue/. uv.lock pins the hash.
-    # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
+    # The schema trees as package data. Floor: the first release with catalogue/.
+    # <1 is the API-stability boundary while dfe-schemas is 0.x.
     "dfe-schemas>=0.2.29,<1",
     # Data processing
     "pandas>=3.0.3",
@@ -213,20 +150,12 @@ addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:c
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-# Permanent hang guard (pytest-timeout): fail ANY test running longer than
-# `timeout` seconds and dump every thread's stack, so a hung test (blocked
-# socket / gRPC / ClickHouse connect, OTLP exporter shutdown-block) fails fast
-# with a traceback instead of stalling the run until the CI job times out. The
-# `thread` method is REQUIRED here: the block can sit in a worker thread (the
-# anyio lifespan-startup thread, an OTLP export thread) that the `signal`
-# method (main-thread SIGALRM only, and unusable under `-n` xdist) cannot
-# interrupt. 300s clears the slowest legit path (integration docker CH pull
-# ~240s on first image fetch) yet still catches a real hang.
+# Hang guard. `thread`, not `signal`: a hang can sit in a worker thread, and
+# SIGALRM reaches only the main thread and does not work under xdist.
 timeout = 300
 timeout_method = "thread"
 filterwarnings = [
-    # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2. The
-    # httpx2 migration is a separate follow-up (test-infra only, prod unaffected).
+    # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2.
     "ignore:Using .httpx. with .starlette.testclient",
     # pytest-benchmark can't run under xdist and the suite runs under it, so
     # benchmarks are intentionally disabled here (run them with -p no:xdist).
@@ -343,12 +272,8 @@ ignore_decorators = [
 ignore_names = ["model_config"]
 
 [project.scripts]
-# Order matters: hyperi-ci's generate-artefacts build step invokes the FIRST
-# entry here (deployment/manifest.py python_entry_point) as `<script>
-# generate-artefacts`. That MUST be the scalo daemon `dfe-engine`, which carries
-# deployment_contract()/generate-artefacts. The auto-CLI `dfe` (OpenAPI-generated)
-# has no such subcommand, so listing it first breaks the release Build. Keep the
-# daemon first.
+# Keep the daemon first: hyperi-ci runs the FIRST entry as `<script>
+# generate-artefacts`, which only `dfe-engine` carries.
 dfe-engine = "dfe_engine.api:run_dev_server"
 dfe = "dfe_engine.cli.auto.main:main"
 dfe-hunt-runner = "dfe_engine.hunts.runner_cli:main"

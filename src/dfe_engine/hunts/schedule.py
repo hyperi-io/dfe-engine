@@ -214,7 +214,7 @@ _SCHEDULE_ID = "data.hunt_schedule"
 def ensure_schedule_schema(ch: Any, database: str) -> None:
     """Assert the materialised schedule table exists. The engine's schema phase makes it.
 
-    A read, not an apply. The literal CREATE that used to live here pinned
+    A read, not an apply. A literal CREATE here would pin
     ``ReplacingMergeTree`` with no ``ON CLUSTER``, which is correct on a single
     node and lands on one replica of a cluster -- the exact failure
     ``tables/internal/hunt_schedule.yaml`` warns against in its own header.

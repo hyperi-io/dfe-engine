@@ -363,10 +363,8 @@ catalogue:
 ## Cardinality Axis
 
 How many distinct values the column holds. One declaration, because it decides
-two things that used to be set apart with nothing keeping them in agreement:
-`attribute: [lowcardinality]` was the storage decision, hand-set, and
-`exact_match` choosing `set(0)` over `bloom_filter` was the index decision,
-derived separately.
+two things that must agree: the storage wrapper, and whether `exact_match`
+chooses `set(0)` or `bloom_filter`.
 
 | Value | Storage | `exact_match` index |
 |-------|---------|---------------------|

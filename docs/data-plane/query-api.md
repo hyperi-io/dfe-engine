@@ -417,7 +417,7 @@ Two distinct things, one implemented, one wire-format-only:
   there is no invalidation endpoint - expiry is the mechanism.
 - **Result caching (wire format only).** `QueryOptions.cache` and the
   `cached`/`cache_key` metadata fields exist in the request/response models,
-  but no server-side result cache is implemented - the flag currently has no
+  but no server-side result cache is implemented - the flag has no
   effect. Treat result caching as a client-side concern until the engine
   grows one.
 
