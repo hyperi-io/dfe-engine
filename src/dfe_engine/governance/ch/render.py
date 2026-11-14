@@ -295,9 +295,9 @@ def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
     PROJECTION: each reconcile TRUNCATEs and re-INSERTs so it exactly reflects
     current config, removed orgs and tiers included.
 
-    The literal CREATEs that used to open this list pinned
-    ``ReplacingMergeTree(updated)`` with no ``ON CLUSTER``, so on a cluster the
-    tables landed on whichever replica the connection reached.
+    A literal CREATE here would pin ``ReplacingMergeTree(updated)`` with no
+    ``ON CLUSTER``, and on a cluster the tables would land on whichever replica
+    the connection reached.
     """
     database, orgs_name, tiers_name = meta_projection()
     orgs_table = f"{database}.{orgs_name}"

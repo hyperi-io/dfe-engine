@@ -185,10 +185,8 @@ class ChCoordinator:
     def ensure_schema(self) -> None:
         """Assert the coordination tables exist. The engine's schema phase makes them.
 
-        A read, not an apply. This worker is a separate pod and used to create the
-        same tables through its own applier, which races an engine replica on
-        ``ALTER TABLE ADD COLUMN`` and is a second answer to when an object comes
-        into existence. Absent means the phase has not converged here, and that is
+        A read, not an apply. This worker is a separate pod, and its own applier
+        would race an engine replica on ``ALTER TABLE ADD COLUMN``. Absent means the phase has not converged here, and that is
         worth failing loudly rather than papering over with a create.
         """
         require_objects(
