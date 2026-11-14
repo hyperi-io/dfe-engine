@@ -104,8 +104,6 @@ metadata:
   capture_raw: true
   raw_source_fields: []
   raw_output: _raw
-  disable_json_tables: []
-  disable_raw_tables: []
   remove_routing_fields: true
 
 schema:

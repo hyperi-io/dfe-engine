@@ -34,7 +34,7 @@ def _env(service: str, name: str) -> str:
 
 # Schemas from the builds that hold each source acknowledgement until delivery,
 # copied byte for byte from each app's docs/config-schema.json: dfe-receiver
-# f61c903, dfe-loader edef368, dfe-transform-vrl da42bd2, dfe-archiver 29f201a,
+# f61c903, dfe-loader 412f65d82d393b0fde0e0c92deca90d7ce3ff818, dfe-transform-vrl da42bd2, dfe-archiver 29f201a,
 # dfe-transform-vector 36dbfa6, dfe-fetcher 0ab0317.
 HELD = Path(__file__).parents[2] / "fixtures" / "contract-acknowledgements"
 
