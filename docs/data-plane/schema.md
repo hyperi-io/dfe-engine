@@ -22,9 +22,11 @@ of columns.
 
 ## Design Principles
 
-### No Schema Registry
+### A meta schema instead of a schema registry
 
-There is **no schema registry** -- no CRUD service, no sync state, no
+A schema registry asks one question of every record at the door: does it match a registered shape, and which version. DFE does not ask it. Every record is accepted as it arrives and lands whole in `_json` under the common header, so nothing is rejected or versioned on the way in. The shape question moves up one level. The common header carries what every table needs (timestamps, source, org, tags, partitioning, TTL), a meta schema per source names the fields worth a real column, and the engine turns the two into DDL. A field the meta schema does not name is still in `_json`, queryable, and can be promoted to a column later with no reindex ([data-evolution](../data-evolution.md)).
+
+So there is **no schema registry** -- no CRUD service, no sync state, no
 intermediate store. Two sources of truth exist, and that's it:
 
 1. **Source YAML** -- the meta schema definition (what the schema should be)

@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -113,7 +113,7 @@ _UNLOADABLE = [
 
 
 @contextmanager
-def _warnings() -> Iterator[list[dict]]:
+def _warnings() -> Generator[list[dict]]:
     """The skip warnings logged inside the block, with their fields."""
     seen: list[dict] = []
     handler = logger.add(

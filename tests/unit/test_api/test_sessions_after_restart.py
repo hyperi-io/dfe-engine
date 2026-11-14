@@ -18,7 +18,7 @@ whoever copies the fixture next.
 
 import contextlib
 import secrets
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Literal
 
@@ -101,7 +101,7 @@ class _Deployment:
     @contextlib.contextmanager
     def boot(
         self, pod: str, *, env: str = "dev", mode: Literal["solo", "team"] = "solo"
-    ) -> Iterator[TestClient]:
+    ) -> Generator[TestClient]:
         """A started engine on *pod*'s store and clone, stopped when the block ends."""
         app = create_app(settings=self._settings(pod, env, mode))
         try:

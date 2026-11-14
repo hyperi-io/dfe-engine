@@ -20,7 +20,7 @@ every doc-level operation keeps working against the manifest unchanged.
 """
 
 import builtins
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -253,7 +253,7 @@ class GitCrud:
         return self._repo.read_locked()
 
     @contextmanager
-    def batch(self, message: str) -> Iterator[None]:
+    def batch(self, message: str) -> Generator[None]:
         """Land every write in the block as one commit and one push (GitopsRepo.batch).
 
         Every write stays a whole-document operation and reads in the block see it.

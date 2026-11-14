@@ -19,7 +19,7 @@ whoever copies the fixture next.
 
 import contextlib
 import secrets
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Literal
 
@@ -106,7 +106,7 @@ def _settings(
 
 
 @contextlib.contextmanager
-def _booted(settings: DFESettings) -> Iterator[tuple[FastAPI, TestClient]]:
+def _booted(settings: DFESettings) -> Generator[tuple[FastAPI, TestClient]]:
     """A started engine. Leaving the block stops it, as a pod being replaced does."""
     app = create_app(settings=settings)
     try:
