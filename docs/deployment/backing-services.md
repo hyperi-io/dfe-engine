@@ -78,7 +78,7 @@ interface, but no value selects it and it is untested.
 | Cluster / compute | k8s API | RKE2 / Rancher | EKS + Karpenter | GKE *(by interface)* | AKS *(by interface)* | single host |
 | Secrets the engine mints | `scalo.secrets` provider | `file` (default), OpenBao / Vault | Secrets Manager | refused | refused | `file` |
 | Data store (CH) | ClickHouse client + `effective_data_database` | DFE CH (single/cluster) | DFE CH, or ClickHouse Cloud as `external` | ClickHouse Cloud as `external` | ClickHouse Cloud as `external` | CH container |
-| Streaming | `scalo.kafka` | Strimzi / Redpanda | Strimzi, or MSK (IAM) as `external` | Confluent *(by interface)* | Event Hubs Kafka API *(by interface)* | Apache Kafka or Redpanda (`KAFKA_BACKEND`), or grpc-direct |
+| Streaming | `scalo.kafka` | Strimzi / Redpanda, or a managed Kafka below | MSK provisioned (`msk`, SCRAM-SHA-512), Strimzi, or a managed Kafka below | Strimzi / Redpanda *(by interface)*, or a managed Kafka below | Strimzi / Redpanda *(by interface)*, or a managed Kafka below | Apache Kafka or Redpanda (`KAFKA_BACKEND`), or grpc-direct |
 | Object store | S3 API | MinIO | S3 (EKS Pod Identity) | GCS *(by interface)* | Blob *(by interface)* | MinIO / local FS |
 | Auth / IdP | OIDC, the engine as relying party | any OIDC IdP (`generic`), or local | any OIDC IdP *(by interface)* | Google (`google`) | Entra ID (`entra_id`) | local-auth / oauth2-proxy |
 | Ingress / LB | Gateway API / Service | MetalLB + Envoy Gateway | NLB (AWS Load Balancer Controller) + Envoy Gateway | GCLB *(by interface)* | Azure LB *(by interface)* | Envoy (`dfe-proxy`) |
@@ -89,6 +89,8 @@ interface, but no value selects it and it is untested.
 | Block storage | StorageClass | local-path, or the cluster default | EBS `gp3` | PD *(by interface)* | Azure Disk *(by interface)* | docker volumes |
 | DNS | external-dns / zone | CoreDNS / site DNS | Route 53 *(by interface)* | Cloud DNS *(by interface)* | Azure DNS *(by interface)* | /etc/hosts |
 | Observability sink | OTel exporter -> dest | dfe-hyperdx + CH | dfe-hyperdx + CH | dfe-hyperdx + CH | dfe-hyperdx + CH | dfe-hyperdx + CH |
+
+A managed Kafka runs on any platform with `kafka.mode=external`: Confluent Cloud (`confluent-cloud`) and Redpanda Cloud (`redpanda-cloud`), each a provider in scalo's `transport/kafka/providers.rs` with its own page under dfe-infra's `docs/deployment/kafka/`. MSK Serverless needs IAM auth, which scalo carries as `msk_iam` but does not yet enable.
 
 ## Worked example - secrets (the pattern for all of them)
 
