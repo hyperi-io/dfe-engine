@@ -2,9 +2,33 @@
 
 Every KEDA-scaled app scales on CPU. The ingest apps also scale on scalo ScalingPressure by default, read through the fail-safe `dfe-keda-shim`. On any shim or ClickHouse failure the last-good value is returned, so scaling freezes at current replicas rather than running up. The deployed charts use no Kedify OTEL Scaler and no Prometheus trigger. The one Prometheus path is `POST /api/v1/pipeline/build`, which renders KEDA `prometheus` triggers against `PROMETHEUS_SERVER_ADDRESS`.
 
+## What DFE scales
+
+| Component | Scales out | Scales in |
+|---|---|---|
+| DFE apps | KEDA, on CPU and ScalingPressure | KEDA, at the scalo-service scale-down pace |
+| Kafka brokers on Strimzi | KEDA, on consumer lag, up to `kafka.autoscaling.maxBrokers` | Off until `kafka.autoscaling.scaleIn.enabled` is set |
+| Kafka brokers on Redpanda | By hand | By hand, one broker at a time |
+| ClickHouse | Sized, not autoscaled | Sized, not autoscaled |
+| Nodes | The platform's node autoscaler | The platform's node autoscaler |
+
+The DFE apps scale out and in through the ScaledObject scalo-service renders for each one. KEDA's `cooldownPeriod` applies only to the step to zero ([ScaledObject spec](https://keda.sh/docs/latest/reference/scaledobject-spec/)), and no DFE tier scales to zero. Between the floor and the ceiling, the HPA that KEDA creates decides.
+
+scalo-service paces that HPA's scale-down. It waits out a 300 second stabilisation window, then removes at most 25 percent of the pods per 60 seconds (scalo-rs `charts/scalo-service/templates/_keda.tpl`). An app's values change it through `keda.scaleDown.stabilizationWindowSeconds`, `keda.scaleDown.percent` and `keda.scaleDown.periodSeconds`. A pod picked to go gets SIGTERM, then up to `terminationGracePeriodSeconds` (45 by default, scalo-rs `charts/scalo-service/templates/_grace.tpl`) to drain before SIGKILL.
+
+On Strimzi, KEDA scales the broker KafkaNodePool on consumer lag in each landing source's transform group, from `kafka.replicas` up to `kafka.autoscaling.maxBrokers` (dfe-infra `helm/charts/kafka/templates/kafka-autoscaler.yaml`). It's on by default and renders once a landing source is declared. A change to the pool's replica count fires Strimzi's Cruise Control autoRebalance, which moves partitions onto a new broker and off a leaving one before Strimzi removes it (`kafka.yaml`, `kafka-rebalance-templates.yaml`).
+
+Broker scale-in is a human decision. Brokers KEDA adds stay until someone sets `kafka.autoscaling.scaleIn.enabled`, which then applies an 1800 second stabilisation window (dfe-infra `helm/charts/kafka/values.yaml`). The [broker autoscaling guide](https://github.com/hyperi-io/dfe-infra/blob/main/docs/deployment/kafka/autoscaling.md) covers the triggers and what has to hold before a scale-in.
+
+The broker autoscaler renders only for `kafka.provider: strimzi`, so Redpanda brokers are sized by hand. Redpanda's own guidance is to keep Kubernetes autoscalers off its brokers ([scaling Redpanda](https://docs.redpanda.com/streaming/current/manage/kubernetes/k-scale-redpanda/)) and to decommission one broker at a time ([decommissioning brokers](https://docs.redpanda.com/streaming/current/manage/kubernetes/k-decommission-brokers/)).
+
+DFE sizes ClickHouse and doesn't autoscale it. The official operator has no autoscaler: scaling is an edit to `spec.replicas` or `spec.shards`, and a new shard takes new writes only, because the operator moves no existing rows ([operator scaling](https://clickhouse.com/docs/products/kubernetes-operator/guides/scaling)). Autoscaling it may come if a paying customer needs it.
+
+Nodes are the platform's job. KEDA adds pods, and on AWS Karpenter adds the nodes they need. On-premises DFE ships no node autoscaler, so the node pool is sized for the peak (dfe-infra `docs/autoscaling.md` and `docs/deployment/node-autoscaling.md`).
+
 ## The two triggers
 
-**CPU, on every KEDA app.** KEDA's native `cpu` scaler (70% utilisation, metrics-server).
+**CPU, on every KEDA app.** KEDA's built-in `cpu` scaler (target 70% CPU, metrics-server).
 
 **scalo ScalingPressure, on by default for the ingest apps**: an app's dfe-infra values carry
 the `pressure-trigger` trigger fragment, and `keda.pressure.*` sets its target,
@@ -26,8 +50,6 @@ flowchart LR
     shim -->|"metrics-api\n(fail-safe cache)"| so
     so --> dep["app Deployment"]
 ```
-
-### Which gauge rows the shim reads
 
 scalo registers the composite as a bare `scaling_pressure` gauge. An app emits it under that name, or as `<namespace>_scaling_pressure` when its deployment sets a metrics namespace. The shim reads every series of the gauge for one service and returns the hottest:
 
@@ -75,6 +97,6 @@ Replica bounds come from dfe-infra `argocd/values/common.yaml` and the tier prof
 | scale | 2 | 12 | 70 |
 | mesh | 2 | 10 | 70 |
 
-No tier scales to zero. dfe-loader sets `cooldownPeriod: 120`.
+No tier scales to zero.
 
 A per-app `keda.triggers` list is passed through verbatim and replaces the default triggers outright, CPU included. The engine never sets one by default: consumer-group lag also rises when a downstream stage is broken, and more pods cannot help there.
