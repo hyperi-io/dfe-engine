@@ -42,7 +42,7 @@ Any other value resolves to an empty endpoint, and an app with an empty endpoint
 
 An endpoint with no scheme gets `http://`, or `https://` when `otel.tls` is true. `otel.endpoint` overrides the resolved value for one deployment. It is exported as written, so it must carry its scheme, and scalo-service sets `OTEL_EXPORTER_OTLP_PROTOCOL` beside it (default `grpc`). dfe-ui and dfe-hyperdx export over OTLP/HTTP, so they take the resolved endpoint on port 4318.
 
-In `receiver` mode, apps export to dfe-receiver's OTLP listener. It binds 4317 and 4318 only while the receiver's `config.otlp.enabled` is true, and with no `telemetry.receiverEndpoint` dfe-infra refuses to render the receiver until it is. Turning it on also serves OTLP on the receiver's load balancer. The receiver converts each record to JSON in the ClickHouse exporter's row shape (its default `otlp.mode: hyperdx`) and sends it down the normal data path. It lands wherever the receiver's routing and the loader's table mapping send it. No shipped rule sends it to the `otel_*` tables.
+In `receiver` mode, apps export to dfe-receiver's OTLP listener. It binds 4317 and 4318 only while the receiver's `config.otlp.enabled` is true, and with no `telemetry.receiverEndpoint` dfe-infra refuses to render the receiver until it is. Turning it on also serves OTLP on the receiver's load balancer. The receiver converts each record to JSON in the ClickHouse exporter's row format (its default `otlp.mode: hyperdx`) and sends it down the normal data path. It lands wherever the receiver's routing and the loader's table mapping send it. No shipped rule sends it to the `otel_*` tables.
 
 The mode moves only the apps' OTLP push. The collector runs in every mode, so container logs, scraped `/metrics` and its other inputs keep landing in the `otel_*` tables.
 
@@ -98,7 +98,7 @@ A row whose `_timestamp_load` is inside a fire's window but which has not reache
 
 dfe-ui registers OpenTelemetry through `@vercel/otel` once per server process when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, with `OTEL_SERVICE_NAME` defaulting to `dfe-ui` (dfe-ui `apps/dfe-core-ui/src/instrumentation.ts`). An empty endpoint registers nothing, so `prometheus` mode starts no exporter. Its server output reaches `otel_logs` from stdout like any other pod.
 
-Its server logger (dfe-ui `apps/dfe-core-ui/src/core/server/logger/`) writes one scalo-py-shaped JSON record per line to stdout (`timestamp`, `level`, `target`, `message`, `fields`), with scalo's field-name masking. `LOG_LEVEL` sets the threshold (default INFO), and `LOG_FORMAT` is `json` or `text`. Unset, it picks JSON in production or whenever an OTLP endpoint is set, and text on a dev terminal. NextAuth's logger and Next's `onRequestError` hook write through it, and request headers are never logged.
+Its server logger (dfe-ui `apps/dfe-core-ui/src/core/server/logger/`) writes one JSON record per line in scalo-py's format to stdout (`timestamp`, `level`, `target`, `message`, `fields`), with scalo's field-name masking. `LOG_LEVEL` sets the threshold (default INFO), and `LOG_FORMAT` is `json` or `text`. Unset, it picks JSON in production or whenever an OTLP endpoint is set, and text on a dev terminal. NextAuth's logger and Next's `onRequestError` hook write through it, and request headers are never logged.
 
 ## Acceptance tests
 

@@ -14,7 +14,7 @@ The DFE control plane: an API and CLI that turn operator changes into git commit
 - OIDC login, SCIM 2.0 provisioning for accounts and groups, and scoped RBAC.
 - The `dfe` CLI, generated from the API's own OpenAPI spec.
 
-Records never flow through the engine. They go receiver, then Kafka or gRPC, then loader, then ClickHouse, and the engine decides what those apps are configured to do. DFE lands data first and lets you shape it later, one field at a time, with no reindex. [docs/data-evolution.md](docs/data-evolution.md) explains the three stages and the `promote` workflow.
+Records never flow through the engine. They go receiver, then Kafka or gRPC, then loader, then ClickHouse, and the engine decides what those apps are configured to do. DFE lands data first and lets you add columns later, one field at a time, with no reindex. [docs/data-evolution.md](docs/data-evolution.md) explains the three stages and the `promote` workflow.
 
 DFE is a product that other organisations deploy. Nothing in this repo is specific to any one deployment, and configuration is injected at deploy time.
 
@@ -55,7 +55,7 @@ The image bakes the dfe-schemas trees in at `/app/schemas` and an empty `/app/co
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md): what the engine is, its invariants and why it is shaped this way.
+- [docs/architecture.md](docs/architecture.md): what the engine is, its invariants and why it is built this way.
 - [docs/control-plane/](docs/control-plane/README.md): the API, auth, RBAC and governed gitops.
 - [docs/data-plane/](docs/data-plane/README.md): sources, schemas, DDL, the query API and hunts.
 - [docs/deployment/](docs/deployment/README.md): the chart, the image and the deployment contract.

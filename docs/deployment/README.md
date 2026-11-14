@@ -86,7 +86,7 @@ win. The layer2-apps ApplicationSet is a matrix of (clusters x git-files over
 The engine turns dials through that instance file and never authors
 Applications, so every dial has to be a Helm value.
 
-App shapes: one deployment for the stack (receiver/loader/archiver/engine/ui -
+App types: one deployment for the stack (receiver/loader/archiver/engine/ui -
 one values file each) vs one per config (fetcher and transforms - N files,
 each its own config). KEDA scaling is folded into each app chart - see
 [keda-scaling.md](keda-scaling.md).
@@ -97,7 +97,7 @@ Five tiers, smallest to largest. The first is Docker; the rest are Kubernetes
 profiles selected by the cluster secret's `dfe.hyperi.io/profile`. Transport
 and the balancer per tier: [transports.md](transports.md).
 
-| Tier | Platform | Transport | Kafka | Sizing | Shape |
+| Tier | Platform | Transport | Kafka | Sizing | Fits |
 |------|----------|-----------|-------|--------|-------|
 | **dfe-docker** | Docker Compose (NOT k8s) | four profiles: `slim-grpc`, `slim-kafka`, `single-grpc`, `single-kafka` (the default) | per profile | minimal | SME / single-host, anything smaller than `slim` |
 | **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s; smallest |

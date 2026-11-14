@@ -24,8 +24,8 @@ flowchart LR
 
 | Mode | Input | Realism source |
 |------|-------|----------------|
-| Reference packs (default) | A dfe-schemas meta schema (`meta/syslog`, `meta/otel/logs`, `meta/beats/filebeat`, the cyber sets) | `@source:` exprs give the event shape; name/type heuristics pick typed generators; schema-authored `synthetic:` hints and scenarios carry vocabularies and message templates |
-| Lookalike | A sample's parsed `rows` or raw `lines` (the sampler's output) | The sample's own shape - enums replay weighted, numerics fit the observed range, free text keeps structure with identity tokens substituted in place |
+| Reference packs (default) | A dfe-schemas meta schema (`meta/syslog`, `meta/otel/logs`, `meta/beats/filebeat`, the cyber sets) | `@source:` exprs give the event fields; name/type heuristics pick typed generators; schema-authored `synthetic:` hints and scenarios carry vocabularies and message templates |
+| Lookalike | A sample's parsed `rows` or raw `lines` (the sampler's output) | The sample's own distributions - enums replay weighted, numerics fit the observed range, free text keeps structure with identity tokens substituted in place |
 
 Both draw from a seeded **entity pool**: a generated host keeps its
 FQDN/IP/MAC and its users across the whole stream, and an identical seed

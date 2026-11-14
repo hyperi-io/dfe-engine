@@ -4,7 +4,7 @@ DFE asks for two things from your Microsoft Entra ID tenant: your users sign in 
 
 Console paths checked 2026-10-10 against Microsoft's documentation.
 
-The DFE operator who sent you this page gives you the redirect URI. It has this shape, and you paste it exactly as given:
+The DFE operator who sent you this page gives you the redirect URI. It looks like this, and you paste it exactly as given:
 
 ```text
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/callback

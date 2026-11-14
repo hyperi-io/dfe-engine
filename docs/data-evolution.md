@@ -8,8 +8,8 @@ works. You improve and evolve from there.
 There are two ways the industry handles incoming data, and both make you pay up
 front.
 
-At one end, Elastic and Splunk. Decide the shape before the data arrives, index
-it all, query it fast. Change the shape later and you are reindexing. Send a
+At one end, Elastic and Splunk. Decide the schema before the data arrives, index
+it all, query it fast. Change the schema later and you are reindexing. Send a
 field you did not plan for and it is either dropped, mapped wrong, or it breaks
 the mapping for everyone.
 
@@ -108,9 +108,9 @@ flowchart TB
     META -.->|"small schema, deploy direct"| TABLE
 ```
 
-### Two shapes, and every table has a common header
+### Two kinds of table, and every table has a common header
 
-Every schema is built for one of two shapes:
+Every schema is built for one of two kinds of data:
 
 - **Time-series** -- logs, a large fact table, observability data.
 - **Time-stamped** -- a database or REST dump from dfe-fetcher, which is a
@@ -232,7 +232,7 @@ base's `expr` unchanged and only overrides the index.
 CEL also appears at `@computed` on a column. Routing CEL is held to the Fast
 profile because it runs against every record.
 
-## Promote: see it, then shape it
+## Promote: see it, then give it a column
 
 Meta schema development does not have to start from a blank page.
 

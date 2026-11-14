@@ -296,7 +296,7 @@ forge is configured to open the PR.
 | GET | `/gitops/classes/{cls}/resources` | Resource select (gated by that class's `:read`) |
 | GET | `/gitops/classes/{cls}/resources/{name}/vars` | Path select, with current values + `protected` |
 
-Wizard shape: name/description -> per change: class select -> resource select
+Wizard flow: name/description -> per change: class select -> resource select
 -> path select (show the current value beside each path) -> value input ->
 validate (render `errors[]` + `diff[]`) -> save. Leave `required_action`
 empty - the server derives `action:invoke:<name>`; expose an override only
@@ -437,7 +437,7 @@ key) - plus the user-layer etag:
 ```
 
 PATCH takes an RFC 7396 merge patch, writes ONLY the user layer, and
-returns the same shape with the new effective doc. `null` deletes a
+returns the same fields with the new effective doc. `null` deletes a
 user-layer key so the value falls back to the inherited layer. The theme
 toggle is one call: `PATCH {"theme": "dark"}`.
 

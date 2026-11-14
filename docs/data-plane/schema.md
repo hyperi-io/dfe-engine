@@ -505,7 +505,7 @@ A field you query often belongs in a typed column with a use case, not inside
 `_json`. `_json` stores each value with its own type, row by row, so a path that
 holds both strings and numbers breaks `=`, `IN` and the string functions at
 query time, and no `_json` path has an index. Promoting the field fixes both:
-see [Data evolution](../data-evolution.md#promote-see-it-then-shape-it).
+see [Data evolution](../data-evolution.md#promote-see-it-then-give-it-a-column).
 
 ### Use Cases Are Tied to Primitives
 

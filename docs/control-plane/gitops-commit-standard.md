@@ -41,7 +41,7 @@ The OpenGitOps four, plus our survivability rule:
   edit to a shared file.
 - The tracked branch is `main`. No env branches.
 
-## 3. Commit conventions (Conventional-Commits-shaped, gitops-typed)
+## 3. Commit conventions (Conventional Commits format, gitops-typed)
 
 Subject: `type(scope): summary` - ASCII only, <= 50 chars, imperative.
 
@@ -144,4 +144,4 @@ Implemented in the gitcrud engine (see [[governed-ops-api]] Phase 1):
 - Argo CD Auto-Sync (self-heal, prune, roll-forward): <https://argo-cd.readthedocs.io/en/latest/user-guide/auto_sync/>
 - Argo CD anti-patterns (PRs over direct commits; pin bases): <https://codefresh.io/blog/argo-cd-anti-patterns-for-gitops/>
 - Argo CD signature verification (GnuPG deprecated -> sourceIntegrity): <https://argo-cd.readthedocs.io/en/latest/user-guide/gpg-verification/>
-- hyperi-ai CI standard (Conventional Commits shape we align to): internal CORE.md / GIT.md
+- hyperi-ai CI standard (the Conventional Commits format we align to): internal CORE.md / GIT.md

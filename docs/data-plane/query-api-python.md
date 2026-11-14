@@ -341,7 +341,7 @@ while result.metadata.has_more:
 
 ## Storage Listing
 
-S3, MinIO and filesystem listings run on the raw route (`POST /api/v1/queries/raw`, scope `raw_query:execute`), which `QueryClient` does not call. The request shape and listing columns are in [query-api.md](query-api.md#storage-listing).
+S3, MinIO and filesystem listings run on the raw route (`POST /api/v1/queries/raw`, scope `raw_query:execute`), which `QueryClient` does not call. The request body and listing columns are in [query-api.md](query-api.md#storage-listing).
 
 ---
 

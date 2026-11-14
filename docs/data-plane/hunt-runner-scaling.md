@@ -165,7 +165,7 @@ so on Kubernetes the table stays empty unless an operator runs the command after
 each hunt-config change. Run that way, a brand-new hunt added while scaled to zero
 still gets a `hunt_schedule` row, so KEDA can wake a worker for it.
 
-## KEDA ScaledObject (shape)
+## KEDA ScaledObject (how it is wired)
 
 **KEDA has no native ClickHouse scaler.** The earlier approach - KEDA's `mysql`
 scaler pointed at ClickHouse's MySQL-compatible interface (`mysql_port`, 9004) -

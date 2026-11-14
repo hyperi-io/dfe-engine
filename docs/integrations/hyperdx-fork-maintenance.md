@@ -46,7 +46,7 @@ upstream by tag with a rebase + CI guardrail. Authority stays in the engine/gito
     hook (e.g. a connection-resolver), contribute it; our delta then shrinks to
     config and that edit disappears.
 
-## What our delta SHOULD be (target shape)
+## What our delta SHOULD be (target)
 
 - Added: `packages/api/src/dfe/**` (oidc-identity, jwt-verify, user-provisioning,
   config, connection-selector) - self-contained.
