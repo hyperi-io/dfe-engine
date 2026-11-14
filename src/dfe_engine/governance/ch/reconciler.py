@@ -15,7 +15,6 @@ EXISTS`` / computed diff for drops), so a second run is a no-op.
 """
 
 import hashlib
-import secrets as _stdlib_secrets
 from collections.abc import Collection, Mapping
 from typing import Any
 
@@ -26,6 +25,7 @@ from scalo.secrets.exceptions import SecretAlreadyExistsError
 from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 from dfe_engine.schema.require import missing_objects
+from dfe_engine.secrets import mint_value
 
 from .models import (
     DB,
@@ -304,7 +304,7 @@ class ChRbacReconciler:
         user's password, so regenerating every run would desync CH from the store.
         The mint is create-only, so two replicas reconciling together keep one password.
         """
-        minted = _stdlib_secrets.token_urlsafe(24)[:32]
+        minted = mint_value()
         if self._secrets is None:
             return hashlib.sha256(minted.encode()).hexdigest()
         plaintext = self._secrets.get_or_none(path)
