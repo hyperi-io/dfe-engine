@@ -62,12 +62,11 @@ dependencies = [
     "httpx2>=2.13.1",
     # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
     # Starlette's SessionMiddleware imports it and does not require it, so this is the only thing that installs it.
-    # 2.2.0 (2024-04) is the latest release, and pallets/itsdangerous last committed 2025-06.
     "itsdangerous>=2.2.0",
-    # Held on 0.6 for GA: later 0.x minors change the SCIM models' API.
+    # Held on 0.6: later 0.x minors change the SCIM models' API the engine is written against.
     "scim2-models>=0.6.12,<0.7",
     # Alerting / notifications
-    # Held below 2.0 for GA: notification delivery, upgraded post-GA with alerting.
+    # Held below 2.0: the notification code is written against the 1.x API.
     "apprise>=1.11.0,<2",
     # Transitive floor (apprise -> requests-oauthlib): CVE-2026-49265 (PKCE verifier timing compare, 4.0.0)
     # and CVE-2026-49272 (device-flow bearer token, 4.0.1).
