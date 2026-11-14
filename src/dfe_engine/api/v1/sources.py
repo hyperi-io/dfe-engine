@@ -1068,7 +1068,7 @@ class ExternalConnectionModel(BaseModel):
 class SourceDetailResponse(Source):
     """Full source definition with per-version build/plan/deploy status."""
 
-    versions: dict[str, SourceVersionDetail] = Field(
+    versions: dict[str, SourceVersionDetail] = Field(  # ty: ignore[invalid-attribute-override]  # the response model narrows the field, never writes it
         default_factory=dict,
         description="Version id -> configuration snapshot and pipeline artifacts",
     )
@@ -1231,7 +1231,7 @@ class SourceSignalsResponse(BaseModel):
 class SourceVersionGetDetailResponse(SourceVersionGetResponse):
     """Single-version GET with build/plan/deploy status on ``version``."""
 
-    version: SourceVersionDetail = Field(
+    version: SourceVersionDetail = Field(  # ty: ignore[invalid-mutable-override]  # the response model narrows the field, never writes it
         ...,
         description="Configuration snapshot for ``selected`` plus pipeline artifacts",
     )

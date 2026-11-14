@@ -40,9 +40,13 @@ class _StubExec:
     if TYPE_CHECKING:
         # Provided by the concrete AI-module host this mixin is combined with
         # (interface.py QueryOptimiser/QueryGenerator/LogParser/SchemaOptimiser).
-        # Declared for type-checkers only. No runtime attribute is created here.
-        name: str
-        module_type: AIModuleType
+        # Declared for type-checkers only, as the properties the host defines them
+        # as, so a stub's own property overrides them cleanly.
+        @property
+        def name(self) -> str: ...
+
+        @property
+        def module_type(self) -> AIModuleType: ...
 
         def generate_task_id(self) -> str: ...
 

@@ -267,7 +267,7 @@ class HuntDetailResponse(_HuntConfigFields):
     """Full hunt configuration returned from GET/create/update."""
 
     name: str = Field(description="Hunt file name (YAML stem)")
-    display_name: str = Field(description="Resolved human-readable label")
+    display_name: str = Field(description="Resolved human-readable label")  # ty: ignore[invalid-mutable-override]  # the response model narrows the field, never writes it
     rules: list[HuntRuleEntry] = Field(min_length=1)
     # A stored hunt naming none is shown, and runs nothing.
     customers: list[str] = Field(
