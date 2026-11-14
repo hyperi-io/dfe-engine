@@ -1,7 +1,7 @@
 """Tests for the local authentication provider (store-backed)."""
 
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -124,7 +124,7 @@ class TestAuthentication:
 
 
 @contextmanager
-def _bcrypt_calls() -> Iterator[list[str]]:
+def _bcrypt_calls() -> Generator[list[str]]:
     """Name each real ``bcrypt.checkpw`` and ``bcrypt.hashpw`` call made inside the block.
 
     Read from the profiler, so the functions themselves are not replaced.

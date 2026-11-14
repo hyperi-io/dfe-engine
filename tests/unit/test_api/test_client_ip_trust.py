@@ -18,7 +18,7 @@ Each test drives the real app from a chosen TCP peer and reads the event off a
 real log sink.
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
@@ -49,7 +49,7 @@ type Headers = list[tuple[str, str]]
 @contextmanager
 def _engine(
     api_settings: DFESettings, peer: tuple[str, int], forwarded_allow_ips: str = POD_NETWORK
-) -> Iterator[TestClient]:
+) -> Generator[TestClient]:
     """The real app, reached from *peer*, trusting *forwarded_allow_ips*."""
     api = api_settings.api.model_copy(update={"forwarded_allow_ips": forwarded_allow_ips})
     app = create_app(settings=api_settings.model_copy(update={"api": api}))

@@ -32,7 +32,7 @@ import sys
 import threading
 import time
 import zlib
-from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -161,7 +161,7 @@ _READ_SCOPE: ContextVar[set[GitopsRepo] | None] = ContextVar("dfe_gitops_read_sc
 
 
 @contextmanager
-def read_scope() -> Iterator[None]:
+def read_scope() -> Generator[None]:
     """Answer every read in this block from one view of the deploy repo.
 
     A request reads many documents and a listing reads them all, so without this
@@ -925,7 +925,7 @@ class GitopsRepo:
             return self._take_head(pending)
 
     @contextmanager
-    def read_locked(self) -> Iterator[None]:
+    def read_locked(self) -> Generator[None]:
         """Hold the working tree still while the caller reads it.
 
         :meth:`publish` stages and commits under this lock and a refresh hard-resets
@@ -1097,7 +1097,7 @@ class GitopsRepo:
         return True
 
     @contextmanager
-    def batch(self, message: str) -> Iterator[None]:
+    def batch(self, message: str) -> Generator[None]:
         """Land every publish in the block as ONE commit and ONE push.
 
         Each publish inside the block writes and stages its files as usual, so a read

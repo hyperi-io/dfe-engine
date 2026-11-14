@@ -176,7 +176,7 @@ class SchemaColumn(BaseModel):
 class SchemaColumnWrite(SchemaColumn):
     """Column payload for API writes (create schema / add version)."""
 
-    field_type: NonEmptyStr = Field(
+    field_type: NonEmptyStr = Field(  # ty: ignore[invalid-mutable-override]  # the derived schema narrows the field, never writes it
         ...,
         validation_alias=AliasChoices("_field_type", "field_type"),
         serialization_alias="_field_type",

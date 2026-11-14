@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import contextvars
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from typing import Any
@@ -66,7 +66,7 @@ def current_tags() -> DfeQueryTags:
 
 
 @contextmanager
-def tags_context(**fields: Any) -> Iterator[None]:
+def tags_context(**fields: Any) -> Generator[None]:
     """Scope attribution ``fields`` to a block, restoring the prior tags on exit.
 
     Restores even on exception. Nested contexts stack (each restores its own

@@ -13,7 +13,7 @@ secret of every listener it is scoped to.
 """
 
 import functools
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -670,7 +670,7 @@ class TestTheMirrorSecret:
 
 
 @pytest.fixture
-def replica_b(client, api_settings) -> Iterator[TestClient]:
+def replica_b(client, api_settings) -> Generator[TestClient]:
     """A second engine on the same config and secrets directories, as another replica runs."""
     with TestClient(create_app(settings=api_settings), raise_server_exceptions=False) as other:
         yield other
@@ -968,7 +968,7 @@ def _record_unreadable_after_put_back_fails(monkeypatch, app) -> None:
 
 
 @contextmanager
-def _logged() -> Iterator[list[str]]:
+def _logged() -> Generator[list[str]]:
     """Each line the engine logs inside the block, with its fields."""
     lines: list[str] = []
     sink = logger.add(lines.append, level="DEBUG", format="{message} {extra}\n")
