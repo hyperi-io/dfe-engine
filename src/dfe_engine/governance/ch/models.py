@@ -8,12 +8,13 @@
 """Config models for the ClickHouse RBAC machinery (gitcrud, versioned).
 
 A TIER is "how much you can consume + what you can do" (grants + settings profile
-+ quota). A SERVICE ROLE is a fixed identity (loader/query_reader/hunt_runner). A
-GROUP BINDING ties an RBAC group's CH user to one tier axis + at most one org
-axis. The tenant axis is one SHARED role plus a per-user pinned setting. per-org
-users are derived from the Org registry by the reconciler.
++ quota). A SERVICE ROLE is a fixed identity (loader, query_reader, hunt_runner,
+otel_writer, otel_reader). A GROUP BINDING ties an RBAC group's CH user to one
+tier axis + at most one org axis. The tenant axis is one SHARED role plus a
+per-user pinned setting. per-org users are derived from the Org registry by the
+reconciler.
 
-The seed CATALOGUE -- the six tiers, the four service roles, the tenant axis, the
+The seed CATALOGUE -- the tiers, the service roles, the tenant axis, the
 system-table grant lists and the naming rules -- is data in dfe-schemas
 (``roles/clickhouse.yaml``) and is read from there. The models here are the shape
 an operator's own governed-ops edits take.
