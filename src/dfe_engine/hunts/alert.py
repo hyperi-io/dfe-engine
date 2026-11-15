@@ -20,13 +20,15 @@ Alert destinations are defined once and referenced by name:
       triggers:
         - when: "result_count > 0"
         - when: "result_count >= 10"
-        - when: 'severity == "critical" && result_count > 0'
 
-Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
+Triggers are CEL expressions evaluated against ``result_count``, the rows the
+fire wrote:
 - "result_count > 0" -- fire when any result rows are returned
 - "result_count >= 10" -- fire when result count meets a threshold
-- 'severity == "critical"' -- fire when a field in results matches a condition
-- 'severity == "critical" && result_count > 0' -- compound conditions
+
+The hunt runner passes the count only, so a trigger on a row field such as
+``severity`` never fires there. ``AlertDispatcher.evaluate_and_send`` merges each
+row of a ``results`` list into the context for a caller that holds the rows.
 """
 
 import builtins
@@ -343,7 +345,6 @@ class AlertTrigger(BaseModel):
 
         AlertTrigger(when="result_count > 0")
         AlertTrigger(when="result_count >= 10")
-        AlertTrigger(when='severity == "critical" && result_count > 0')
     """
 
     when: str = Field(..., description="CEL condition expression")
@@ -399,7 +400,7 @@ class AlertDispatcher:
 
     Usage:
         dispatcher = AlertDispatcher(alert_config)
-        dispatcher.evaluate_and_send(hunt_context)
+        dispatcher.evaluate_and_send(hunt_name, customer, rule_name, result_count)
     """
 
     def __init__(self, config: AlertConfig):
@@ -529,7 +530,6 @@ def build_alert_config(
             - mailto://...
           triggers:
             - when: "result_count > 0"
-            - when: 'severity == "critical" && result_count > 0'
 
     Resolution order:
     1. Resolve destination names via registry -> Apprise URLs

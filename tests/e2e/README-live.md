@@ -66,10 +66,9 @@ in the order the path runs: a record lands with nothing declared, a nested
 source gets its own routing and typed table, an index moves on the live table,
 and a transform parses a syslog line into columns.
 
-A step the product cannot do yet is `xfail(strict=True)` naming its open issue,
-so the run goes red when the fix lands rather than staying quietly green. 1.3 is
-dfe-engine#459 and 2.7 is dfe-loader#184. Nothing here is softened to make a run
-green.
+A step that cannot pass yet is `xfail(strict=True)` naming its open issue, so
+the run goes red when the cause is fixed rather than staying quietly green. 2.7 is
+dfe-engine#1173. Nothing here is softened to make a run green.
 
 The steps share one source and one table, so run this file in ONE worker --
 pass `-p no:xdist`, because workers would split the sequence across
@@ -151,7 +150,8 @@ says the umbrella path transformed -- not that all three corpus modules did.
 
 `test_live_pipeline.py` has NOT been run green end to end.
 
-`test_data_evolution.py` carries nine steps proved by hand against a live
-compose stack -- seven pass, 1.3 and 2.7 are the two xfails -- but the pytest
-file itself has NOT yet been run against a deployment. Until it has, a failure
-in it is as likely to be the harness as the product.
+`test_data_evolution.py` has been run against the 2.2.2 compose stack. 1.3, 3.2
+and 3.3 pass and 2.7 is the one xfail. 1.1 expects a 409 where the engine lets a
+core schema's `current` move and answers 422 for an unknown version, and 2.6 saw
+its active-part count fall from 5 to 1 across the add and drop. A failure in this
+file is as likely to be the harness as the product.

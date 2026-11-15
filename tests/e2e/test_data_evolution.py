@@ -152,7 +152,7 @@ CAPTURE_SELECT = ("timestamp", "host_name", "event_dataset", "message")
 # What an UNPOPULATED `_json` reads as. The column is non-Nullable JSON, so the
 # loader writing nothing leaves the empty object rather than NULL: `toString()`
 # renders `{}` and `length()` is 2. A falsiness check on that length can never
-# hold, so it would xfail forever and never go red when #513 lands.
+# hold.
 EMPTY_JSON_LENGTH = 2
 
 HEADER = {"type": "common-header/timeseries", "version": "1.0.1"}
@@ -684,13 +684,6 @@ class TestStage1:
             f"{', '.join(_COMPARED_FIELDS)}: {lost[:3]}"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "dfe-engine#459: promote writes @copy into the column COMMENT and dfe-loader does "
-            "not carry that directive, so the column is created and never fills"
-        ),
-    )
     def test_1_3_a_field_seen_in_json_promotes_to_a_real_column(
         self, engine: EngineAPI, e2e, ch_client, evolved: Evolved
     ) -> None:
@@ -1074,9 +1067,10 @@ class TestStage2:
 
     @pytest.mark.xfail(
         strict=True,
+        raises=AssertionError,
         reason=(
-            "dfe-loader#184: the transform produces the ECS record on the source's load topic "
-            "and the loader never lands it, so the source's table stays empty"
+            "dfe-engine#1173: the source links no VRL program, so its transform instance "
+            "idles, and a deploy does not start that instance"
         ),
     )
     def test_2_7_a_transform_turns_a_text_line_into_typed_columns(
@@ -1145,14 +1139,6 @@ class TestStage3:
             "left unpopulated, so turning capture back on would need a migration"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "dfe-engine#513: the deploy writes table_capture_modes and reports "
-            "restart_required: [], but dfe-loader logs no config reload, so the mode "
-            "only takes effect after the loader is restarted by hand"
-        ),
-    )
     def test_3_2_the_feed_lands_typed_with_json_empty(
         self, e2e, ch_client, capture_off: str
     ) -> None:
@@ -1190,13 +1176,6 @@ class TestStage3:
             f"{EMPTY_JSON_LENGTH} of an empty object, so population did not stop"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "dfe-engine#513: turning capture back on writes the loader config and needs "
-            "the same manual restart, so a new record still lands with _json empty"
-        ),
-    )
     def test_3_3_turning_population_back_on_refills_json(
         self, engine: EngineAPI, e2e, ch_client, capture_off: str
     ) -> None:
