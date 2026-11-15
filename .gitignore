@@ -86,8 +86,7 @@ meta_schemas.zip
 # Docker
 docker-compose.yml
 
-# Runtime config directory (created by bootstrap). Anchored to the root so the
-# fixtures under tests/resources/test_hunts/hunt_config/config/ stay tracked.
+# Runtime config directory (created by bootstrap), anchored to the repo root.
 /config/
 
 # Local environment files (never commit -- contain secrets)

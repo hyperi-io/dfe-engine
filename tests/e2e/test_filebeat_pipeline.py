@@ -1,11 +1,11 @@
 #  Project:      dfe-engine
 #  File:         tests/e2e/test_filebeat_pipeline.py
-#  Purpose:      The transform layer proved end to end on real filebeat data
+#  Purpose:      The transform layer proved end to end on the synthetic filebeat corpus
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The whole source path, with a transform in it, on real data.
+"""The whole source path, with a transform in it, on the synthetic corpus.
 
     filebeat samples
       -> dfe-receiver        (JSON conditional routing picks the source)
@@ -22,10 +22,8 @@ both apps deployed each run measures both whatever it is told. DFE_E2E_TRANSFORM
 only names the app in the failure message.
 
 Every assertion polls a real signal. The one thing deliberately NOT asserted is
-byte-equality against the upstream goldens: the bundled pipeline documents four
-known departures from elastic (user_agent wording, query-parameter order,
-public-suffix section, ambiguous timezone abbreviations), so equality would fail
-for reasons the pipeline's own README already answers. Field presence and the
+full-output equality against the
+corpus expectations, because those name only the fields a case checks. Field presence and the
 routing decision are what this proves.
 
 Skipped unless the DFE_E2E_* env is set - see conftest and README-live.md.
@@ -54,11 +52,10 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # transformed rather than passed through. Both are set ONLY in the umbrella
 # branch of the pipeline, so this assertion covers one of the three corpus
 # modules. `event_module` and `event_dataset` are not asserted: the VRL never
-# sets either, and neither appears in Elastic's own goldens.
+# sets either, and neither appears in the corpus expectations.
 #
-# `source_ip` is the column that covers all three modules (104 of the 377
-# goldens -- umbrella 30, ios 37, meraki 37), is set by the VRL and declared by
-# the meta schema, and is excluded only because dfe-loader#127 rejects the
+# `source_ip` is the column that covers all three modules, is set by the VRL and
+# declared by the meta schema, and is excluded only because dfe-loader#127 rejects the
 # value. Once that lands, switch to it AND widen the sample: the five events
 # posted below include no meraki line that carries a source IP.
 #
