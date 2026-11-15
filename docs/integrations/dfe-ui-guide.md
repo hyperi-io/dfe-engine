@@ -15,10 +15,10 @@ engine (the brain + API), and dfe-hyperdx (data exploration).
 
 ## 2. What it is built from (the stack)
 
-- **Next.js + React** (versions in `apps/dfe-core-ui/package.json`) - Next.js is a web framework that runs partly on a
+- Next.js + React (versions in `apps/dfe-core-ui/package.json`) - Next.js is a web framework that runs partly on a
   Node.js server and partly in the browser. Think "a Node server that renders
   pages and also ships interactive JavaScript to the browser".
-- **A monorepo** (Yarn + Turbo): one repository holding several packages -
+- A monorepo (Yarn + Turbo): one repository holding several packages -
   `apps/dfe-core-ui` (the actual app) plus shared `packages/*`, among them
   `dfe-engine-types` (see below).
 - It builds in **"standalone" mode**: `next build` produces a self-contained
@@ -53,7 +53,7 @@ is deliberately light:
    the variable server-side at request time, so it is a deployment setting, not a
    build-time one.
 2. "Create rule from a Search" - dfe-hyperdx can send the browser a
-   cross-window message (`postMessage`). Dfe-ui catches it, stores the search, and
+   cross-window message (`postMessage`), and dfe-ui catches it, stores the search, and
    opens its rule-create screen pre-filled. The UI checks the message came from the
    configured dfe-hyperdx origin.
 

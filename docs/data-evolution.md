@@ -136,23 +136,23 @@ than suggested.
 A source gets its own Kafka topic, where the deployment has Kafka, and its own
 table.
 
-**Routing.** A source declares the condition that selects its records, as a
+Routing: a source declares the condition that selects its records, as a
 `match` (`key exists`, `key=value` and the other operators, grouped `all` or
 `any`) or as `when`, a CEL Fast condition the receiver evaluates. That condition
 runs against EVERY inbound record, so the CEL Fast profile refuses regex,
 iteration and time functions there.
 
-**What is mandatory.** The source name, which names the table and the topics
+What is mandatory: the source name, which names the table and the topics
 (`<name>_land`, plus `<name>_load` after a transform), and the routing condition when the origin is the receiver. A source
 landing anywhere other than `main` also needs a meta schema or a derived schema,
 because that is what defines its table.
 
-**Derived schemas.** This is where a large meta schema usually gets one. A
+Derived schemas: this is where a large meta schema usually gets one. A
 derived schema is a sub-selection of fields from its parent meta schema, plus
 which of those fields carry which index type -- one index type per field, added
 and removed as a CRUD operation on both the definition and the deployed table.
 
-**Transforms, optional.** A source carries at most one transform. DFE ships
+Transforms, optional: a source carries at most one transform. DFE ships
 transform-elastic, transform-vrl and transform-vector.
 
 ### What a transform is actually for
@@ -202,7 +202,7 @@ net was down, is gone rather than slow.
 It is a maturity statement. Never a default. Nothing pushes you here and most
 tables should never arrive.
 
-**The data plane already does this.** dfe-loader's `metadata.capture_mode`
+The data plane already does this. dfe-loader's `metadata.capture_mode`
 (`full`, `json_only`, `raw_only`, `extracted_only`) decides what it writes, with
 `metadata.table_capture_modes` for per-table control, and the column directive
 framework reaches the same end with `@skip` on `_json`. The control plane says it

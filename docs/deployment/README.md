@@ -2,8 +2,8 @@
 
 How DFE gets onto a cluster and how the engine's dials reach it. The engine
 never deploys backing services and never authors Argo Applications - it
-writes config, DDL, and overlay values into the deploy repo. Dfe-infra's
-charts and ApplicationSets do the deploying. This page carries the layered
+writes config, DDL, and overlay values into the deploy repo, and the charts
+and ApplicationSets in dfe-infra do the deploying. This page carries the layered
 model, the tiers, the deploy-repo providers, the backing-service modes, and
 the network model. The system map is [../architecture.md](../architecture.md).
 

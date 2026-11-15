@@ -176,25 +176,25 @@ plan.statements  # CREATE, or ADD COLUMN / index / TTL / settings moves
 
 ## Gotchas
 
-- **`expr` vs `comment`**: both end up in the ClickHouse COMMENT clause,
+- `expr` vs `comment`: both end up in the ClickHouse COMMENT clause,
   separated by ` - ` (dfe-schemas `render.py`). That separator is part of the
   wire format the loader parses. `expr` carries the `@directive`. `comment` is
   the human description. Never put directives in `comment`.
-- **`default` does triple duty**: `DEFAULT expr` normally,
+- `default` does triple duty: `DEFAULT expr` normally,
   `MATERIALIZED expr` with the `materialized` attribute, `ALIAS expr` with
   `alias`.
-- **Profile columns win**: `SchemaLoader.compose()` drops source columns
+- Profile columns win: `SchemaLoader.compose()` drops source columns
   that duplicate profile names.
-- **`timestamp` vs `datetime`**: both map to `DateTime64(3,'UTC')`, but
+- `timestamp` vs `datetime`: both map to `DateTime64(3,'UTC')`, but
   `timestamp` is NOT nullable and uses `Delta, LZ4`. Use `timestamp` for
   ORDER BY time columns.
-- **Nullable ORDER BY**: ORDER BY columns should carry `not_null`. The
+- Nullable ORDER BY: ORDER BY columns should carry `not_null`. The
   engine warns but does not reject.
-- **Shipped schemas are read-only**: `is_shipped_schema()` detects paths
+- Shipped schemas are read-only: `is_shipped_schema()` detects paths
   inside the resolved schemas root (the `dfe-schemas` package, or the image
   seed) - custom schemas live outside those directories (`DFE_ENGINE_SCHEMAS_DIR`).
-- **Profile name matches the FILENAME**: use `timeseries` / `minimal` /
+- Profile name matches the FILENAME: use `timeseries` / `minimal` /
   `passthrough` in `header.type`, matching the YAML filenames.
-- **Schema YAML is YAML 1.2**: `registries/types.yaml` and the meta schemas
+- Schema YAML is YAML 1.2: `registries/types.yaml` and the meta schemas
   load through ruamel (`yaml_utils.yaml_load`, dfe-schemas `loader.py`), so
   `off`/`yes`/`no` stay strings there.

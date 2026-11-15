@@ -168,7 +168,7 @@ The closest tool is **Kapitan** (1,904 stars), but it brings substantial complex
 
 - **URL:** <https://github.com/grafana/tanka>
 - **Stars:** 2,646 | **Active:** Yes (Grafana Labs production use)
-- **What:** K8s config management using Jsonnet. Environments are top-level objects.
+- What: K8s config management using Jsonnet. Environments are top-level objects.
   Go + Jsonnet, not Python. Conceptual pattern (environment overlays -> manifests) identical
   to ours.
 

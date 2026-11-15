@@ -52,11 +52,11 @@ dfe-infra's `helm/edge/gateway` chart configures Envoy Gateway.
 | Concern | What the chart does |
 |---|---|
 | Routing | dfe-ui and the engine share one hostname, the engine on its `/api/v1` path families. dfe-hyperdx has its own hostname. |
-| Infra routes | Argo CD and the other infra-class routes carry an OIDC `SecurityPolicy` that requires one of the admin groups. |
-| Product routes | dfe-ui, the engine and dfe-hyperdx carry no edge OIDC policy. The apps check the engine token. |
+| Infra routes | Argo CD and the other infra-class routes carry an OIDC `SecurityPolicy` that requires one of the admin groups. Kafbat is the exception (`edgePolicy: false`, `ownLogin: true`): it runs its own OIDC login. |
+| Product routes | With `oidc.enabled: false`, the default, dfe-ui, the engine and dfe-hyperdx carry no edge OIDC policy and the apps check the engine token. Turned on, the engine route takes a `SecurityPolicy`, because the default `oidc.targetRoutes` names `dfe-engine`. dfe-hyperdx is left out on purpose: it is framed inside dfe-ui, where an interactive redirect cannot complete. |
 | Edge JWT (opt-in) | `jwtAuthn.enabled` (default `false`) adds Envoy's `jwt_authn` for an external OIDC issuer's Bearer token. It strips client `X-Oidc-*` headers first, then maps the token's claims into them. |
 | TLS | One `ClientTrafficPolicy`: TLS 1.2 minimum by default (1.3 for a high-security overlay), AES-256-GCM, P-384 ECDHE, and the hybrid ML-KEM group offered. |
-| Reachability | NetworkPolicy keeps the app pods behind the gateway. |
+| Reachability | dfe-infra's `network-policies` chart (`templates/dfe-namespace.yaml`) admits ingress to the DFE namespaces only from the gateway namespace, the other DFE namespaces, KEDA on the shim port and the OTel collector. |
 
 ## Docker: one static Envoy config
 

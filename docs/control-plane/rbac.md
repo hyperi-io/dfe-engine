@@ -105,7 +105,7 @@ flowchart LR
     ENV -->|JWT signing key,<br/>CH passwords| API
 ```
 
-**What goes where:**
+What goes where:
 
 | Data | Where stored | Format | Safe to commit? |
 |------|-------------|--------|-----------------|
@@ -120,7 +120,7 @@ flowchart LR
 | Role definitions | `rbac/roles.yaml` beside the auth directory, seeded from `src/dfe_engine/auth/resources/roles.yaml` on first boot | Permission patterns | Yes |
 | Group->role mapping | `groups/{name}.yaml` | Role list | Yes |
 
-**Config directory layout:**
+Config directory layout:
 
 ```text
 config/auth/
@@ -263,7 +263,7 @@ A `scoped` role grants only `...:read` patterns and `query:execute`, as at syste
 
 The routes enforce more domains than this table lists (accounts, groups, API keys, roles, OIDC providers, governance, and others). The full catalogue is `src/dfe_engine/auth/rbac_scopes/scope_constants.py`.
 
-**The usage scope:**
+The usage scope:
 
 `usage:read` opens `GET /api/v1/usage` and `GET /api/v1/usage/overview` ([ui-api-guide.md](ui-api-guide.md#usage-apiv1usage)). Four built-in roles carry it: `infra_admin`, `infra_viewer`, `dfe_operator` and `org_viewer`. `admin` holds it through `*`. A changed built-in grant reaches an existing deployment at its next restart, see [2.2](#22-role-definitions).
 

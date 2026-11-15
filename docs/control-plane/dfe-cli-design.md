@@ -8,7 +8,7 @@
 
 # The `dfe` CLI
 
-`dfe` is the engine's HTTP client. Its command tree is generated from the engine's OpenAPI document, so an endpoint becomes a command with no CLI code. It is scalo's `SpecCli` (`src/dfe_engine/cli/auto/app.py`), shaped like the AWS and gcloud CLIs, and ships as the `dfe` console script in this package (`pyproject.toml`, `[project.scripts]`).
+`dfe` is the engine's HTTP client. Its command tree is generated from the engine's OpenAPI document, so an endpoint becomes a command with no CLI code. It is scalo's `SpecCli` (`src/dfe_engine/cli/auto/app.py`), modelled on the AWS and gcloud CLIs, and ships as the `dfe` console script in this package (`pyproject.toml`, `[project.scripts]`).
 
 `dfe-engine` is the server. The two are separate entry points: `dfe` talks to an engine over HTTP, and its `local` group works on the deploy repo when no engine is running.
 

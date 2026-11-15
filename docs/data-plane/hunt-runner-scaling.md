@@ -228,7 +228,7 @@ spec:
 
 ## The shim's fail-safe
 
-**The fail-safe** (`src/dfe_engine/keda_shim/shim.py`, `QueryShim.run`): every query
+The fail-safe (`src/dfe_engine/keda_shim/shim.py`, `QueryShim.run`): every query
 caches its last-good integer per (query, params). On ANY failure - CH
 unreachable, timeout, a bad query - the shim returns the CACHED value, so KEDA
 sees no change and the pod count FREEZES at current, so it can never run

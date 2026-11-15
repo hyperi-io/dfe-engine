@@ -163,9 +163,9 @@ One group resolution (`deps.py _resolve_group_grants` + the `Group` model) feeds
 both. A group file carries `roles`, `org_ids`, and `scope`
 (`system`|`org:<name>`). A user's roles and org_ids are the union across groups.
 
-- **Control plane (3a/4a):** `roles.yaml` + wildcard `permission_matches` gate
+- Control plane (3a/4a): `roles.yaml` + wildcard `permission_matches` gate
   the dfe-engine API (manage sources/hunts/config/deploy). Static named roles.
-- **Data plane (3b/4b):** org_ids drive dynamic, data-only access. A caller fenced to one org (an `org_viewer`, or any role bound at that org's scope) browses Observe as the org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to that org (rbac.md section 5). Read-only. No control-plane power.
+- Data plane (3b/4b): org_ids drive dynamic, data-only access. A caller fenced to one org (an `org_viewer`, or any role bound at that org's scope) browses Observe as the org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to that org (rbac.md section 5). Read-only. No control-plane power.
 
 Both axes resolve from the group files. The re-minted token carries
 `{sub, email, groups}` plus the `role` claim dfe-hyperdx reads (see
