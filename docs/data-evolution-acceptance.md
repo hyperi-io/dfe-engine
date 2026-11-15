@@ -17,18 +17,18 @@ for its number.
 | 0.2 | 0 | A nested sub-field in `_json` answers a query (`fred.nerk.frog`) | live |
 | 1.1 | 1 | A pre-supplied read-only meta schema imports from dfe-schemas | live |
 | 1.2 | 1 | A meta schema exports, then re-imports into a clean deployment | live, part |
-| 1.3 | 1 | A field seen in `_json` promotes to a real column | live, xfail dfe-engine#459 |
+| 1.3 | 1 | A field seen in `_json` promotes to a real column | live |
 | 2.1 | 2 | A source declares a `key=value` routing condition | live |
 | 2.2 | 2 | Deploy renders the routing, the receiver reloads it in place, and records route by it | live, part |
 | 2.3 | 2 | Records land in the source's OWN table, typed columns filled by dfe-loader rather than left in `_json` | live |
 | 2.4 | 2 | A derived schema selects a subset, with an index type per field | live |
 | 2.5 | 2 | Deploying it routes the feed to the narrower table | live |
 | 2.6 | 2 | An index is added and dropped on the live table, no rebuild | live, part |
-| 2.7 | 2 | A transform turns a text line in `message` into typed columns | live, xfail dfe-loader#184 |
+| 2.7 | 2 | A transform turns a text line in `message` into typed columns | live, xfail dfe-engine#1173 |
 | 2.8 | 2 | The transform is swapped and the same columns still fill | live, part |
 | 3.1 | 3 | A derived schema stops the loader populating `_json` and `_raw`, and the columns still EXIST on the table | live |
-| 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | live, xfail dfe-engine#513 |
-| 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | live, xfail dfe-engine#513 |
+| 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | live |
+| 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | live |
 
 ## What the marks mean
 
@@ -45,7 +45,7 @@ that has never seen the schema -- that needs a second stack.
 
 2.8 drives the source that already has a transform instance, because Compose declares one service per transform app and binds it at deploy. So it proves a different engine on the same corpus, never a second binding. It reads that source's match rule off the API, since the source belongs to the deployment.
 
-A derived schema stops population with `capture_json: false` and `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`. 3.2 and 3.3 are xfail on dfe-engine#513: the deploy writes `table_capture_modes` and reports `restart_required: []`, but the loader logs no config reload, so the mode takes effect only once it is restarted by hand.
+A derived schema stops population with `capture_json: false` and `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`.
 
 ## Three carry the weight
 

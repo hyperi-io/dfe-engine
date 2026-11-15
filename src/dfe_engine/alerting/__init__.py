@@ -1,16 +1,16 @@
 #  Project:      dfe-engine
 #  File:         alerting/__init__.py
-#  Purpose:      Alerting (MVP scaffold) - alert table -> external destinations
+#  Purpose:      Alert rule model and dispatcher to external destinations
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Alerting scaffold (DEFERRED phase - see memory project_alerting).
+"""Alert rule and destination models, and a dispatcher that routes a fired rule.
 
-Thin MVP only: the rule MODEL (threshold-over-window + severity->channel) and a
-pluggable dispatcher. The web-research / platform survey (Apprise as the re-use
-sender base. The Alertmanager routing model) happens WHEN THIS PHASE IS REACHED,
-NOT now. Builds on the existing alert grouping/cooldown (dfe.alert_state).
+A rule fires when its matched-row count over a window reaches its threshold. The
+dispatcher hands the alert to the ``Sender`` registered for the destination's kind
+and falls back to ``LogSender`` when there is none. ``LogSender`` is the only
+sender shipped: it logs the alert and reports it sent, without delivering it.
 """
 
 from .dispatcher import Dispatcher, Sender
