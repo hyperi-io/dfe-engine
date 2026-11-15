@@ -318,7 +318,7 @@ engine rather than hiding it behind a UI that accepts anything.
 
 ## Usage (`/api/v1/usage`)
 
-The numbers a deployment is sized and licensed on: cores deployed, worker-node cores, data ingested and events per second. Both endpoints need `usage:read` ([rbac.md](rbac.md#the-usage-scope)) and read the usage rollup in ClickHouse.
+The numbers a deployment is sized and licensed on: cores deployed, worker-node cores, data ingested and events per second. Both endpoints need `usage:read` ([rbac.md](rbac.md#23-permission-taxonomy)) and read the usage rollup in ClickHouse.
 
 | Method | Path | Purpose |
 |--------|------|---------|
