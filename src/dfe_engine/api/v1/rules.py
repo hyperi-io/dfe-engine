@@ -6,6 +6,7 @@ GET    /api/v1/rules/{name}    -> Rule detail
 PUT    /api/v1/rules/{name}    -> Update rule
 DELETE /api/v1/rules/{name}    -> Delete rule
 POST   /api/v1/rules/validate     -> Validate SQL/CEL without creating
+POST   /api/v1/rules/preview      -> Compile a condition and check it as a save would, saving nothing
 """
 
 import functools
@@ -13,7 +14,7 @@ import re
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.concurrency import run_blocking
 
@@ -35,6 +36,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
+from dfe_engine.hunts.rule_condition import RuleCondition
 from dfe_engine.hunts.rule_creation_service import CostEstimate
 from dfe_engine.hunts.rule_guard import source_label
 from dfe_engine.hunts.rule_model import Severity
@@ -70,11 +72,21 @@ class _RuleWriteFields(BaseModel):
         description="Human-readable label (defaults from ``name`` when omitted on create)",
     )
     severity: Severity = Field(default="medium", description="low|medium|high|critical")
-    user_sql: str = Field(
+    user_sql: str | None = Field(
+        default=None,
         min_length=1,
         description=(
             "Full detection query: SELECT ... FROM <db>.<table> WHERE ... "
-            "(the FROM names the source table)"
+            "(the FROM names the source table). Give this or ``condition``, not both. "
+            "A rule saved this way has no ``condition``"
+        ),
+    )
+    condition: RuleCondition | None = Field(
+        default=None,
+        description=(
+            "The rule's structured condition, which the engine compiles to its SQL and stores "
+            "with it, so the builder reopens on it. Reads the table of ``source``. "
+            "Give this or ``user_sql``, not both"
         ),
     )
     cel_filter: str | None = Field(default=None, description="CEL expression filter")
@@ -95,6 +107,12 @@ class _RuleWriteFields(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _sql_or_condition(self) -> _RuleWriteFields:
+        if (self.user_sql is None) == (self.condition is None):
+            raise ValueError("give 'user_sql' or 'condition', one of the two")
+        return self
+
 
 class RuleCreateRequest(_RuleWriteFields):
     """Create a hunt rule via RuleCreationService."""
@@ -105,6 +123,14 @@ class RuleCreateRequest(_RuleWriteFields):
         default="raw",
         description="'raw' (plain SQL) or 'hyperdx' (Search saved search format)",
     )
+
+    @model_validator(mode="after")
+    def _condition_names_its_source(self) -> RuleCreateRequest:
+        if self.condition is not None and not self.source:
+            raise ValueError("a condition reads a source's table, so name the source")
+        if self.condition is not None and self.source_type != "raw":
+            raise ValueError("a condition is compiled by the engine, so its source_type is 'raw'")
+        return self
 
 
 class RuleUpdateRequest(_RuleWriteFields):
@@ -134,6 +160,51 @@ class SqlValidationResponse(BaseModel):
     errors: list[SqlValidationError] = Field(default_factory=list)
 
 
+class RulePreviewRequest(BaseModel):
+    """A condition to compile and check as a save would, without saving it."""
+
+    source: str = Field(description="Source label whose table the condition reads")
+    condition: RuleCondition
+    cel_filter: str | None = Field(default=None, description="CEL expression ANDed in, as on save")
+    cost_window_minutes: int | None = Field(
+        default=None,
+        description=(
+            "Lookback window in minutes the volume preview counts over. Absent or 0 uses the "
+            "deployment's preview window."
+        ),
+    )
+    name: str | None = Field(
+        default=None,
+        description=(
+            "The rule being edited. The volume preview then counts the orgs of the hunts "
+            "that run it and of the hunt it names, as its save would"
+        ),
+    )
+    hunt_name: str | None = Field(
+        default=None,
+        description="The hunt the rule names as its own, which the count follows. Defaults to the stored rule's",
+    )
+
+
+class RulePreviewResponse(BaseModel):
+    """What a save of the condition would compile to and find, and nothing written."""
+
+    user_sql: str = Field(
+        description="The rule SQL the condition compiles to, empty when it does not"
+    )
+    source_db: str | None = None
+    source_table: str | None = None
+    where_clause: str = Field(description="The detection WHERE the rule would store")
+    sql_errors: list[SqlValidationError] = Field(
+        default_factory=list, description="Why a save would be refused as invalid"
+    )
+    matches_everything: str | None = Field(
+        default=None,
+        description="Why a save would be refused for matching every event, when it would",
+    )
+    cost_estimate: CostEstimate | None = None
+
+
 class RuleResponse(BaseModel):
     """A detection rule as the API returns it."""
 
@@ -144,6 +215,10 @@ class RuleResponse(BaseModel):
     source_table: str | None = None
     where_clause: str
     cel_filter: str | None = None
+    condition: RuleCondition | None = Field(
+        default=None,
+        description="The structured condition the SQL was compiled from, absent for a rule written as SQL",
+    )
     original_sql: str
     hunt_name: str | None = None
     source: str | None = None
@@ -274,27 +349,22 @@ def create_rule(
 ):
     """Create a new hunt rule via RuleCreationService.
 
-    The service sanitizes the SQL, applies CEL->SQL transpilation,
-    validates column references, and optionally estimates query cost. A rule
-    whose SQL the hunt runner could not compile is refused with 422. The cost
-    preview counts only the orgs the hunts running the rule read, cut to the orgs
-    its author may read.
+    The rule is written as SQL or as a structured ``condition``, which the engine
+    compiles to the SQL and stores with it. The service sanitizes the SQL,
+    applies CEL->SQL transpilation, validates column references, and optionally
+    estimates query cost. A rule whose SQL the hunt runner could not compile is
+    refused with 422. The cost preview counts only the orgs the hunts running the
+    rule read, cut to the orgs its author may read.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
     """
-    from dfe_engine.hunts.rule_creation_service import (
-        RuleCreateRequest as SvcRequest,
-    )
-    from dfe_engine.hunts.rule_creation_service import (
-        RuleCreationService,
-    )
-    from dfe_engine.settings import get_clickhouse_config
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
     if registry.name_exists(body.name):
         raise ProblemError(409, f"Rule '{body.name}' already exists", code="conflict")
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
+    service = _rule_service(settings)
     display = (
         body.display_name if body.display_name is not None else default_display_name(body.name)
     )
@@ -304,6 +374,7 @@ def create_rule(
         severity=body.severity,
         source_type=body.source_type,
         user_sql=body.user_sql,
+        condition=body.condition,
         cel_filter=body.cel_filter,
         hunt_name=body.hunt_name,
         source=body.source,
@@ -363,18 +434,12 @@ def _create_rule_from_sql(
     hunts: OptionalHuntConfigReg,
 ) -> RuleFromHyperdxResponse:
     """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
-    from dfe_engine.hunts.rule_creation_service import (
-        RuleCreateRequest as SvcRequest,
-    )
-    from dfe_engine.hunts.rule_creation_service import (
-        RuleCreationService,
-    )
-    from dfe_engine.settings import get_clickhouse_config
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
     rule_id = _unique_rule_id(registry, body.saved_search_name)
     display = body.saved_search_name or default_display_name(rule_id)
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
+    service = _rule_service(settings)
     svc_request = SvcRequest(
         name=display,
         severity=body.severity,
@@ -414,10 +479,7 @@ def validate_rule_sql(
 
     Returns any syntax errors or validation issues found.
     """
-    from dfe_engine.hunts.rule_creation_service import RuleCreationService
-    from dfe_engine.settings import get_clickhouse_config
-
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
+    service = _rule_service(settings)
     errors = service.validate_sql(body.sql)
 
     return SqlValidationResponse(
@@ -430,6 +492,58 @@ def validate_rule_sql(
             )
             for e in errors
         ],
+    )
+
+
+@router.post(
+    "/preview",
+    response_model=RulePreviewResponse,
+    dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
+)
+def preview_rule(
+    body: RulePreviewRequest,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+    request: Request,
+    hunts: OptionalHuntConfigReg,
+) -> RulePreviewResponse:
+    """Compile a condition and check it exactly as a save would, writing nothing.
+
+    Runs the creation pipeline of ``POST /rules`` (compile, parse, the forbidden-keyword
+    and column checks, the matches-everything check and the alert-volume preview) under the
+    same org fence, and stops before the save. A condition the save would refuse comes back
+    with 200 and its reasons in ``sql_errors`` or ``matches_everything``, so a builder can
+    show them as the author edits. A body that is not a condition at all is 422.
+    """
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
+
+    rule_id = body.name or "preview"
+    hunt_name = body.hunt_name
+    if hunt_name is None and body.name:
+        # An update keeps the stored rule's hunt when the body names none, so the preview does.
+        try:
+            hunt_name = registry.get(body.name).hunt_name
+        except RuleNotFoundError:
+            pass
+    svc_request = SvcRequest(
+        name=rule_id,
+        source=body.source,
+        condition=body.condition,
+        cel_filter=body.cel_filter,
+        hunt_name=hunt_name,
+        cost_window_minutes=body.cost_window_minutes,
+    )
+    fence = _preview_tenant_ids(request, user, hunts, body.name or "", hunt_name)
+    result = _rule_service(settings).create_rule(svc_request, rule_id, tenant_ids=fence)
+    return RulePreviewResponse(
+        user_sql=result.rule.original_sql,
+        source_db=result.rule.source_db,
+        source_table=result.rule.source_table,
+        where_clause=result.rule.where_clause,
+        sql_errors=_save_blockers(result),
+        matches_everything=result.matches_everything,
+        cost_estimate=result.cost_estimate,
     )
 
 
@@ -466,6 +580,9 @@ def update_rule(
 ):
     """Replace a detection rule (re-runs creation pipeline, preserves created_at).
 
+    The replacement is written as SQL or as a ``condition``, as on create, and a
+    rule replaced with SQL no longer carries a condition.
+
     A replacement the hunt runner could not compile is refused with 422 and the
     stored rule is left as it was. A production+team write is routed to a review
     branch instead of the branch the runner git-syncs, and the
@@ -476,15 +593,9 @@ def update_rule(
     except RuleNotFoundError:
         raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
 
-    from dfe_engine.hunts.rule_creation_service import (
-        RuleCreateRequest as SvcRequest,
-    )
-    from dfe_engine.hunts.rule_creation_service import (
-        RuleCreationService,
-    )
-    from dfe_engine.settings import get_clickhouse_config
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
+    service = _rule_service(settings)
     effective_display = body.display_name if body.display_name is not None else existing.name
     effective_source = body.source if body.source is not None else existing.source
     effective_hunt = body.hunt_name if body.hunt_name is not None else existing.hunt_name
@@ -493,6 +604,7 @@ def update_rule(
         severity=body.severity,
         source_type="raw",
         user_sql=body.user_sql,
+        condition=body.condition,
         cel_filter=body.cel_filter,
         hunt_name=effective_hunt,
         source=effective_source,
@@ -544,6 +656,18 @@ def delete_rule(
 # -- Helpers --------------------------------------------------
 
 
+def _rule_service(settings: Settings):
+    """The creation service every rule check and save runs through."""
+    from dfe_engine.hunts.rule_creation_service import RuleCreationService
+    from dfe_engine.settings import get_clickhouse_config
+
+    return RuleCreationService(
+        ch_config=get_clickhouse_config(settings),
+        hunts=settings.hunts,
+        data_database=settings.clickhouse.effective_data_database,
+    )
+
+
 def _preview_tenant_ids(
     request: Request, user: CurrentUser, hunts: Any, rule: str, hunt_name: str | None
 ) -> list[str] | None:
@@ -586,10 +710,7 @@ def _preview_tenant_ids(
 def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[SqlValidationError]:
     if not original_sql.strip():
         return []
-    from dfe_engine.hunts.rule_creation_service import RuleCreationService
-    from dfe_engine.settings import get_clickhouse_config
-
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
+    service = _rule_service(settings)
     return _map_sql_errors(service.validate_sql(original_sql))
 
 
@@ -602,6 +723,7 @@ def _rule_to_response(rule, *, sql_errors: list[SqlValidationError] | None = Non
         source_table=rule.source_table,
         where_clause=rule.where_clause,
         cel_filter=rule.cel_filter,
+        condition=rule.condition,
         original_sql=rule.original_sql,
         hunt_name=rule.hunt_name,
         source=rule.source,
@@ -622,19 +744,26 @@ def _map_sql_errors(errors) -> list[SqlValidationError]:
     ]
 
 
-def _refuse_uncompilable(result) -> None:
-    """Refuse, before anything is written, a rule the hunt runner cannot compile.
+def _save_blockers(result) -> list[SqlValidationError]:
+    """Why a save of the checked rule is refused as invalid, empty when it is not.
 
     SQL that does not validate is refused on its SQL errors. SQL that validates
     can still leave nothing to run, such as a search with no filter, which the
     rule's own execution check reports.
-
-    Raises:
-        ProblemError: 422 ``invalid_sql``, every error in ``sql_errors``.
     """
     sql_errors = _map_sql_errors(result.sql_errors or [])
     if not sql_errors:
         sql_errors = [SqlValidationError(message=m) for m in result.rule.validate_rule()]
+    return sql_errors
+
+
+def _refuse_uncompilable(result) -> None:
+    """Refuse, before anything is written, a rule the hunt runner cannot compile.
+
+    Raises:
+        ProblemError: 422 ``invalid_sql``, every error in ``sql_errors``.
+    """
+    sql_errors = _save_blockers(result)
     if not sql_errors:
         return
     raise ProblemError(

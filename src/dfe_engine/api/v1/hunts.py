@@ -471,6 +471,10 @@ def list_hunts(
             "source_table, target_table"
         ),
     ),
+    rule: str | None = Query(
+        None,
+        description="Only the hunts whose rules include this rule, by its exact name",
+    ),
 ) -> Page[HuntSummary]:
     """List persisted hunt configurations, each with its run state, paginated.
 
@@ -479,6 +483,8 @@ def list_hunts(
     (rows the last run wrote). Next due is derived, not stored.
     """
     raw = registry.list_hunts()
+    if rule is not None:
+        raw = [row for row in raw if rule in (row.get("rules") or [])]
     raw = apply_search(
         raw,
         search,
@@ -489,7 +495,7 @@ def list_hunts(
     status = _run_status_for([row["name"] for row in raw], now)
     fraction = settings.hunts.phase_spread_fraction
     summaries = [_hunt_row_to_summary(row, status.get(row["name"]), now, fraction) for row in raw]
-    return paginate(summaries, query, bound={"search": search})
+    return paginate(summaries, query, bound={"search": search, "rule": rule})
 
 
 @router.post(

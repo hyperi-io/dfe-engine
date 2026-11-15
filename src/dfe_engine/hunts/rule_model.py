@@ -41,8 +41,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
+from .rule_condition import RuleCondition
 from .rule_rewriter import ParsedRule, RuleRewriter
 
 if TYPE_CHECKING:
@@ -100,6 +108,10 @@ class RuleCreate(BaseModel):
         default=None,
         description="CEL expression for query pushdown (transpiled to SQL WHERE)",
     )
+    condition: RuleCondition | None = Field(
+        default=None,
+        description="The structured condition ``user_sql`` was compiled from, kept so a builder can reopen it",
+    )
     hunt_name: str | None = Field(
         default=None,
         description="Parent hunt name (optional -- may be assigned later)",
@@ -155,6 +167,13 @@ class Rule(BaseModel):
         default=None,
         description="Original CEL expression (before transpilation)",
     )
+    condition: RuleCondition | None = Field(
+        default=None,
+        description=(
+            "The structured condition ``original_sql`` was compiled from. None for a "
+            "rule written as SQL"
+        ),
+    )
     had_select_star: bool = Field(default=False, description="Whether user used SELECT *")
     original_sql: str = Field(default="", description="Original user SQL")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
@@ -181,6 +200,13 @@ class Rule(BaseModel):
         default_factory=lambda: datetime.now(UTC).isoformat(),
         description="Creation timestamp (ISO 8601)",
     )
+
+    @field_serializer("condition")
+    def _store_condition(self, condition: RuleCondition | None) -> dict[str, Any] | None:
+        """Write only what the builder set, so the stored YAML stays short."""
+        if condition is None:
+            return None
+        return condition.model_dump(exclude_defaults=True, exclude_none=True)
 
     @classmethod
     def from_create(
@@ -237,6 +263,7 @@ class Rule(BaseModel):
             source_table=parsed.source_table,
             where_clause=where_clause,
             cel_filter=create.cel_filter,
+            condition=create.condition,
             had_select_star=parsed.had_select_star,
             original_sql=parsed.original_sql,
             hunt_name=create.hunt_name,
