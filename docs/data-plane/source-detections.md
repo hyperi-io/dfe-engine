@@ -14,17 +14,50 @@ declared. The source itself is [source.md](source.md).
 
 ## Rules
 
-A rule is one detection condition on a source's table: a SQL WHERE fragment, a
-CEL filter the engine transpiles to one, or both ANDed together.
+A rule is one detection condition on a source's table. `POST /api/v1/rules` takes it as a full `SELECT ... FROM <db>.<table> WHERE ...` in `user_sql` (the FROM names the source table), or as a structured `condition` on a `source`, and never both. A CEL filter may be ANDed in beside either. The engine stores the WHERE it extracts, the source table and the original SQL, which is the file the hunt runner reads.
 
 ```yaml
 # rules/brute_force_login.yaml -- the filename stem is the rule's id
-rule_id: brute_force_login
-name: Brute Force Login Attempt
+display_name: Brute Force Login Attempt
 severity: high
-source_table: winaudit                  # In the data database unless source_db names another
+source_db: dfe
+source_table: winaudit
 where_clause: "event_id = 4625"
+original_sql: SELECT * FROM dfe.winaudit WHERE event_id = 4625
 ```
+
+### Conditions
+
+A `condition` is one test on a field, or `all` or `any` of several, nested to `x-dfe-max-nesting` groups. `negate` inverts a test or a group. The engine compiles it to `original_sql` and `where_clause` and stores it beside them, so `GET /api/v1/rules/{name}` returns the `condition` and the console reopens its builder on it. A rule saved as SQL has no condition, and a `PUT` with SQL drops one.
+
+```json
+{"all": [{"field": "user.name", "value": "bob"},
+         {"field": "attempts", "operator": "gte", "value": 5}]}
+```
+
+| Operator | Value |
+|---|---|
+| `equals` (the default), `not_equals` | text or a number |
+| `includes`, `starts_with`, `ends_with` | text, not empty |
+| `lt`, `lte`, `gt`, `gte` | a number, or an ISO 8601 date or date-time (UTC unless it names a zone) |
+| `in` | a list of texts or of numbers, at most 500 |
+| `exists` | none |
+
+The `RuleCondition` schema in `openapi.json` publishes the operators, the kind of value each takes (`x-dfe-operand-kinds`) and the nesting limit.
+
+A field is a column of the source table when the table has one by that name, otherwise a path inside `_json` (`_json.` in front is accepted). A path is read as the type of its operand. A row without the field fails every test but `exists`, and `negate` does not change that, so `exists` negated finds the rows that lack it. Every value is quoted and every field name is split into identifier parts, so no operand reaches the SQL as text. The hunt window bounds time for every rule, so a condition cannot compare `_timestamp` or the other time columns with `lt`, `lte`, `gt` or `gte`, and a save or preview says so. A text operand cannot hold `{window}` or `{unseen}`, which the runner fills in wherever they sit. A condition is always `source_type` `raw`.
+
+### Preview
+
+`POST /api/v1/rules/preview` takes `{source, condition, cel_filter?, cost_window_minutes?}` and runs what a save runs under the same org fence, then stops. Send `name` when editing a rule so the count follows the hunts that run it. A condition the save would refuse still answers 200, with the reasons in `sql_errors` or `matches_everything`.
+
+```json
+{"user_sql": "SELECT * FROM `dfe`.`winaudit` WHERE ...", "source_db": "dfe",
+ "source_table": "winaudit", "where_clause": "...", "sql_errors": [],
+ "matches_everything": null, "cost_estimate": {"estimated_rows": 2, "band": "ok"}}
+```
+
+`GET /api/v1/hunts?rule=<name>` lists the hunts whose `rules` include exactly that name.
 
 ## Hunts
 
