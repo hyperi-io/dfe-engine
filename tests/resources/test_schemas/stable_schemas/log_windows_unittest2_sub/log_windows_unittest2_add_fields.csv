@@ -1,3 +1,0 @@
-﻿column,type,index_order,os_order,comment
-logon_virtual_account,string_fast_lowcardinality,,,
-account_type,string,0,,

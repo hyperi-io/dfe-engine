@@ -1078,8 +1078,7 @@ class TestStage2:
     ) -> None:
         """A syslog line in ``message`` becomes indexed columns.
 
-        Real upstream samples from elastic/integrations at pin c7bc5302, read out
-        of the archive in memory because the data is Elastic-licensed.
+        The input is the synthetic corpus in ``filebeat_cases.yaml``.
 
         Counted before and after rather than matched on a marker: the event's
         identity is spent producing typed columns, and the transform stores the
