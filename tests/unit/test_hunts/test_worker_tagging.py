@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from dfe_engine.hunts.worker import query_settings
 
 
@@ -55,3 +57,24 @@ def test_query_settings_values_are_all_strings():
     # CH per-query settings are string key/values on the wire.
     for value in query_settings("h", workload="hunts").values():
         assert isinstance(value, str)
+
+
+@pytest.mark.parametrize(
+    ("fire", "expected_run"),
+    [(1700000000, "1700000000"), (0, "0"), (None, None)],
+    ids=["epoch", "zero-epoch", "no-fire"],
+)
+def test_query_settings_tags_the_fire_only_when_given(fire, expected_run):
+    # The run tag groups one fire's statements for the smoothing cost model.
+    comment = query_settings("h", fire)["log_comment"]
+    tags = json.loads(comment)
+    assert tags.get("run") == expected_run
+    assert ("run" in tags) is (expected_run is not None)
+    if expected_run is not None:
+        assert f'"run":"{expected_run}"' in comment
+
+
+def test_query_settings_workload_stays_keyword_after_the_fire():
+    settings = query_settings("h", 1700000000, workload="hunts")
+    assert settings["workload"] == "hunts"
+    assert json.loads(settings["log_comment"])["run"] == "1700000000"

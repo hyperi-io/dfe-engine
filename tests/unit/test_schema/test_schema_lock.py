@@ -12,11 +12,21 @@ The settings reaching a real server, and a missed quorum leaving the lease untak
 are proven against ClickHouse in tests/integration/test_schema/test_manifest_bootstrap.py.
 """
 
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 
 from dfe_engine.clickhouse.lease import majority, write_settings_for
-from dfe_engine.schema.lock import SchemaLockError, SchemaLockQuorumError, _lock_error
+from dfe_engine.schema.lock import (
+    LOCK_NAME,
+    SchemaLock,
+    SchemaLockError,
+    SchemaLockQuorumError,
+    _lock_error,
+)
 
 
 @pytest.mark.parametrize(
@@ -74,3 +84,98 @@ def test_every_other_failure_stays_a_lease_error(cause):
     error = _lock_error("could not read the schema lock", cause)
 
     assert type(error) is SchemaLockError
+
+
+@dataclass
+class _Result:
+    result_rows: list[list[Any]]
+
+
+@dataclass
+class _RecordingClient:
+    """A client that holds no leases, and records what a lock reads and inserts."""
+
+    reads: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    inserts: list[list[list[Any]]] = field(default_factory=list)
+
+    def query(self, sql: str, parameters: dict[str, Any] | None = None, **_: Any) -> _Result:
+        if "system.tables" in sql:
+            return _Result([["ReplicatedReplacingMergeTree"]])
+        if "system.replicas" in sql:
+            return _Result([[3]])
+        self.reads.append((sql, parameters or {}))
+        return _Result([])
+
+    def insert(self, table: str, rows: list[list[Any]], **_: Any) -> None:
+        self.inserts.append(rows)
+
+
+_HELD_AT = datetime(2026, 1, 2, 3, 4, 5, 678000, tzinfo=UTC)
+
+
+def _lock(client: _RecordingClient, lock_name: str | None) -> SchemaLock:
+    if lock_name is None:
+        return SchemaLock(client, database="d", table="t", holder="pod/1")
+    return SchemaLock(client, database="d", table="t", holder="pod/1", lock_name=lock_name)
+
+
+@pytest.mark.parametrize(
+    ("lock_name", "name"),
+    [(None, LOCK_NAME), ("hunt_smoothing_leader", "hunt_smoothing_leader")],
+    ids=["default", "own-lease"],
+)
+def test_a_claim_and_its_marker_carry_the_locks_name(lock_name, name):
+    client = _RecordingClient()
+    lock = _lock(client, lock_name)
+
+    lock._claim(_HELD_AT)
+
+    claim, marker = client.inserts[0]
+    assert claim[0] == name
+    assert marker[0] == f"{name}/claim/pod/1/2026-01-02T03:04:05.678+00:00"
+    assert marker[1:] == claim[1:]
+
+
+@pytest.mark.parametrize(
+    ("lock_name", "name"),
+    [(None, LOCK_NAME), ("hunt_smoothing_leader", "hunt_smoothing_leader")],
+    ids=["default", "own-lease"],
+)
+def test_a_release_ends_the_claim_and_marker_under_the_locks_name(lock_name, name):
+    client = _RecordingClient()
+    lock = _lock(client, lock_name)
+    lock._claimed_at = _HELD_AT
+    lock.acquired = True
+
+    lock.release()
+
+    claim, marker = client.inserts[0]
+    assert (claim[0], claim[4]) == (name, 1)
+    assert marker[0].startswith(f"{name}/claim/pod/1/")
+    assert marker[4] == 1
+
+
+@pytest.mark.parametrize(
+    ("lock_name", "name"),
+    [(None, LOCK_NAME), ("hunt_smoothing_leader", "hunt_smoothing_leader")],
+    ids=["default", "own-lease"],
+)
+def test_reads_look_up_the_locks_own_name_and_marker_prefix(lock_name, name):
+    client = _RecordingClient()
+    lock = _lock(client, lock_name)
+
+    assert lock.read() is None
+    assert lock._only_ended_claims(datetime.now(UTC) + timedelta(seconds=1)) is True
+
+    assert client.reads[0][1] == {"lock": name}
+    assert [p["lock"] for _, p in client.reads[1:]] == [name, name]
+    assert [p["prefix"] for _, p in client.reads[1:]] == [f"{name}/claim/"] * 2
+
+
+def test_an_ended_marker_write_defaults_to_the_locks_name():
+    client = _RecordingClient()
+    lock = _lock(client, "hunt_smoothing_leader")
+
+    lock._write(_HELD_AT, expires=_HELD_AT, released=1)
+
+    assert client.inserts[0][0][0] == "hunt_smoothing_leader"

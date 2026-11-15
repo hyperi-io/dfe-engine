@@ -275,6 +275,96 @@ LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
 _CLICKHOUSE_CATALOGUES = frozenset({"system", "information_schema"})
 
 
+class HuntSmoothingSettings(BaseModel):
+    """The adaptive phase-drift loop that flattens ClickHouse load from rate hunts.
+
+    Off by default. On, the leading hunt runner learns each hunt's cost from
+    query_log_archive and moves offsets in hunt_schedule, one hunt per cycle.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Drift rate-hunt offsets to flatten ClickHouse load. A beta, off by default, "
+            "and the runner warns at start when it is on. DFE_ENGINE_HUNTS_SMOOTHING_ENABLED."
+        ),
+    )
+    cycle_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        description=(
+            "Seconds between controller cycles on the leading runner. "
+            "DFE_ENGINE_HUNTS_SMOOTHING_CYCLE_SECONDS."
+        ),
+    )
+    bucket_seconds: int = Field(
+        default=30,
+        gt=0,
+        description=(
+            "Width of one bucket of the load curve. DFE_ENGINE_HUNTS_SMOOTHING_BUCKET_SECONDS."
+        ),
+    )
+    window_days: int = Field(
+        default=7,
+        gt=0,
+        description=(
+            "Trailing days of query_log_archive the per-hunt p95 costs come from. "
+            "DFE_ENGINE_HUNTS_SMOOTHING_WINDOW_DAYS."
+        ),
+    )
+    max_step_fraction: float = Field(
+        default=0.1,
+        gt=0,
+        le=1,
+        description=(
+            "The most an offset moves in one cycle, as a share of the hunt's interval. "
+            "DFE_ENGINE_HUNTS_SMOOTHING_MAX_STEP_FRACTION."
+        ),
+    )
+    hysteresis: float = Field(
+        default=0.01,
+        ge=0,
+        lt=1,
+        description=(
+            "The least relative drop in the objective that keeps a move. "
+            "DFE_ENGINE_HUNTS_SMOOTHING_HYSTERESIS."
+        ),
+    )
+    cooldown_cycles: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Cycles a hunt sits out after a move. DFE_ENGINE_HUNTS_SMOOTHING_COOLDOWN_CYCLES."
+        ),
+    )
+    weight_memory: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description=(
+            "Weight of the memory curve in the composite pressure, the CPU curve takes the "
+            "rest. DFE_ENGINE_HUNTS_SMOOTHING_WEIGHT_MEMORY."
+        ),
+    )
+    memory_cap_bytes: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Memory no bucket may exceed after a move. 0 reads max_server_memory_usage from "
+            "the server, and an unreadable value turns the constraint off. "
+            "DFE_ENGINE_HUNTS_SMOOTHING_MEMORY_CAP_BYTES."
+        ),
+    )
+    horizon_max_seconds: int = Field(
+        default=86400,
+        gt=0,
+        description=(
+            "Cap on the hyperperiod the load curve spans, the least common multiple of the "
+            "intervals up to this. DFE_ENGINE_HUNTS_SMOOTHING_HORIZON_MAX_SECONDS."
+        ),
+    )
+
+
 class DetectionGuardSettings(BaseModel):
     """Alert-volume preview a rule gets when it is created or updated.
 
@@ -499,6 +589,10 @@ class HuntsSettings(BaseModel):
             "on and the API's next_due read this one value, so a change needs the schedule "
             "republished (dfe-hunt-runner materialise). DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION."
         ),
+    )
+    smoothing: HuntSmoothingSettings = Field(
+        default_factory=HuntSmoothingSettings,
+        description="Adaptive phase drift for rate hunts",
     )
     failure_backoff_initial_seconds: float = Field(
         default=FAILURE_BACKOFF_INITIAL_SECONDS,
@@ -2436,6 +2530,11 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING": "hunts.max_detections_per_run_ceiling",
             "DFE_ENGINE_HUNTS_WINDOW_OVERLAP_SECONDS": "hunts.window_overlap_seconds",
             "DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS": "hunts.safe_horizon_max_deferral_seconds",
+            "DFE_ENGINE_HUNTS_SMOOTHING_BUCKET_SECONDS": "hunts.smoothing.bucket_seconds",
+            "DFE_ENGINE_HUNTS_SMOOTHING_WINDOW_DAYS": "hunts.smoothing.window_days",
+            "DFE_ENGINE_HUNTS_SMOOTHING_COOLDOWN_CYCLES": "hunts.smoothing.cooldown_cycles",
+            "DFE_ENGINE_HUNTS_SMOOTHING_MEMORY_CAP_BYTES": "hunts.smoothing.memory_cap_bytes",
+            "DFE_ENGINE_HUNTS_SMOOTHING_HORIZON_MAX_SECONDS": "hunts.smoothing.horizon_max_seconds",
             "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_EVENTS": "transform_validation.dry_run_max_events",
             "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_OUTPUT_BYTES": "transform_validation.dry_run_max_output_bytes",
             "DFE_ENGINE_DEPLOYMENT_MAX_REPLICAS_CEILING": "deployment.max_replicas_ceiling",
@@ -2493,6 +2592,10 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_STACK_RESOLVE_REQUEST_TIMEOUT_SECONDS": "stack_resolve_request_timeout_seconds",
             "DFE_ENGINE_STACK_RESOLVE_BUDGET_SECONDS": "stack_resolve_budget_seconds",
             "DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION": "hunts.phase_spread_fraction",
+            "DFE_ENGINE_HUNTS_SMOOTHING_CYCLE_SECONDS": "hunts.smoothing.cycle_seconds",
+            "DFE_ENGINE_HUNTS_SMOOTHING_MAX_STEP_FRACTION": "hunts.smoothing.max_step_fraction",
+            "DFE_ENGINE_HUNTS_SMOOTHING_HYSTERESIS": "hunts.smoothing.hysteresis",
+            "DFE_ENGINE_HUNTS_SMOOTHING_WEIGHT_MEMORY": "hunts.smoothing.weight_memory",
             "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS": "hunts.failure_backoff_initial_seconds",
             "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_MAX_SECONDS": "hunts.failure_backoff_max_seconds",
             "DFE_ENGINE_HUNTS_FAILURE_REMINDER_SECONDS": "hunts.failure_reminder_seconds",
@@ -2522,6 +2625,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_CLICKHOUSE_CLOUD_AUTOWAKE": "clickhouse.cloud.autowake",
             "DFE_ENGINE_HUNTS_SAFE_HORIZON": "hunts.safe_horizon",
             "DFE_ENGINE_DETECTION_GUARD_ENABLED": "hunts.detection_guard.enabled",
+            "DFE_ENGINE_HUNTS_SMOOTHING_ENABLED": "hunts.smoothing.enabled",
             "DFE_ENGINE_KAFKA_ENSURE_TOPICS": "kafka.ensure_topics",
             "DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS": "kafka.bootstrap_topics",
             "DFE_ENGINE_KAFKA_TIERED_STORAGE": "kafka.tiered_storage",

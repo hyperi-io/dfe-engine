@@ -641,6 +641,34 @@ class TestEnvOverrides:
         ("path", "env", "default", "raw", "expected"),
         [
             ("hunts.phase_spread_fraction", "HUNTS_PHASE_SPREAD_FRACTION", 0.8, "0.5", 0.5),
+            ("hunts.smoothing.enabled", "HUNTS_SMOOTHING_ENABLED", False, "true", True),
+            ("hunts.smoothing.cycle_seconds", "HUNTS_SMOOTHING_CYCLE_SECONDS", 300.0, "60", 60.0),
+            ("hunts.smoothing.bucket_seconds", "HUNTS_SMOOTHING_BUCKET_SECONDS", 30, "10", 10),
+            ("hunts.smoothing.window_days", "HUNTS_SMOOTHING_WINDOW_DAYS", 7, "3", 3),
+            (
+                "hunts.smoothing.max_step_fraction",
+                "HUNTS_SMOOTHING_MAX_STEP_FRACTION",
+                0.1,
+                "0.25",
+                0.25,
+            ),
+            ("hunts.smoothing.hysteresis", "HUNTS_SMOOTHING_HYSTERESIS", 0.01, "0.05", 0.05),
+            ("hunts.smoothing.cooldown_cycles", "HUNTS_SMOOTHING_COOLDOWN_CYCLES", 2, "0", 0),
+            ("hunts.smoothing.weight_memory", "HUNTS_SMOOTHING_WEIGHT_MEMORY", 0.5, "0.75", 0.75),
+            (
+                "hunts.smoothing.memory_cap_bytes",
+                "HUNTS_SMOOTHING_MEMORY_CAP_BYTES",
+                0,
+                "1073741824",
+                1073741824,
+            ),
+            (
+                "hunts.smoothing.horizon_max_seconds",
+                "HUNTS_SMOOTHING_HORIZON_MAX_SECONDS",
+                86400,
+                "3600",
+                3600,
+            ),
             (
                 "hunts.failure_backoff_initial_seconds",
                 "HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS",
@@ -725,6 +753,9 @@ class TestEnvOverrides:
         [
             {"phase_spread_fraction": 0},
             {"phase_spread_fraction": 1.5},
+            {"smoothing": {"hysteresis": 1.0}},
+            {"smoothing": {"max_step_fraction": 0}},
+            {"smoothing": {"weight_memory": 1.5}},
             {"failure_backoff_initial_seconds": 0},
             {"failure_backoff_initial_seconds": 60, "failure_backoff_max_seconds": 30},
         ],
@@ -1329,7 +1360,17 @@ class TestEverySettingIsRead:
     """
 
     # Read inside settings.py by e2e_routes_enabled, which this search skips.
-    KNOWN_UNREAD = {("DFESettings", "e2e_server")}
+    KNOWN_UNREAD = {
+        ("DFESettings", "e2e_server"),
+        # Declared ahead of the smoothing controller that reads them.
+        ("HuntSmoothingSettings", "cooldown_cycles"),
+        ("HuntSmoothingSettings", "cycle_seconds"),
+        ("HuntSmoothingSettings", "horizon_max_seconds"),
+        ("HuntSmoothingSettings", "hysteresis"),
+        ("HuntSmoothingSettings", "max_step_fraction"),
+        ("HuntSmoothingSettings", "memory_cap_bytes"),
+        ("HuntSmoothingSettings", "weight_memory"),
+    }
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the
     # server setting would otherwise read as a reader. Only an attribute
