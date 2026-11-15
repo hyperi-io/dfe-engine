@@ -657,11 +657,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
 
     # In the background: the registry is the internet's, so startup and readiness never wait on it.
+    from dfe_engine.gitops.pins import load_pins, stack_version
     from dfe_engine.stack_resolve import resolve_into
 
     app.state.resolved_stack = None
+    read_pin = None
+    if gitcrud is not None:
+        deploy_repo = gitcrud
+
+        def read_pin() -> str | None:
+            # The pins are read as deployment_facts reads them, and they win over the registry.
+            with deploy_repo.reading():
+                return stack_version(load_pins(deploy_repo.repo_path))
+
     app.state.stack_resolution = asyncio.create_task(
-        resolve_into(app.state, settings), name="stack-resolution"
+        resolve_into(app.state, settings, read_pin), name="stack-resolution"
     )
 
     health.set_started()

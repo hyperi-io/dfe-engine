@@ -14,15 +14,10 @@ file. The same resolver is held to the real ``ghcr.io`` registry in
 ``tests/integration/test_stack_resolve_registry.py``.
 """
 
-import hashlib
-import json
 import threading
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -37,157 +32,23 @@ from dfe_engine.stack_resolve import (
     running_digests,
     semver_key,
 )
-
-REPO_PATH = "org/dfe-stack-manifest"
-LOADER = "dfe-loader"
-RECEIVER = "dfe-receiver"
-UI = "dfe-ui"
-PAGE_SIZE = 2
-
-
-def digest_of(label: str) -> str:
-    return "sha256:" + hashlib.sha256(label.encode()).hexdigest()
-
-
-def image_ref(app: str, label: str) -> str:
-    return f"registry.example/org/{app}:{label}@{digest_of(f'{app}-{label}')}"
-
-
-def manifest_yaml(tag: str, apps: dict[str, str]) -> str:
-    """A stack manifest as dfe-infra renders it: apps by name, each pinned by digest."""
-    lines = [f'stack_version: "{tag}"', "images:"]
-    lines += [f'  {app}: "{image_ref(app, label)}"' for app, label in sorted(apps.items())]
-    return "\n".join(lines) + "\n"
-
-
-def running(apps: dict[str, str]) -> list[str]:
-    return [image_ref(app, label) for app, label in apps.items()]
-
-
-ALL_V1 = {LOADER: "v1", RECEIVER: "v1", UI: "v1"}
-ALL_V2 = {LOADER: "v2", RECEIVER: "v2", UI: "v2"}
-
-
-@dataclass
-class FakeRegistry:
-    """A loopback OCI registry holding stack-manifest artifacts, counting what it serves."""
-
-    host: str = ""
-    stacks: dict[str, dict[str, str]] = field(default_factory=dict)
-    damage: dict[str, str] = field(default_factory=dict)
-    delay_seconds: float = 0.0
-    token_requests: int = 0
-    requests: int = 0
-
-    @property
-    def repository(self) -> str:
-        return f"{self.host}/{REPO_PATH}"
-
-    def layer(self, tag: str) -> bytes:
-        if self.damage.get(tag) == "not-yaml":
-            return b"images: [unclosed\n  - {"
-        return manifest_yaml(tag, self.stacks[tag]).encode()
-
-    def manifest(self, tag: str) -> dict:
-        blob = self.layer(tag)
-        title = "readme.txt" if self.damage.get(tag) == "no-layer" else f"dfe-manifest-{tag}.yaml"
-        digest = "sha256:" + hashlib.sha256(blob).hexdigest()
-        return {
-            "schemaVersion": 2,
-            "layers": [
-                {
-                    "digest": digest,
-                    "size": len(blob),
-                    "annotations": {"org.opencontainers.image.title": title},
-                }
-            ],
-        }
-
-    def blob(self, digest: str) -> bytes | None:
-        for tag in self.stacks:
-            real = self.layer(tag)
-            if "sha256:" + hashlib.sha256(real).hexdigest() == digest:
-                return b"tampered: true\n" if self.damage.get(tag) == "tampered" else real
-        return None
-
-
-def _handler(registry: FakeRegistry) -> type[BaseHTTPRequestHandler]:
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-        def _send(self, status: int, body: bytes, headers: dict[str, str] | None = None) -> None:
-            self.send_response(status)
-            for name, value in (headers or {}).items():
-                self.send_header(name, value)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self) -> None:
-            registry.requests += 1
-            time.sleep(registry.delay_seconds)
-            parts = urlsplit(self.path)
-            if parts.path == "/token":
-                registry.token_requests += 1
-                self._send(200, json.dumps({"token": "anonymous"}).encode())
-                return
-            if self.headers.get("Authorization") != "Bearer anonymous":
-                challenge = (
-                    f'Bearer realm="http://{registry.host}/token",service="test",'
-                    f'scope="repository:{REPO_PATH}:pull"'
-                )
-                self._send(401, b"{}", {"WWW-Authenticate": challenge})
-                return
-            prefix = f"/v2/{REPO_PATH}/"
-            if not parts.path.startswith(prefix):
-                self._send(404, b"{}")
-                return
-            tail = parts.path.removeprefix(prefix)
-            if tail == "tags/list":
-                self._tags(parse_qs(parts.query))
-            elif (
-                tail.startswith("manifests/") and tail.removeprefix("manifests/") in registry.stacks
-            ):
-                tag = tail.removeprefix("manifests/")
-                answer = (
-                    [1, 2]
-                    if registry.damage.get(tag) == "manifest-array"
-                    else registry.manifest(tag)
-                )
-                body = json.dumps(answer)
-                self._send(200, body.encode(), {"Content-Type": "application/json"})
-            elif tail.startswith("blobs/") and registry.blob(tail.removeprefix("blobs/")):
-                self._send(200, registry.blob(tail.removeprefix("blobs/")) or b"")
-            else:
-                self._send(404, b"{}")
-
-        def _tags(self, query: dict[str, list[str]]) -> None:
-            tags = sorted(registry.stacks)
-            last = query.get("last", [""])[0]
-            remaining = [tag for tag in tags if tag > last] if last else tags
-            page, more = remaining[:PAGE_SIZE], len(remaining) > PAGE_SIZE
-            headers = {}
-            if more:
-                headers["Link"] = f'</v2/{REPO_PATH}/tags/list?last={page[-1]}&n=1000>; rel="next"'
-            self._send(200, json.dumps({"name": REPO_PATH, "tags": page}).encode(), headers)
-
-    return Handler
+from tests.support.oci_registry import (
+    ALL_V1,
+    ALL_V2,
+    LOADER,
+    RECEIVER,
+    UI,
+    FakeRegistry,
+    image_ref,
+    running,
+    serve_registry,
+)
 
 
 @pytest.fixture
 def registry() -> Iterator[FakeRegistry]:
-    fake = FakeRegistry()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(fake))
-    fake.host = f"127.0.0.1:{server.server_address[1]}"
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_registry() as fake:
         yield fake
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 def resolve(registry: FakeRegistry, apps: dict[str, str], **limits: float) -> str | None:
@@ -490,3 +351,83 @@ async def test_a_failure_leaves_the_label_and_never_raises(stack_images):
     await resolve_into(state, settings)
 
     assert state.resolved_stack is None
+
+
+def _warning(events: list[dict]) -> dict:
+    warned = [e for e in events if str(e["event"]).startswith("stack not resolved")]
+    assert len(warned) == 1, events
+    return warned[0]
+
+
+@pytest.mark.parametrize(
+    ("tags_answer", "reason"),
+    [
+        pytest.param({"tags": 5}, "tag list is not a list", id="tags_is_a_number"),
+        pytest.param({"tags": "2.2.2"}, "tag list is not a list", id="tags_is_a_string"),
+        pytest.param([1, 2], "not an object", id="answer_is_an_array"),
+    ],
+)
+async def test_a_malformed_tag_list_warns_once_and_keeps_the_label(
+    registry, audit_events, tags_answer, reason
+):
+    registry.stacks = {"2.2.2": ALL_V1}
+    registry.tags_answer = tags_answer
+    state = SimpleNamespace(resolved_stack=None)
+
+    await resolve_into(state, settings_for(registry, ALL_V1))
+
+    warned = _warning(audit_events)
+    assert reason in warned["reason"]
+    assert warned["fallback"] == "2.2.2-rc.5"
+    assert state.resolved_stack is None
+
+
+async def test_any_other_failure_warns_once_with_its_type_and_keeps_the_label(audit_events):
+    state = SimpleNamespace(resolved_stack=None)
+    # A budget that is not a number fails inside the resolver thread with a TypeError.
+    settings = SimpleNamespace(
+        stack_images=[image_ref(LOADER, "v1")],
+        stack_resolve=True,
+        stack_version="2.2.2-rc.5",
+        stack_manifest_repository="127.0.0.1:1/org/dfe-stack-manifest",
+        stack_resolve_request_timeout_seconds=1.0,
+        stack_resolve_budget_seconds="soon",
+    )
+
+    await resolve_into(state, settings)
+
+    warned = _warning(audit_events)
+    assert warned["reason"].startswith("TypeError")
+    assert warned["fallback"] == "2.2.2-rc.5"
+    assert state.resolved_stack is None
+
+
+@pytest.mark.parametrize(
+    ("pin", "expected", "calls_registry"),
+    [
+        pytest.param(lambda: "2.2.0", None, False, id="a_pin_wins_so_the_registry_is_not_read"),
+        pytest.param(lambda: None, "2.2.2", True, id="no_pin_resolves"),
+    ],
+)
+async def test_the_registry_is_read_only_when_the_deploy_repo_pins_no_stack(
+    registry, pin, expected, calls_registry
+):
+    registry.stacks = {"2.2.2": ALL_V1}
+    state = SimpleNamespace(resolved_stack=None)
+
+    await resolve_into(state, settings_for(registry, ALL_V1), pin)
+
+    assert state.resolved_stack == expected
+    assert (registry.requests > 0) is calls_registry
+
+
+async def test_a_pin_that_cannot_be_read_warns_and_keeps_the_label(registry, audit_events):
+    def unreadable() -> str | None:
+        raise OSError("deploy repo gone")
+
+    state = SimpleNamespace(resolved_stack=None)
+
+    await resolve_into(state, settings_for(registry, ALL_V1), unreadable)
+
+    assert "OSError" in _warning(audit_events)["reason"]
+    assert registry.requests == 0

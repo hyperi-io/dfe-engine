@@ -22,7 +22,7 @@ import hashlib
 import re
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -276,7 +276,10 @@ class RegistryReader:
         url: str | None = f"/v2/{self._path}/tags/list?n={_TAGS_PAGE_SIZE}"
         while url:
             response = self.get(url)
-            tags.extend(str(tag) for tag in _json_object(response).get("tags") or [])
+            page = _json_object(response).get("tags") or []
+            if not isinstance(page, list):
+                raise StackResolveError("registry tag list is not a list")
+            tags.extend(str(tag) for tag in page)
             url = response.links.get("next", {}).get("url")
         return tags
 
@@ -354,12 +357,21 @@ def resolve_stack(
     return None
 
 
-async def resolve_into(state: Any, settings: Any) -> None:
+async def resolve_into(
+    state: Any, settings: Any, deploy_repo_stack: Callable[[], str | None] | None = None
+) -> None:
     """Resolve the running stack off the event loop and store it on ``state``.
 
-    Sets ``state.resolved_stack`` to the tag on a match. A failure, or no match, logs
-    once at warn and leaves the configured ``stack_version`` to answer. It never raises
-    for a registry problem, so neither startup nor readiness waits on it.
+    Sets ``state.resolved_stack`` to the tag on a match. A failure of any kind, or no
+    match, logs once at warn and leaves the configured ``stack_version`` to answer. It
+    raises nothing but cancellation, so neither startup nor readiness waits on it and a
+    dead task never goes unremarked.
+
+    Args:
+        state: Where ``resolved_stack`` is stored.
+        settings: The engine settings carrying the ``stack_*`` fields.
+        deploy_repo_stack: Reads the stack the deploy repo pins, blocking. A pin always
+            wins over the registry, so when one exists the registry is not read.
     """
     images = list(settings.stack_images)
     if not settings.stack_resolve or not images:
@@ -367,6 +379,9 @@ async def resolve_into(state: Any, settings: Any) -> None:
     fallback = settings.stack_version or None
     stop = threading.Event()
     try:
+        if deploy_repo_stack is not None and await asyncio.to_thread(deploy_repo_stack):
+            logger.debug("deploy repo pins the stack, registry not read")
+            return
         tag = await asyncio.to_thread(
             resolve_stack,
             images,
@@ -379,10 +394,12 @@ async def resolve_into(state: Any, settings: Any) -> None:
         # The thread cannot be cancelled, so it is told to stop before its next tag.
         stop.set()
         raise
-    except StackResolveError as exc:
+    except Exception as exc:
+        # Whatever ends this task is logged here, since nothing awaits it before shutdown.
+        reason = str(exc) if isinstance(exc, StackResolveError) else f"{type(exc).__name__}: {exc}"
         logger.warning(
             "stack not resolved from the registry, keeping the configured label",
-            reason=str(exc),
+            reason=reason,
             fallback=fallback,
         )
         return
