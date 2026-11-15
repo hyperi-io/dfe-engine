@@ -123,7 +123,7 @@ DFE_TRANSFORM_VRL = Producer(
     repo="dfe-transform-vrl",
     ref="v1.1.47",
     dir_env="DFE_TRANSFORM_VRL_DIR",
-    files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz", "docs/config-schema.json"),
+    files=("docs/config-schema.json",),
 )
 DFE_TRANSFORM_VECTOR = Producer(
     repo="dfe-transform-vector",

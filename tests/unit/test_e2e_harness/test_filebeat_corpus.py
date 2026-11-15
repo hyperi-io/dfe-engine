@@ -14,34 +14,37 @@ diagnose on a shared cluster.
 
 from __future__ import annotations
 
-import io
 import json
-import shutil
-import tarfile
 
 import pytest
 
 from tests.e2e import filebeat_corpus as corpus
-from tests.support.producer_contract import DFE_TRANSFORM_VRL, producer_file
+
+CASES = """\
+- name: umb-one
+  module: umbrella
+  line: "2026-01-01,a,b"
+  expect: {event: {action: dns-request-Allowed}}
+- name: umb-two
+  module: umbrella
+  line: "2026-01-02,c,d"
+  expect: {event: {action: dns-request-Blocked}}
+- name: ios-one
+  module: ios
+  line: "<134>1 Jan  1 00:00:00 host %SYS-5-CONFIG_I: x"
+  expect: {}
+- name: meraki-one
+  module: meraki
+  line: "<134>1 1500000000 MX flows src=1.2.3.4"
+  expect: {}
+"""
 
 
 @pytest.fixture
 def archive(tmp_path):
-    """A miniature corpus with the real one's layout."""
-    path = tmp_path / "testdata.tar.gz"
-    files = {
-        "cisco_umbrella/log/test-dns.log": "2026-01-01,a,b\n2026-01-02,c,d\n",
-        "cisco_umbrella/log/test-dns.log-expected.json": json.dumps({"expected": [{"a": 1}]}),
-        "cisco_ios/log/test-syslog.log": "<134>1 Jan  1 00:00:00 host %SYS-5-CONFIG_I: x\n",
-        "cisco_meraki/log/test-flows.log": "<134>1 1500000000 MX flows src=1.2.3.4\n",
-        "unrelated/log/other.log": "should not be read\n",
-    }
-    with tarfile.open(path, "w:gz") as tar:
-        for name, body in files.items():
-            data = body.encode()
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
+    """A miniature corpus with the shipped file's layout."""
+    path = tmp_path / "cases.yaml"
+    path.write_text(CASES, encoding="utf-8")
     return path
 
 
@@ -49,21 +52,6 @@ class TestLoading:
     def test_every_module_is_read(self, archive):
         found = {s.module for s in corpus.samples(archive)}
         assert found == {"cisco_umbrella", "cisco_ios", "cisco_meraki"}
-
-    def test_a_directory_outside_the_modules_is_ignored(self, archive):
-        assert all("should not be read" not in s.line for s in corpus.samples(archive))
-
-    def test_blank_lines_are_skipped(self, tmp_path):
-        path = tmp_path / "t.tar.gz"
-        with tarfile.open(path, "w:gz") as tar:
-            data = b"first\n\n   \nsecond\n"
-            info = tarfile.TarInfo("cisco_ios/log/a.log")
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-        assert [s.line for s in corpus.samples(path)] == ["first", "second"]
-
-    def test_expected_json_is_not_read_as_a_sample(self, archive):
-        assert all(not s.name.endswith(".json") for s in corpus.samples(archive))
 
     def test_the_limit_is_per_module_not_overall(self, archive):
         # A global cap would stop inside the first module and never exercise the
@@ -73,11 +61,17 @@ class TestLoading:
         assert len(found) == 3
 
     def test_goldens_are_keyed_by_their_sample_file(self, archive):
-        assert "test-dns.log-expected.json" in corpus.goldens(archive)
+        sample = corpus.samples(archive, modules=("cisco_umbrella",))[0]
+        golden = corpus.goldens(archive)[f"{sample.name}-expected.json"]
+        assert golden["expected"] == [{"event": {"action": "dns-request-Allowed"}}]
 
     def test_a_selected_module_excludes_the_others(self, archive):
         found = corpus.samples(archive, modules=("cisco_umbrella",))
         assert {s.module for s in found} == {"cisco_umbrella"}
+        assert set(corpus.goldens(archive, modules=("cisco_umbrella",))) == {
+            "umb-one.log-expected.json",
+            "umb-two.log-expected.json",
+        }
 
 
 class TestWrapping:
@@ -126,27 +120,23 @@ class TestWrapping:
         assert [b["message"] for b in wrapped] == [s.line for s in found]
 
 
-@pytest.fixture(scope="module")
-def shipped(tmp_path_factory):
-    """The archive dfe-transform-vrl ships, from a checkout or its pinned release."""
-    corpus_dir = tmp_path_factory.mktemp("corpus")
-    path = corpus_dir / "filebeat-testdata.tar.gz"
-    path.write_bytes(producer_file(DFE_TRANSFORM_VRL, corpus.CORPUS_FILE).data)
-    yield path
-    # Module-scoped tmp_path_factory dirs are NOT covered by tmp_path_retention_policy.
-    shutil.rmtree(corpus_dir, ignore_errors=True)
+class TestTheShippedCorpus:
+    """Against the file the e2e suites read."""
 
-
-class TestTheRealCorpus:
-    """Against the shipped archive: a checkout, else the pinned release."""
-
-    def test_every_module_has_samples(self, shipped):
+    def test_every_module_has_samples(self):
         by_module: dict[str, int] = {}
-        for sample in corpus.samples(shipped):
+        for sample in corpus.samples():
             by_module[sample.module] = by_module.get(sample.module, 0) + 1
         assert set(by_module) == set(corpus.MODULES)
         assert all(count > 0 for count in by_module.values())
 
-    def test_the_umbrella_subset_needs_no_enrichment_table(self, shipped):
-        found = corpus.samples(shipped, modules=(corpus.NO_ENRICHMENT_MODULE,))
+    def test_the_umbrella_subset_needs_no_enrichment_table(self):
+        found = corpus.samples(modules=(corpus.NO_ENRICHMENT_MODULE,))
         assert found, "the no-enrichment subset must not be empty"
+
+    def test_every_module_has_a_dataset(self):
+        assert set(corpus.DATASETS) == set(corpus.MODULES)
+
+    def test_every_sample_has_an_expectation(self):
+        expected = corpus.goldens()
+        assert all(f"{s.name}-expected.json" in expected for s in corpus.samples())

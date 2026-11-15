@@ -5,13 +5,11 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Real filebeat samples, in the shape the receiver and the pipeline expect.
+"""Synthetic filebeat samples, in the shape the receiver and the pipeline expect.
 
-The corpus is dfe-transform-vrl's, pinned to elastic/integrations @ c7bc530 -
-the same vintage the bundled filebeat VRL was generated against, so its golden
-outputs are the reference for what the transform should produce. ``CORPUS`` is the
-archive in a dfe-transform-vrl checkout (``$DFE_TRANSFORM_VRL_DIR``, or one beside
-this repo).
+The corpus is ``filebeat_cases.yaml`` beside this file: log lines written for the
+repo from the documentation address ranges, each with the fields the bundled
+filebeat VRL should produce. ``CORPUS`` is that file.
 
 Two shapes have to be bridged, and doing it here rather than in the test keeps
 the reason in one place:
@@ -31,27 +29,24 @@ what the pipeline can read: the bundled VRL tests ``includes(array!(.tags), ...)
 for ``preserve_original_event``, and against a map it reaches
 ``assert!(false, "contains only works on strings and array")`` and aborts the
 program for every event. Each marker is therefore a ``key:value`` string.
-
-Read straight out of the archive, never unpacked to the working tree - it
-carries Elastic-licensed data whose terms travel with it.
 """
 
 from __future__ import annotations
 
-import json
-import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.support.producer_contract import CHECKOUTS, DFE_TRANSFORM_VRL, checkout_path
+import yaml
 
-CORPUS_FILE = DFE_TRANSFORM_VRL.files[0]
-CORPUS = (
-    checkout_path(DFE_TRANSFORM_VRL, CORPUS_FILE)
-    or CHECKOUTS / DFE_TRANSFORM_VRL.repo / CORPUS_FILE
-)
+CORPUS = Path(__file__).with_name("filebeat_cases.yaml")
 
 MODULES = ("cisco_umbrella", "cisco_ios", "cisco_meraki")
+
+# The Elastic data stream each module's lines belong to.
+DATASETS = {module: f"{module}.log" for module in MODULES}
+
+# The module key a case uses in the YAML, by corpus module.
+_CASE_MODULE = {"cisco_umbrella": "umbrella", "cisco_ios": "ios", "cisco_meraki": "meraki"}
 
 # The umbrella branch needs no timezone table, so it is the subset that runs
 # without the enrichment tables mounted.
@@ -74,74 +69,48 @@ class Sample:
 
 
 def available(path: Path | None = None) -> bool:
-    """Whether the corpus archive is present."""
+    """Whether the corpus file is present."""
     return (path or CORPUS).is_file()
+
+
+def _cases(path: Path | None) -> list[dict]:
+    loaded = yaml.safe_load((path or CORPUS).read_text(encoding="utf-8"))
+    return loaded or []
 
 
 def samples(
     path: Path | None = None, *, modules: tuple[str, ...] = MODULES, limit: int = 0
 ) -> list[Sample]:
-    """Every raw line in the corpus, oldest module first.
+    """Every raw line in the corpus, grouped by module in ``modules`` order.
 
     ``limit`` caps the count PER MODULE rather than overall, so a reduced run
     still exercises every branch instead of stopping inside the first one.
     """
-    archive = path or CORPUS
+    cases = _cases(path)
     out: list[Sample] = []
-    per_module: dict[str, int] = dict.fromkeys(modules, 0)
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in sorted(tar.getmembers(), key=lambda m: m.name):
-            module = _module_of(member.name, modules)
-            if module is None or not member.name.endswith(".log"):
+    for module in modules:
+        key = _CASE_MODULE[module]
+        count = 0
+        for case in cases:
+            if case["module"] != key:
                 continue
-            if limit and per_module[module] >= limit:
-                continue
-            handle = tar.extractfile(member)
-            if handle is None:
-                continue
-            body = handle.read().decode("utf-8", errors="replace")
-            for i, line in enumerate(body.splitlines()):
-                if not line.strip():
-                    continue
-                if limit and per_module[module] >= limit:
-                    break
-                out.append(
-                    Sample(
-                        module=module,
-                        name=Path(member.name).name,
-                        line=line,
-                        index=i,
-                    )
-                )
-                per_module[module] += 1
+            if limit and count >= limit:
+                break
+            out.append(
+                Sample(module=module, name=f"{case['name']}.log", line=case["line"], index=0)
+            )
+            count += 1
     return out
 
 
 def goldens(path: Path | None = None, *, modules: tuple[str, ...] = MODULES) -> dict[str, dict]:
-    """The upstream expected outputs, keyed by their sample file's name."""
-    archive = path or CORPUS
-    out: dict[str, dict] = {}
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in tar.getmembers():
-            if not member.name.endswith(".log-expected.json"):
-                continue
-            if _module_of(member.name, modules) is None:
-                continue
-            handle = tar.extractfile(member)
-            if handle is None:
-                continue
-            try:
-                out[Path(member.name).name] = json.loads(handle.read().decode("utf-8"))
-            except json.JSONDecodeError:
-                continue
-    return out
-
-
-def _module_of(name: str, modules: tuple[str, ...]) -> str | None:
-    for module in modules:
-        if name.startswith(f"{module}/"):
-            return module
-    return None
+    """The expected output of each case, keyed as ``<sample name>-expected.json``."""
+    wanted = {_CASE_MODULE[m] for m in modules}
+    return {
+        f"{case['name']}.log-expected.json": {"expected": [case["expect"]]}
+        for case in _cases(path)
+        if case["module"] in wanted
+    }
 
 
 def wrap(sample: Sample, source: str = "filebeat", run: str = "") -> dict:
