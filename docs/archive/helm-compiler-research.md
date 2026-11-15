@@ -29,7 +29,7 @@ The closest tool is **Kapitan** (1,904 stars), but it brings substantial complex
   Supports Jinja2, Jsonnet, Kadet (Python), and Helm input types. Hierarchical class
   inheritance via reclass merges YAML fragments.
 - **Key patterns:**
-  - **Inventory = classes + targets**: Classes define defaults; targets compose classes
+  - **Inventory = classes + targets**: Classes define defaults. Targets compose classes
     and override parameters. Structurally similar to our
     `base config + environment overlay + service-specific override` pattern.
   - **`kapitan compile`**: Single command compiles entire inventory into output.
@@ -168,7 +168,7 @@ The closest tool is **Kapitan** (1,904 stars), but it brings substantial complex
 
 - **URL:** <https://github.com/grafana/tanka>
 - **Stars:** 2,646 | **Active:** Yes (Grafana Labs production use)
-- **What:** K8s config management using Jsonnet. Environments as first-class citizens.
+- **What:** K8s config management using Jsonnet. Environments are top-level objects.
   Go + Jsonnet, not Python. Conceptual pattern (environment overlays -> manifests) identical
   to ours.
 

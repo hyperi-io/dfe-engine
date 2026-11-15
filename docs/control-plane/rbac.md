@@ -12,12 +12,12 @@
 flowchart TD
     REQ[Incoming Request] --> OIDC{X-Oidc-Subject header<br/>and auth.trust_proxy_auth_headers?}
     OIDC -->|Yes| EXTRACT_OIDC[Extract user_id + groups<br/>from OIDC headers]
-    EXTRACT_OIDC --> RESOLVE_OIDC[GroupStore resolves<br/>groups → roles]
+    EXTRACT_OIDC --> RESOLVE_OIDC[GroupStore resolves<br/>groups -> roles]
     RESOLVE_OIDC --> CTX[Build AuthContext]
 
     OIDC -->|No| APIKEY{X-API-Key<br/>header?}
     APIKEY -->|Yes| VERIFY_KEY[APIKeyStore.verify<br/>Parse short+long token<br/>SHA-384 compare]
-    VERIFY_KEY --> RESOLVE_KEY[GroupStore resolves<br/>key groups → roles]
+    VERIFY_KEY --> RESOLVE_KEY[GroupStore resolves<br/>key groups -> roles]
     RESOLVE_KEY --> CTX
 
     APIKEY -->|No| JWT{Authorization:<br/>Bearer?}
@@ -50,7 +50,7 @@ A JWT carries identity, not authority. Its `org_id`, `roles`, `groups` and `org_
 
 A session's `org_id` is its account's `org`, set by `POST` or `PUT /api/v1/auth/accounts`, or its API key's `org`, set by `POST /api/v1/auth/api-keys` (`422 unknown_org` for an unregistered org), and empty for one bound to none. A view taking `org_id` runs only when the session's groups grant that org or it reads every org, else `403 no_org` or `403 org_not_granted`. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
 
-OIDC headers injected by Envoy Gateway SecurityPolicy, read only when `auth.trust_proxy_auth_headers` (`DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true:
+OIDC headers a proxy injects, read only when `auth.trust_proxy_auth_headers` (`DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true. dfe-infra's gateway sets them with its opt-in `jwtAuthn`, and Envoy Gateway cannot map the array `groups` claim, so `X-Oidc-Groups` does not arrive from it:
 
 | Header | Content |
 |--------|---------|
@@ -79,7 +79,7 @@ dfe-engine MUST only be accessible via the proxy that sets the headers. Direct p
 blocked by K8s NetworkPolicy. Without this, any client with pod access can
 forge OIDC headers and impersonate any user.
 
-### 1.4 Credential Storage Architecture
+## 1.4 Credential Storage Architecture
 
 ```mermaid
 flowchart LR
@@ -105,7 +105,7 @@ flowchart LR
     ENV -->|JWT signing key,<br/>CH passwords| API
 ```
 
-#### What Goes Where
+**What goes where:**
 
 | Data | Where stored | Format | Safe to commit? |
 |------|-------------|--------|-----------------|
@@ -117,17 +117,17 @@ flowchart LR
 | JWT signing key | Secrets backend at `api.jwt_key_path` (default `jwt/signing-key`), minted on first boot when absent | ECDSA private key, PEM (P-384 for the default ES384) | **NO** |
 | OIDC login session cookie key | `DFE_ENGINE_API_SESSION_SECRET`, else `DFE_ENGINE_API_JWT_SECRET` | Random, `DFE_ENGINE_API_JWT_SECRET` at least 32 bytes | **NO** |
 | CH connection passwords | Env var / K8s Secret | Plaintext | **NO** |
-| Role definitions | `rbac/roles.yaml` beside the auth directory, seeded from `auth/resources/roles.yaml` on first boot | Permission patterns | Yes |
-| Group→role mapping | `groups/{name}.yaml` | Role list | Yes |
+| Role definitions | `rbac/roles.yaml` beside the auth directory, seeded from `src/dfe_engine/auth/resources/roles.yaml` on first boot | Permission patterns | Yes |
+| Group->role mapping | `groups/{name}.yaml` | Role list | Yes |
 
-#### Config Directory Layout
+**Config directory layout:**
 
 ```text
 config/auth/
     accounts/           # One YAML per local user account
         admin.yaml
         analyst1.yaml
-    groups/              # One YAML per group (group → roles)
+    groups/              # One YAML per group (group -> roles)
         dfe-admins.yaml
         soc-analysts.yaml
     api-keys/            # One YAML per API key
@@ -136,11 +136,11 @@ config/auth/
 ```
 
 Account filename = username. Group filename = group name. API key filename =
-key name. The filename IS the identity — never stored inside the YAML body
+key name. The filename IS the identity -- never stored inside the YAML body
 (avoids DirectoryConfigStore YAML 1.1 boolean coercion on values like `off`,
 `yes`, `no`).
 
-### 1.5 Password Verification Flow
+## 1.5 Password Verification Flow
 
 ```python
 # AccountStore.verify_password()
@@ -153,29 +153,29 @@ return bcrypt.checkpw(password.encode(), account.password_hash.encode())
 
 Constant-time rejection for unknown usernames prevents enumeration attacks.
 
-### 1.6 API Key Format
+## 1.6 API Key Format
 
 ```text
-dfe_ak_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f
+dfe_ak_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f0a1b2c3d
 |      |         |
 prefix short     long token (shown once, stored as SHA-384 hash)
        token
        (lookup index, shown in UI)
 ```
 
-- **Prefix** (`dfe_ak_`): enables secret scanning by GitHub, GitGuardian
-- **Short token** (8 hex chars): plaintext in YAML, used for lookup and display
-- **Long token** (32 hex chars): SHA-384 hashed. Not bcrypt -- keys are
+- Prefix (`dfe_ak_`): enables secret scanning by GitHub, GitGuardian
+- Short token (8 hex chars): plaintext in YAML, used for lookup and display
+- Long token (32 hex chars): SHA-384 hashed. Not bcrypt -- keys are
   high-entropy random, bcrypt's slowness adds no security value
 - Full key shown **once** at creation, never retrievable again
-- **Expiry** (`expires_at`, optional ISO-8601 stored as UTC): enforced on every
+- Expiry (`expires_at`, optional ISO-8601 stored as UTC): enforced on every
   verify, so a lapsed key stops authenticating with no sweeper running. The
   file stays until revoked, and `list` reports `expired: true`. A key created
   through the API without one expires after `auth.api_key_default_ttl_days`
   (default 90, `0` for no expiry)
-- **Revocation:** Delete the key's YAML file or call the revoke API
+- Revocation: delete the key's YAML file or call the revoke API
 
-### 1.7 API Key Verification Flow
+## 1.7 API Key Verification Flow
 
 ```python
 # APIKeyStore.verify()
@@ -241,7 +241,7 @@ A role write grants only what its caller already holds. Creating a role, or chan
 
 A `scoped` role grants only `...:read` patterns and `query:execute`, as at system scope it passes every org-scope check. Anything else fails the roles file's load, and the roles API answers 422.
 
-### 2.3 Permission Taxonomy
+## 2.3 Permission Taxonomy
 
 | Domain | Actions | Scoped by service? |
 |--------|---------|---------------------|
@@ -263,13 +263,13 @@ A `scoped` role grants only `...:read` patterns and `query:execute`, as at syste
 
 The routes enforce more domains than this table lists (accounts, groups, API keys, roles, OIDC providers, governance, and others). The full catalogue is `src/dfe_engine/auth/rbac_scopes/scope_constants.py`.
 
-#### The usage scope
+**The usage scope:**
 
 `usage:read` opens `GET /api/v1/usage` and `GET /api/v1/usage/overview` ([ui-api-guide.md](ui-api-guide.md#usage-apiv1usage)). Four built-in roles carry it: `infra_admin`, `infra_viewer`, `dfe_operator` and `org_viewer`. `admin` holds it through `*`. A changed built-in grant reaches an existing deployment at its next restart, see [2.2](#22-role-definitions).
 
 A grant at system scope or at an org's scope opens both routes. A holder whose grant reads every org sees the whole deployment and may name any org. Any other holder is held to its own orgs that grant `usage:read`. `org_viewer` is scoped, so it is always held. The reads are described in [rbac-engine-reads.md](rbac-engine-reads.md#usage-reads).
 
-### 2.4 Wildcard Permission Matching
+## 2.4 Wildcard Permission Matching
 
 ```python
 def permission_matches(permission: str, action: str) -> bool:
@@ -277,7 +277,7 @@ def permission_matches(permission: str, action: str) -> bool:
 
 | Pattern | Matches | Does NOT match |
 |---------|---------|----------------|
-| `*` | Everything | — |
+| `*` | Everything | -- |
 | `config:*` | `config:read`, `config:write`, `config:read:sub` | `hunt:read` |
 | `service:*:config:*` | `service:loader:config:read` | `service:loader:metrics:read` |
 | `service:*:config:read` | `service:loader:config:read` | `service:loader:config:write` |
@@ -286,7 +286,7 @@ def permission_matches(permission: str, action: str) -> bool:
 - Trailing `*` matches any remaining segments
 - Mid-position `*` matches exactly one segment
 
-### 2.5 Authorization Engine
+## 2.5 Authorization Engine
 
 ```python
 # engine.py
@@ -303,12 +303,12 @@ def authorize(
 
 Decision order:
 
-1. `enabled=False` → allow (dev/test)
-2. `auth=None` → root mode, allow
+1. `enabled=False` -> allow (dev/test)
+2. `auth=None` -> root mode, allow
 3. For each of the caller's scoped grants (`auth.grants`, else `auth.roles` as system grants): allow when the grant's scope covers the requested scope and its role's permissions match the action. `scope=None` is a system-scope check
 4. Return `AuthzResult(allowed, reason)`
 
-### 2.6 RBAC Enforcement in API
+## 2.6 RBAC Enforcement in API
 
 ```python
 # api/deps.py
@@ -426,10 +426,10 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 
 **Groups:**
 
-- `dfe-admins` → roles: `[admin]`
-- `dfe-analysts` → roles: `[data_analyst]`
-- `dfe-viewers` → roles: `[data_viewer]`
-- `dfe-infra` → roles: `[infra_admin]`
+- `dfe-admins` -> roles: `[admin]`
+- `dfe-analysts` -> roles: `[data_analyst]`
+- `dfe-viewers` -> roles: `[data_viewer]`
+- `dfe-infra` -> roles: `[infra_admin]`
 
 **Accounts:** `admin` and `breakglass`, both in `dfe-admins`. See 3.5.
 
@@ -501,7 +501,7 @@ A Google login reads the user's groups from Cloud Identity with that login's own
 The customer's IdP admin sets up their side from [idp-setup/google.md](idp-setup/google.md), [idp-setup/entra.md](idp-setup/entra.md) or [idp-setup/okta.md](idp-setup/okta.md), and sends back the client credentials, the issuer and the group identifiers each provider links on.
 
 Config holds a secret PATH into the `DfeSecrets` store, or the NAME of an env var
-(`client_id_env`, `client_secret_env`, `service_account_json_env`) — never a
+(`client_id_env`, `client_secret_env`, `service_account_json_env`) -- never a
 secret value. Resolution reads the store first, so a credential sent to
 `POST /api/v1/auth/oidc-providers` takes effect without a restart, then the
 environment, so an ESO-mounted variable keeps working.
@@ -513,18 +513,18 @@ Surrounding whitespace, such as the newline a mounted secret file ends with, is 
 | no `*_env` field | the env var name and any stored copy are kept |
 | `*_env` set to `""` | the name is cleared, the stored copy is kept |
 | a name, with no value for the secret, that differs from the one held or sits beside a stored copy | the env var must resolve non-empty in the engine: the name is saved and the stored copy is deleted once the update is saved |
-| the same, but the engine does not set that env var | `422`, the field error `env_var_not_set` on that `*_env` field; nothing is saved or deleted |
+| the same, but the engine does not set that env var | `422`, the field error `env_var_not_set` on that `*_env` field. Nothing is saved or deleted |
 | the name already held, with nothing stored | no change |
 | a value for the secret | the value is stored and the name saved as sent |
 
-A create naming an env var the engine does not set, with no value for that secret, is refused the same way. A stored copy whose delete fails after the update is saved is logged by its store path; the update still answers 200.
+A create naming an env var the engine does not set, with no value for that secret, is refused the same way. A stored copy whose delete fails after the update is saved is logged by its store path. The update still answers 200.
 
 ### 4.3 Adapter Implementations
 
 | Adapter | Status | Admin API | Group sync |
 |---------|--------|-----------|------------|
 | Generic | Done | None | No (use `token_claim` mode) |
-| Google | Done | Cloud Identity as the user at login; Admin SDK `groups().list()` as an optional service account | Only with a service account |
+| Google | Done | Cloud Identity as the user at login. Admin SDK `groups().list()` as an optional service account | Only with a service account |
 | Entra ID | Done | Graph `/me/transitiveMemberOf` with the user's token on a >200 group overage, falling back to app-only `/users/{oid}/transitiveMemberOf` when Graph refuses that token. Graph `/groups` for sync | Yes, api mode with app credentials -- `$top=999` pagination |
 | Okta | Done | Groups API `/api/v1/groups` with an API token, api mode only. `token_claim` calls nothing | Yes, api mode -- `Link` header pagination |
 
@@ -540,11 +540,11 @@ Moved to [rbac-groups.md](rbac-groups.md#44-group-sync-process).
 
 ### 5.1 Pinned Org Users, One Shared Policy Set
 
-Every registered org gets its own ClickHouse user, and that user is what fences it in. The reconciler in `governance/ch/` renders the whole model from the org registry and the tier catalogue. The role, setting and user names come from the dfe-schemas catalogue, not from engine code.
+Every registered org gets its own ClickHouse user, and that user is what fences it in. The reconciler in `src/dfe_engine/governance/ch/` renders the whole model from the org registry and the tier catalogue. The role, setting and user names come from the dfe-schemas catalogue, not from engine code.
 
-- **One shared tenant role.** Every org-pinned user holds it and nothing else does.
-- **One RESTRICTIVE row policy per table that carries `_org_id`**, on that role. Its predicate is `has(splitByChar(',', getSetting('<tenant setting>')), _org_id)`.
-- **The tenant setting, pinned READONLY on each org user**, listing that org's `_org_id` values. A `SETTINGS` clause in query text cannot override it: ClickHouse answers 452 (SETTING_CONSTRAINT_VIOLATION).
+- One shared tenant role. Every org-pinned user holds it and nothing else does.
+- One RESTRICTIVE row policy per table that carries `_org_id`, on that role. Its predicate is `has(splitByChar(',', getSetting('<tenant setting>')), _org_id)`.
+- The tenant setting, pinned READONLY on each org user, listing that org's `_org_id` values. A `SETTINGS` clause in query text cannot override it: ClickHouse answers 452 (SETTING_CONSTRAINT_VIOLATION).
 
 A platform identity does not hold the tenant role, so no policy targets it and it reads every row. RESTRICTIVE-only is deliberate. A PERMISSIVE policy would flip the table to default-deny for everyone. A holder of the tenant role with no pinned setting makes `getSetting` throw, so a bad grant fails closed.
 
@@ -556,7 +556,7 @@ Each reconcile replaces a pinned or group user's whole role set, so a group that
 
 It also replaces each tier, service and tenant role's privileges with the ones configured, so a grant dropped from a tier is revoked. Where ClickHouse refuses the list, the role is cleared and given each entry it accepts.
 
-### 5.2 Who Reads As Whom
+## 5.2 Who Reads As Whom
 
 ```mermaid
 flowchart TD
@@ -567,9 +567,9 @@ flowchart TD
     ORG -->|no| DENY["403 no_single_org<br/>fails closed"]
 ```
 
-`platform_grants` (`auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the sampler, the dfe-hyperdx connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, a role marked `scoped` in `roles.yaml` is held to its holder's orgs wherever it is bound, a role `roles.yaml` does not declare unfences nothing, and `org_viewer` never unfences anyone.
+`platform_grants` (`src/dfe_engine/auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the sampler, the dfe-hyperdx connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, a role marked `scoped` in `roles.yaml` is held to its holder's orgs wherever it is bound, a role `roles.yaml` does not declare unfences nothing, and `org_viewer` never unfences anyone.
 
-Group bindings (`governance/ch/bindings.py`) follow the same rule. An org-scoped group binds to its org's pinned user whatever roles it holds. A system group holding a platform role reads unrestricted, and an `admin` or `infra_admin` group also reads the otel database. A group's claimed org markers resolve to a registered org by name or, failing that, by the one org that declares the marker as a tenant id (`orgs/tenant_scope.py::resolve_orgs`); a marker no org declares, or a tenant id two orgs both declare, resolves to none, so the group gets no ClickHouse user at all -- the alternative is an unrestricted one.
+Group bindings (`src/dfe_engine/governance/ch/bindings.py`) follow the same rule. An org-scoped group binds to its org's pinned user whatever roles it holds. A system group holding a platform role reads unrestricted, and an `admin` or `infra_admin` group also reads the otel database. A group's claimed org markers resolve to a registered org by name or, failing that, by the one org that declares the marker as a tenant id (`orgs/tenant_scope.py::resolve_orgs`). A marker no org declares, or a tenant id two orgs both declare, resolves to none, so the group gets no ClickHouse user at all -- the alternative is an unrestricted one.
 
 ### 5.3 The Engine's Own Reads
 
@@ -614,9 +614,9 @@ A reconcile that raises, ClickHouse unreachable being the usual cause, is logged
 
 A hunt stores the tenant ids each of its customer orgs resolved to, because the hunt runner reads the deploy repo and the org registry is not in it. `POST /api/v1/orgs`, and `PUT` and `DELETE` on `/api/v1/orgs/{name}`, store the org's tenant ids afresh in every hunt naming it, as one deploy-repo commit, before the org itself is written. A hunt write that fails leaves the org as it was, so the same request can be sent again, and a `PUT` with nothing changed repairs a hunt holding stale ids.
 
-- **Delete.** The hunt keeps the org's name and loses its ids, so it fails as `unknown_customers` and holds its watermark until someone edits it.
-- **Rename.** An org's name is its identity, so `PUT` cannot change it.
-- **Review.** Production with `DFE_ENGINE_GITOPS_MODE=team` puts the hunt change on one review branch, the org answer carries `X-DFE-Review-Required`, and the runner keeps the old ids until it is merged.
+- Delete: the hunt keeps the org's name and loses its ids, so it fails as `unknown_customers` and holds its watermark until someone edits it.
+- Rename: an org's name is its identity, so `PUT` cannot change it.
+- Review: production with `DFE_ENGINE_GITOPS_MODE=team` puts the hunt change on one review branch, the org answer carries `X-DFE-Review-Required`, and the runner keeps the old ids until it is merged.
 
 Each hunt rewritten emits `resource.hunt.updated` naming the org.
 
@@ -626,21 +626,21 @@ Each hunt rewritten emits `resource.hunt.updated` naming the org.
 
 ### 7.1 Strategy
 
-- **Connections:** the fork asks `GET /api/v1/hyperdx/connection` with the user's own token and seeds that one per-org credential on their team; the engine writes none itself
-- **Runtime:** `HyperDXClient` calls the dfe-hyperdx internal API for the team and for per-DFE-source CRUD
-- **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
+- Connections: the fork asks `GET /api/v1/hyperdx/connection` with the user's own token and seeds that one per-org credential on their team. The engine writes none itself
+- Runtime: `HyperDXClient` calls the dfe-hyperdx internal API for the team and for per-DFE-source CRUD
+- Failures: non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
 
 ### 7.2 Teams and Connections
 
-- **Team name.** JIT picks it from the caller's grants (`auth/jit.py`, `resolve_hyperdx_team`): `dfe-admin` for `admin` or `infra_admin` at system scope, `dfe-analysts` for `data_analyst` at system scope, else `customer-<org>` for the caller's first org, else none.
-- **Connection.** A team's ClickHouse connection is whatever `GET /api/v1/hyperdx/connection` returned to the user whose token seeded it (section 5.2): the platform reader, or that user's org's pinned user.
-- **Role.** `GET /api/v1/auth/me` hands the fork `hyperdx_role` (`auth/hyperdx_role.py`). `admin` goes to `admin` or `infra_admin` at system scope and may change what a whole team sees. `member` goes to anyone whose roles allow `query:write`, the dfe-hyperdx authoring permission, and may save searches and dashboards in the observe embed. Everyone else is `viewer`, and the fork refuses it every write. So `admin` and `data_analyst` author, and the other shipped roles read.
+- Team name: JIT picks it from the caller's grants (`src/dfe_engine/auth/jit.py`, `resolve_hyperdx_team`): `dfe-admin` for `admin` or `infra_admin` at system scope, `dfe-analysts` for `data_analyst` at system scope, else `customer-<org>` for the caller's first org, else none.
+- Connection: a team's ClickHouse connection is whatever `GET /api/v1/hyperdx/connection` returned to the user whose token seeded it (section 5.2): the platform reader, or that user's org's pinned user.
+- Role: `GET /api/v1/auth/me` hands the fork `hyperdx_role` (`src/dfe_engine/auth/hyperdx_role.py`). `admin` goes to `admin` or `infra_admin` at system scope and may change what a whole team sees. `member` goes to anyone whose roles allow `query:write`, the dfe-hyperdx authoring permission, and may save searches and dashboards in the observe embed. Everyone else is `viewer`, and the fork refuses it every write. So `admin` and `data_analyst` author, and the other shipped roles read.
 
 ---
 
 ## 8. Argo CD Permissions
 
-Roles carry `argo:{resource}:{action}` permissions in `roles.yaml`, and the scope catalogue publishes the `argo:` prefix (`auth/rbac_scopes`). The engine does not export them: it writes no `argocd-rbac-cm` policy and no AppProject roles.
+Roles carry `argo:{resource}:{action}` permissions in `roles.yaml`, and the scope catalogue publishes the `argo:` prefix (`src/dfe_engine/auth/rbac_scopes`). The engine does not export them: it writes no `argocd-rbac-cm` policy and no AppProject roles.
 
 ---
 
@@ -666,8 +666,8 @@ A refused bearer token emits `auth.login.denied` with `login_method: jwt`, the v
 
 Every account, group, API key and role write through `/api/v1/auth` emits one event naming the actor (`admin_id`), the change and the target. Its `details` carry the roles, groups, members or permissions the write set, and the names of contact fields changed, never their values. No event carries a password, a hash, an attribute value or an API key's secret half.
 
-Events flow through the OTel pipeline → JSON → ClickHouse → Observe.
-No custom ClickHouse audit table — standard OTel log ingestion is used.
+Events flow through the OTel pipeline -> JSON -> ClickHouse -> Observe.
+No custom ClickHouse audit table -- standard OTel log ingestion is used.
 
 ---
 
@@ -688,7 +688,7 @@ class AuthContext(BaseModel):
     user_agent: str | None = None
 ```
 
-Permissions are resolved at authorisation time from roles — never stored on
+Permissions are resolved at authorisation time from roles -- never stored on
 the context.
 
 ---
@@ -791,11 +791,11 @@ graph TD
 
 ---
 
-## 14. Edge Cases
+## 13. Edge Cases
 
 | Scenario | Behaviour |
 |----------|-----------|
-| Multi-role user | A platform grant with `query:execute` reads as the platform user; otherwise the caller must resolve to exactly one org, or gets `403 no_single_org` (section 5.2) |
+| Multi-role user | A platform grant with `query:execute` reads as the platform user. Otherwise the caller must resolve to exactly one org, or gets `403 no_single_org` (section 5.2) |
 | dfe-hyperdx unavailable | Non-fatal. Org CRUD succeeds. Sync retried in background |
 | ClickHouse unavailable | `/readyz` reports NotReady while its ping fails. Liveness is untouched, so the pod is not restarted. The CH RBAC reconcile retries in the background (section 6.2) |
 | Unknown OIDC group | No linked group with a role, so the sign-in is refused with `401 no_role_granted` and no account is created (section 2.1) |
@@ -804,7 +804,7 @@ graph TD
 
 ---
 
-## 15. Non-Goals
+## 14. Non-Goals
 
 - Per-metric RBAC granularity (access is per-service, not per-metric)
 - Per-setting RBAC granularity (access is per-service config, not per-key)
@@ -816,9 +816,9 @@ graph TD
 
 ---
 
-## 17. References
+## 15. References
 
 - [ClickHouse Custom Settings + Row Policy (Highlight)](https://www.highlight.io/blog/row-level-security)
-- [API Key Prefix Pattern (Seam)](https://github.com/seamapi/prefixed-api-key) <!-- docs-gate: allow register -- the vendor's name -->
+- [API Key Prefix Pattern (seamapi/prefixed-api-key)](https://github.com/seamapi/prefixed-api-key)
 - [Multi-Tenant RBAC Design (WorkOS)](https://workos.com/blog/how-to-design-multi-tenant-rbac-saas)
 - [Envoy Gateway OIDC SecurityPolicy](https://gateway.envoyproxy.io/docs/tasks/security/oidc/)

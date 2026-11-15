@@ -74,18 +74,18 @@ common sources, starting with Elastic in 2.2.0.
 What makes it different from traditional ETL and from a data lake's schema
 work:
 
-- **Cover what you USE, not everything you receive.** You are never forced to
+- Cover what you USE, not everything you receive. You are never forced to
   model the full breadth, because `_json` is still there as the slower fallback
   for anything off the hot path. Partial is a valid answer.
-- **Written at the primitive level**, in the types the engine can actually
+- Written at the primitive level, in the types the engine can actually
   store.
-- **Written at the use-case level.** A column declares the question it answers
+- Written at the use-case level. A column declares the question it answers
   -- `dimension`, `range`, `word_search` -- and DFE picks the ClickHouse index.
   The label never names the engine primitive.
-- **Readable by the SME who owns the data.** Whoever understands the source and
+- Readable by the SME who owns the data. Whoever understands the source and
   the workflow can write one. It does not require a data engineer, a ClickHouse
   expert or a Kafka expert.
-- **Narrowable to ClickHouse specifics** where you do want that control.
+- Narrowable to ClickHouse specifics where you do want that control.
 
 A large meta schema is normally NOT deployed as it stands. It is the base a
 derived schema selects from.
@@ -97,7 +97,7 @@ but that is unusual and worth a second look when you see it.
 
 ```mermaid
 flowchart TB
-    HEADER["common header<br/>_json, _timestamp, timestamp, _tags<br/>partitioning, TTL"]
+    HEADER["common header<br/>_json, _timestamp, _timestamp_load, _tags<br/>partitioning, TTL"]
     META["meta schema<br/>full breadth, rarely deployed as-is"]
     DERIVED["derived schema<br/>selection + one index type per field"]
     TABLE[("deployed table")]
@@ -122,11 +122,11 @@ DFE machinery depends on:
 
 - `_json` is the fallback that makes stage 0 work and keeps partial meta schemas
   honest.
-- `_timestamp` and `timestamp` drive partitioning, retention and every
-  time-bounded query.
+- `_timestamp_load` drives partitioning and retention, and `_timestamp`, the
+  event time read from the record's `timestamp`, every time-bounded query.
 - `_tags` carries contextual divisions and data routing.
 
-Remove a header field and something concrete breaks: no `_timestamp` and the
+Remove a header field and something concrete breaks: no `_timestamp_load` and the
 table cannot partition or expire, no `_json` and a partial meta schema silently
 loses every field it did not model. That is why the header is enforced rather
 than suggested.
@@ -142,8 +142,8 @@ table.
 runs against EVERY inbound record, so the CEL Fast profile refuses regex,
 iteration and time functions there.
 
-**What is mandatory.** The source name, which is both the topic and the table
-name, and the routing condition when the origin is the receiver. A source
+**What is mandatory.** The source name, which names the table and the topics
+(`<name>_land`, plus `<name>_load` after a transform), and the routing condition when the origin is the receiver. A source
 landing anywhere other than `main` also needs a meta schema or a derived schema,
 because that is what defines its table.
 
@@ -202,12 +202,12 @@ net was down, is gone rather than slow.
 It is a maturity statement. Never a default. Nothing pushes you here and most
 tables should never arrive.
 
-**The data plane already does this.** dfe-loader's `MetadataConfig` carries
-`capture_json` / `capture_raw` with `disable_json_tables` and
-`disable_raw_tables` for per-table control, and the column directive framework
-reaches the same end with `@skip` on `_json`. The control plane says it through
-a derived schema's `capture_json` and `capture_raw`, which the engine compiles
-into the loader's per-table `table_capture_modes`.
+**The data plane already does this.** dfe-loader's `metadata.capture_mode`
+(`full`, `json_only`, `raw_only`, `extracted_only`) decides what it writes, with
+`metadata.table_capture_modes` for per-table control, and the column directive
+framework reaches the same end with `@skip` on `_json`. The control plane says it
+through a derived schema's `capture_json` and `capture_raw`, which the engine
+compiles into the loader's per-table `table_capture_modes`.
 
 ### Column comments carry loader instructions
 

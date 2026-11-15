@@ -20,13 +20,14 @@ docker compose -f docker-compose.dev.yaml up prism
 
 ## Authentication
 
-All `/api/v1/*` endpoints require authentication. Three methods supported:
+Every `/api/v1/*` endpoint but login and the OIDC sign-in routes needs a credential:
 
 | Method | Header | Use Case |
 |--------|--------|----------|
 | JWT Bearer | `Authorization: Bearer <token>` | UI login flow |
 | API Key | `X-API-Key: dfe_xxxx...` | Machine-to-machine |
-| OIDC | `X-Oidc-Subject` (set by Envoy) | Production SSO |
+| OIDC | The engine's own sign-in (`/api/v1/auth/oidc/{provider}/login`) mints the JWT above | Production SSO |
+| Proxy headers | `X-Oidc-Subject`, read only with `auth.trust_proxy_auth_headers` | An engine reachable only through an OIDC proxy |
 
 ### Login Flow
 
@@ -34,14 +35,14 @@ All `/api/v1/*` endpoints require authentication. Three methods supported:
 // POST /api/v1/auth/login
 const resp = await fetch('/api/v1/auth/login', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: new URLSearchParams({ username, password }),
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ username, password }),
 });
 const { access_token } = await resp.json();
 // Use: { Authorization: `Bearer ${access_token}` }
 
-// GET /api/v1/auth/me — returns current user info + roles
-// POST /api/v1/auth/refresh — refresh token
+// GET /api/v1/auth/me -- returns current user info + roles
+// POST /api/v1/auth/refresh -- refresh token
 ```
 
 ## Error Handling
@@ -74,7 +75,7 @@ interface FieldError {
 | 403 | `forbidden` | Insufficient permissions |
 | 404 | `not_found` | Resource doesn't exist |
 | 409 | `conflict` | Duplicate name or match conflict |
-| 412 | `etag_mismatch` | `If-Match` is stale; `etag` carries the current one |
+| 412 | `etag_mismatch` | `If-Match` is stale. `etag` carries the current one |
 | 413 | `payload_too_large` | Request body over `api.max_request_body_bytes` (4 MiB, `DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES`), or over a file upload's own limit |
 | 422 | `validation_error` | Request body validation failed |
 | 500 | `internal_error` | Unexpected server error |
@@ -107,7 +108,9 @@ const { data, fetchNextPage } = useInfiniteQuery({
 
 A request that starts slow work answers 202 with an AIP-151 `Operation` and a `Location` to poll: `GET /api/v1/operations/{operation}` until `done`, then read `response` or `error` (a `Problem`). `metadata` carries the progress.
 
-## API Surface (74 Endpoints)
+## API surface
+
+The tables below cover the routes a UI uses most. `openapi/openapi.json` lists every operation.
 
 ### Auth & RBAC (`/api/v1/auth/*`)
 
@@ -123,10 +126,10 @@ A request that starts slow work answers 202 with an AIP-151 `Operation` and a `L
 | GET | `/auth/roles/scopes` | RBAC permission scopes for role editors |
 | CRUD | `/auth/api-keys` | API key management |
 | CRUD | `/auth/oidc-providers` | OIDC provider configuration |
-| POST | `/auth/oidc-providers/{name}/sync` | Force group sync; `status` says how it ended |
+| POST | `/auth/oidc-providers/{name}/sync` | Force group sync. `status` says how it ended |
 | GET | `/auth/oidc-providers/{name}/test` | Test provider connectivity |
 
-A group's `source_id` and `source_provider` link it to an IdP group; the group form sets both through `POST` and `PUT /auth/groups`. A login through that provider asserting `source_id` takes the group's roles: for a `token_claim` provider sending names (Okta, dex, Keycloak) it is the group name the IdP sends. A `source_id` without a provider answers `422 missing_source_provider`, a taken one `409 conflict`, a malformed one `422 invalid_source_id` and an unknown or overlong provider `422 invalid_source_provider`. A group name that is another group's `source_id` or a `source_id` that is another group's name answers `409 identifier_taken`.
+A group's `source_id` and `source_provider` link it to an IdP group. The group form sets both through `POST` and `PUT /auth/groups`. A login through that provider asserting `source_id` takes the group's roles: for a `token_claim` provider sending names (Okta, dex, Keycloak) it is the group name the IdP sends. A `source_id` without a provider answers `422 missing_source_provider`, a taken one `409 conflict`, a malformed one `422 invalid_source_id` and an unknown or overlong provider `422 invalid_source_provider`. A group name that is another group's `source_id` or a `source_id` that is another group's name answers `409 identifier_taken`.
 
 A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `error`, `skipped` and `status`. Key on `status` (`ok`, `partial`, `error`, `not_configured`, `user_token` or `skipped`), never on the text of `error` or `skipped`, which are for display.
 
@@ -138,12 +141,12 @@ A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `
 | POST | `/sources` | Create source |
 | GET | `/sources/{name}` | Get source details |
 | GET | `/sources/{name}/versions/{version}` | Get one version snapshot |
-| GET | `/sources/{name}/columns` | Composed schema columns for a source version (a `Page` of columns; `?version=` source id, default `deployed_version`) |
-| POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
-| POST | `/sources/{name}/plan` | Dry-run deploy plan (`?version=` defaults to `current`; not persisted) |
+| GET | `/sources/{name}/columns` | Composed schema columns for a source version (a `Page` of columns. `?version=` source id, default `deployed_version`) |
+| POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id. Default `deployed_version`) |
+| POST | `/sources/{name}/plan` | Dry-run deploy plan (`?version=` defaults to `current`. Not persisted) |
 | POST | `/sources/{name}/deploy` | Apply plan DDL to ClickHouse and set `deployed_version` (`?version=` defaults to `current`) |
 | PUT | `/sources/{name}` | Update source |
-| PATCH | `/sources/{name}` | Set lifecycle state (`state: active\|dormant\|disabled`, or compat `enabled`); no new version; `409 match_conflict` if activating duplicates another non-disabled source's match |
+| PATCH | `/sources/{name}` | Set lifecycle state (`state: active\|dormant\|disabled`, or compat `enabled`). No new version. `409 match_conflict` if activating duplicates another non-disabled source's match |
 | DELETE | `/sources/{name}` | Delete source |
 | POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete` / `deploy`) on named sources |
 | POST | `/sources/seed` | Seed defaults |
@@ -184,7 +187,6 @@ Schema-less service config for Rust services (receiver, loader, archiver, etc.)
 | GET | `/queries/views/{label}` | View definition + parameters |
 | POST | `/queries/views/{label}/execute` | Execute view -> JSON |
 | POST | `/queries/raw` | Raw read-only query -> JSON. Needs `raw_query:execute`, which only `admin` holds |
-| GET | `/queries/health` | Query engine health |
 
 View execution returns **JSON** (`QueryResponse`) with fields:
 `rows`, `columns`, `row_count`, `query_duration_ms`, `has_more`,
@@ -219,25 +221,10 @@ Long-running operations, such as pipeline builds and synthetic-data streams.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/operations` | List operations (filter by `kind`) |
-| GET | `/operations/{id}` | Get an operation |
-| POST | `/operations/{id}/cancel` | Cancel a running operation |
-| GET | `/operations/{id}/stream` | SSE progress stream |
+| GET | `/operations/{operation}` | Get an operation. Poll it until `done` |
+| POST | `/operations/{operation}/cancel` | Cancel a running operation |
 
-#### SSE Stream Events
-
-```typescript
-// EventSource: GET /api/v1/operations/{id}/stream
-const es = new EventSource(`/api/v1/operations/${id}/stream`);
-es.addEventListener('progress', (e) => {
-  const { status, progress, message } = JSON.parse(e.data);
-  // Update progress bar
-});
-es.addEventListener('complete', (e) => {
-  const { status, result, error } = JSON.parse(e.data);
-  // Task finished — close stream
-  es.close();
-});
-```
+There is no progress stream: poll the operation, and read `metadata` for progress.
 
 ### Other
 
@@ -277,7 +264,7 @@ through the guided flow below - never through free-text fields.
 Invoke body (only when the action declares params):
 `{"params": {"level": "2x"}}`. Each param is CONSTRAINED - enum params carry
 their full `values` list, numerics carry `min`/`max` - so render enum params
-as a select and numerics as a bounded input; never a free text box. A
+as a select and numerics as a bounded input. Never a free text box. A
 violation returns 422 `invalid_params`.
 
 The flow to render: pick action -> fill params from the constraints -> dry-run
@@ -291,7 +278,7 @@ forge is configured to open the PR.
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/governance/admin/actions/validate` | Check a def: EVERY violation + would-be diff, no commit |
-| POST | `/governance/admin/actions` | Define (`governance:write`); `required_action` optional |
+| POST | `/governance/admin/actions` | Define (`governance:write`). `required_action` optional |
 | DELETE | `/governance/admin/actions/{name}` | Remove a def |
 | GET | `/gitops/classes` | Class select (filter on `action_writable`) |
 | GET | `/gitops/classes/{cls}/resources` | Resource select (gated by that class's `:read`) |
@@ -300,7 +287,7 @@ forge is configured to open the PR.
 Wizard flow: name/description -> per change: class select -> resource select
 -> path select (show the current value beside each path) -> value input ->
 validate (render `errors[]` + `diff[]`) -> save. Leave `required_action`
-empty - the server derives `action:invoke:<name>`; expose an override only
+empty - the server derives `action:invoke:<name>`. Expose an override only
 behind an advanced toggle.
 
 ### Closed sets in the contract (`x-dfe-enum-source`)
@@ -309,7 +296,7 @@ House rule: if the server will reject values outside a set, the contract
 exposes the set. Three mechanisms, in order of preference:
 
 1. **Static set** - a schema enum (e.g. repository `scope`). Generated types
-   already give a union; render a select.
+   already give a union. Render a select.
 2. **Dynamic set** - the schema field carries an `x-dfe-enum-source`
    annotation naming the endpoint that enumerates its legal values:
 
@@ -320,7 +307,7 @@ exposes the set. Three mechanisms, in order of preference:
    `params` maps `{placeholder}` segments in the endpoint template to SIBLING
    fields of the same object (e.g. the `path` field's source depends on the
    chosen `cls` and `name`). `value_key` names the option field when the
-   endpoint returns objects; absent means the items are plain strings. Build
+   endpoint returns objects. Absent means the items are plain strings. Build
    ONE generic hook that resolves an annotated field to a select fed by a
    TanStack query - every annotated field then renders correctly for free.
 3. **Derived value** - the field is optional and the server fills a documented
@@ -413,7 +400,7 @@ A caller whose grant reads every org sees the whole deployment and may name any 
 
 Events per second over more than one tenant id (several orgs, or an org that declares several) is the busiest minute of their sum. The minute table keeps 7 days, so days older than that have no entry.
 
-The CLI generates `dfe usage list` for `/usage` and `dfe usage overview list` for `/usage/overview`. The Observe "Overview" dashboard (`src/dfe_engine/hyperdx/dashboards/dfe-overview.json`) reads the same rollup for the whole deployment, without going through the API.
+The CLI generates `dfe usage get` for `/usage` and `dfe usage overview list` for `/usage/overview`. The Observe "Overview" dashboard (`src/dfe_engine/hyperdx/dashboards/dfe-overview.json`) reads the same rollup for the whole deployment, without going through the API.
 
 ## Repository (UI preferences + small objects)
 
@@ -473,18 +460,18 @@ the object endpoints below (namespace `preferences`, key `default`).
 |--------|------|---------|
 | GET | `/repository/objects/{scope}/{scope_id}/{namespace}` | List metadata (key, content_type, size, updated_by, updated_at, etag) |
 | GET | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Raw bytes with stored `Content-Type` + `ETag` headers |
-| PUT | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Store raw body (`Content-Type` header is kept; default `application/octet-stream`) |
-| DELETE | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Delete (204; 404 if absent) |
+| PUT | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Store raw body (`Content-Type` header is kept. Default `application/octet-stream`) |
+| DELETE | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Delete (204. 404 if absent) |
 
 Path rules: `scope` is one of `system|org|group|user` (422 otherwise).
 For `system` the `scope_id` MUST be `-`. `namespace` and `key` match
 `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$` (422 otherwise).
 
-Access: any authenticated user reads the system layer; members read their
-own org/group layers and their own user layer; everything else needs the
+Access: any authenticated user reads the system layer. Members read their
+own org/group layers and their own user layer. Everything else needs the
 `repository:read` / `repository:write` RBAC actions at the matching scope
 (admins system-wide, org-wildcard admins within their org). Reads you
-cannot see return 404 (existence stays hidden); forbidden writes return 403.
+cannot see return 404 (existence stays hidden). Forbidden writes return 403.
 
 ### ETag semantics
 
@@ -525,28 +512,22 @@ type Source = paths['/api/v1/sources/{name}']['get']['responses']['200']['conten
 
 ## Mock Server (Prism)
 
-```yaml
-# docker-compose.dev.yaml
-services:
-  prism:
-    image: stoplight/prism:4
-    command: mock -h 0.0.0.0 /spec/openapi.json
-    volumes:
-      - ./openapi:/spec
-    ports:
-      - "4010:4010"
+`docker-compose.dev.yaml` runs Prism, digest-pinned, over `./openapi`:
+
+```bash
+docker compose -f docker-compose.dev.yaml up prism
 ```
 
-Prism generates realistic mock responses from the OpenAPI spec.
-Point the UI at `http://localhost:4010` during development.
+Prism generates mock responses from the OpenAPI spec. Point the UI at
+`http://localhost:4010` during development.
 
 ## Contract Drift Detection
 
-CI validates the committed spec matches the running app:
+`tests/unit/test_openapi_spec_committed.py` fails CI when the committed spec, or
+the route map built from it, differs from what the app generates. Regenerate and
+commit after a route or model change:
 
 ```bash
 uv run python scripts/generate_openapi.py
 git diff --exit-code openapi/openapi.json openapi/openapi.e2e.json
 ```
-
-If this fails, the spec needs regenerating after route/model changes.

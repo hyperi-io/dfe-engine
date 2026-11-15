@@ -3,7 +3,7 @@
 The engine classes that turn schema YAML (from the dfe-schemas repo) into
 ClickHouse DDL. The YAML FORMAT itself (version tree, column fields, types,
 attributes, use cases, @directives) is documented in the dfe-schemas repo
-(<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/meta-schema.md>); this page is the code-side lookup. Concept
+(<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/meta-schema.md>). This page is the code-side lookup. Concept
 overview: [schema.md](schema.md).
 
 ## File map
@@ -12,7 +12,7 @@ overview: [schema.md](schema.md).
 |------|-----------------|
 | `src/dfe_engine/source/models.py` | `SchemaColumn`, `SourceSchema`, `SourceHeader`, `Source` Pydantic models |
 | `src/dfe_engine/source/type_registry.py` | `TypeRegistry` class, `ResolvedType` dataclass |
-| dfe-schemas `registries/types.yaml` | 13 primitives, use_case constraints, attribute constraints, ch_override catalogue |
+| dfe-schemas `registries/types.yaml` | the primitives, use_case constraints, attribute constraints, ch_override catalogue |
 | `src/dfe_engine/source/engine_registry.py` | `EngineRegistry` - permitted table engines and their argument rules, from dfe-schemas `registries/engines.yaml` |
 | `src/dfe_engine/schema/schema_loader.py` | `SchemaLoader` - YAML loading, composition, validation |
 | `src/dfe_engine/schema/schema_ddl.py` | `DDLGenerator`, `DDLConfig` - column/index/view DDL generation |
@@ -38,7 +38,7 @@ flowchart LR
 
 ## Key classes
 
-### SchemaColumn (`source/models.py`)
+### SchemaColumn (`src/dfe_engine/source/models.py`)
 
 ```python
 from dfe_engine.source.models import SchemaColumn
@@ -54,7 +54,7 @@ col = SchemaColumn(
 errors = col.validate_against_registry(TypeRegistry.default())
 ```
 
-### TypeRegistry (`source/type_registry.py`)
+### TypeRegistry (`src/dfe_engine/source/type_registry.py`)
 
 ```python
 from dfe_engine.source.type_registry import TypeRegistry
@@ -67,7 +67,7 @@ registry.validate_use_case("integer", "word_search")  # raises ValueError
 registry.validate_cardinality("medium")  # raises InvalidCardinalityError
 ```
 
-### SchemaLoader (`schema/schema_loader.py`)
+### SchemaLoader (`src/dfe_engine/schema/schema_loader.py`)
 
 ```python
 from dfe_engine.schema.schema_loader import SchemaLoader
@@ -82,7 +82,7 @@ order_cols = SchemaLoader.get_order_by_columns(full)
 meta = SchemaLoader.load_version_metadata("meta/syslog.yaml")
 ```
 
-### SchemaBuilderV2 (`schema/schema_builder_v2.py`)
+### SchemaBuilderV2 (`src/dfe_engine/schema/schema_builder_v2.py`)
 
 ```python
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
@@ -99,7 +99,7 @@ result.validation_errors  # list[str]
 result.view_ddls  # {"sigma": "CREATE VIEW ...", ...}
 ```
 
-### DDLGenerator (`schema/schema_ddl.py`)
+### DDLGenerator (`src/dfe_engine/schema/schema_ddl.py`)
 
 ```python
 from dfe_engine.schema.schema_ddl import DDLGenerator, DDLConfig
@@ -110,7 +110,7 @@ add_ddl = gen.generate_alter_add_column("my_table", column)
 view_ddl = gen.generate_view("my_table", {"SourceIP": "source_ip"}, "sigma")
 ```
 
-### SchemaManager (`schema/schema_manager.py`)
+### SchemaManager (`src/dfe_engine/schema/schema_manager.py`)
 
 Version WRITE operations - published versions are immutable, so all changes
 create new version entries:
@@ -145,7 +145,7 @@ SchemaManager.clone_version(
 )
 ```
 
-### The applier (`schema/applier.py`)
+### The applier (`src/dfe_engine/schema/applier.py`)
 
 One applier brings every live table to its CREATE TABLE. It reads the statement
 with sqlglot's ClickHouse tokens, and an added column or index is cut from the
@@ -162,7 +162,7 @@ plan.statements  # CREATE, or ADD COLUMN / index / TTL / settings moves
 
 ## Validation rules
 
-1. Primitive must exist in TypeRegistry (one of 15 values).
+1. Primitive must exist in TypeRegistry (`registries/types.yaml` `primitives`).
 2. Use case must be valid for the primitive (e.g. `word_search` is not valid
    for `integer`).
 3. Attributes must be valid for the primitive (e.g. `lowcardinality` is not
@@ -177,8 +177,8 @@ plan.statements  # CREATE, or ADD COLUMN / index / TTL / settings moves
 ## Gotchas
 
 - **`expr` vs `comment`**: both end up in the ClickHouse COMMENT clause,
-  separated by ` — ` (that separator is part of the wire format the loader
-  parses - do not "fix" it). `expr` carries the `@directive`; `comment` is
+  separated by ` - ` (dfe-schemas `render.py`). That separator is part of the
+  wire format the loader parses. `expr` carries the `@directive`. `comment` is
   the human description. Never put directives in `comment`.
 - **`default` does triple duty**: `DEFAULT expr` normally,
   `MATERIALIZED expr` with the `materialized` attribute, `ALIAS expr` with
@@ -188,13 +188,13 @@ plan.statements  # CREATE, or ADD COLUMN / index / TTL / settings moves
 - **`timestamp` vs `datetime`**: both map to `DateTime64(3,'UTC')`, but
   `timestamp` is NOT nullable and uses `Delta, LZ4`. Use `timestamp` for
   ORDER BY time columns.
-- **Nullable ORDER BY**: ORDER BY columns should carry `not_null`; the
+- **Nullable ORDER BY**: ORDER BY columns should carry `not_null`. The
   engine warns but does not reject.
 - **Shipped schemas are read-only**: `is_shipped_schema()` detects paths
   inside the resolved schemas root (the `dfe-schemas` package, or the image
   seed) - custom schemas live outside those directories (`DFE_ENGINE_SCHEMAS_DIR`).
 - **Profile name matches the FILENAME**: use `timeseries` / `minimal` /
   `passthrough` in `header.type`, matching the YAML filenames.
-- **registries/types.yaml loads via YAML 1.1** (PyYAML through
-  DirectoryConfigStore semantics): `off`/`yes`/`no` become booleans. Meta
-  schemas load via ruamel (YAML 1.2) and are unaffected.
+- **Schema YAML is YAML 1.2**: `registries/types.yaml` and the meta schemas
+  load through ruamel (`yaml_utils.yaml_load`, dfe-schemas `loader.py`), so
+  `off`/`yes`/`no` stay strings there.

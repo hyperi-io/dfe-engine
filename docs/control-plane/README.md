@@ -33,9 +33,9 @@ flowchart TB
 |---|---|
 | **dfe-engine** | The config control plane + the sole authorisation PDP. Hosts the FastAPI API and the generated `dfe` CLI. Everything else in the layer keys off its API. |
 | **dfe-schemas** | The schema SSoT (common event header, hunt-results DDL, profiles). The engine reads it (the version-pinned `dfe-schemas` wheel) and auto-creates from it. |
-| **dfe-ui** | The operator console. A window over the engine API - it holds no authority of its own; it verifies the engine-minted JWT. |
-| **dfe-infra** | The GitOps SSoT and deploy vehicle (Argo CD). Deploys the suite; never a config authority. |
-| **dfe-deploy** | The per-deployment read-write gitops repo the running engine commits to. We own only its **initial** state; after handover the deployment owns it. |
+| **dfe-ui** | The operator console. A window over the engine API that holds no authority of its own. It carries the engine-minted JWT and reads its expiry, and the engine verifies it. |
+| **dfe-infra** | The GitOps SSoT and deploy vehicle (Argo CD). Deploys the suite. Never a config authority. |
+| **dfe-deploy** | The per-deployment read-write gitops repo the running engine commits to. We own only its **initial** state. After handover the deployment owns it. |
 
 ## The controlling SSoTs
 
@@ -48,8 +48,8 @@ ONE write path - so a change is auditable and consumers can never diverge.
 |---|---|---|---|
 | **API surface** - `openapi.json` | dfe-engine `openapi/` | dfe CLI, dfe-ui types, contract mock, reference docs | the FastAPI routes via `scripts/generate_openapi.py` (never hand-edited) |
 | **Schema** - event header, hunt-results DDL, profiles | dfe-schemas (the `dfe-schemas` wheel, pinned in `uv.lock`) | the engine (auto-creates the CH objects at startup), the CLI, dfe-ui | dfe-schemas commits |
-| **Deployment definition** - Helm charts + values | each app's thin chart, built from its deployment contract, plus dfe-infra values + the deploy-repo overlays | Argo CD, the cluster | the thin charts by each app's release, the values by dfe-infra, the overlays by the engine, one `values/<service>-<instance>-values.yaml` per app instance, each write a gitops commit. Where no chart runs (Compose), `appmgmt/appconfig.py` merges an overlay's `config:` over the deployment's base config into the app's config file |
-| **Deployed state** - the gitops YAML | dfe-deploy (per deployment) | Argo CD (syncs to the cluster), the engine (reads current state) | the engine API - every mutation is a git commit (governed ops); `dfe local` break-glass when the daemon is down |
+| **Deployment definition** - Helm charts + values | each app's thin chart, built from its deployment contract, plus dfe-infra values + the deploy-repo overlays | Argo CD, the cluster | the thin charts by each app's release, the values by dfe-infra, the overlays by the engine, one `values/<service>-<instance>-values.yaml` per app instance, each write a gitops commit. Where no chart runs (Compose), `src/dfe_engine/appmgmt/appconfig.py` merges an overlay's `config:` over the deployment's base config into the app's config file |
+| **Deployed state** - the gitops YAML | dfe-deploy (per deployment) | Argo CD (syncs to the cluster), the engine (reads current state) | the engine API - every mutation is a git commit (governed ops), and `dfe local` break-glass when the daemon is down |
 | **AuthZ** - RBAC roles + scopes | dfe-engine `auth/` (YAML) | the API (`require_action`), the CLI | the engine (governed writes) |
 
 ```mermaid
@@ -93,10 +93,8 @@ do not call it "the dfe-api". Its own settings read as `DFE_ENGINE_API_*`.
 
 `openapi/openapi.json` is the **single source of truth for the API surface**.
 It is generated from the FastAPI app (`uv run python scripts/generate_openapi.py`)
-and committed. Every consumer keys off it, never off a hand-maintained copy:
-
-The spec is the hub; everything radiates out of it. The FastAPI routes feed it,
-and every downstream consumer keys off it - never off a hand-kept copy:
+and committed. The FastAPI routes feed it, and every consumer keys off it, never
+off a hand-kept copy:
 
 ```mermaid
 flowchart TB
@@ -104,8 +102,8 @@ flowchart TB
     routes -->|"scripts/generate_openapi.py"| spec[("openapi.json<br/>THE API SSoT")]
 
     spec -->|"command tree at runtime<br/>(x-scalo.cli.hidden opts out)"| cli["dfe CLI"]
-    spec -->|"openapi-typescript<br/>-> @dfe/dfe-engine-types"| ui["dfe-ui"]
-    spec -->|"Prism"| mock["contract mock (dev + CI)"]
+    spec -->|"openapi-typescript<br/>-> @repo/dfe-engine-types"| ui["dfe-ui"]
+    spec -->|"Prism"| mock["contract mock<br/>docker-compose.dev.yaml"]
     spec -->|"Swagger UI"| refdocs["API reference docs"]
 
     classDef ssot fill:#fff3cd,stroke:#664d03,stroke-width:3px;

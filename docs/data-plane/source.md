@@ -1,7 +1,5 @@
 # Source - the top-level data abstraction
 
-**Status:** Shipped (`SourceRegistry` + the Source model are the live path).
-
 A Source is one distinct stream of events entering the platform -- `filebeat`,
 `syslog`, `crowdstrike-edr`, `windows-audit`. It is the only entity the API,
 the CLI and the console CRUD, and everything a stream needs hangs off it:
@@ -22,27 +20,30 @@ sizes, scaling.
 
 | Service | Role |
 |---------|------|
-| **receiver** | HTTP/gRPC ingestion, match routing, `_source` injection |
-| **loader** | landing records to ClickHouse, schema-aware insert |
-| **archiver** | landing records to S3 or a file archive |
+| receiver | HTTP/gRPC ingestion, match routing, `_source` injection |
+| loader | landing records to ClickHouse, schema-aware insert |
+| archiver | landing records to S3 or a file archive |
 
 **Sources** say *what*. Each one contains its own scoped components rather
 than being listed inside a service's config:
 
 | Component | Required | Purpose |
 |-----------|----------|---------|
-| **identity** | Yes | `_source` label, display name |
-| **origin** | Yes | Exactly one of a receiver `match` rule, a `fetcher`, or `external` for your own pipeline. See [external-pipelines.md](external-pipelines.md) |
-| **schema** | Yes | ClickHouse table definition (starts as the common header alone). See [schema.md](schema.md) |
-| **transform** | No | Enrichment or normalisation stage: a DFE transform app, or `engine: external` for your own |
-| **flow** | No | `transport` (bus or direct) and `archive`; unset takes the deployment default. See [source-flow.md](source-flow.md) |
-| **rules** | No | SQL detections against this source's table |
-| **views** | No | Naming-standard views (sigma, ecs, cim, ocsf) with per-source overrides |
+| identity | Yes | `_source` label, display name |
+| origin | Yes | Exactly one of a receiver `match` rule, a `fetcher`, or `external` for your own pipeline. See [external-pipelines.md](external-pipelines.md) |
+| schema | Yes | ClickHouse table definition (starts as the common header alone). See [schema.md](schema.md) |
+| transform | No | Enrichment or normalisation stage: a DFE transform app, or `engine: external` for your own |
+| flow | No | `transport` (bus or direct) and `archive`. Unset takes the deployment default. See [source-flow.md](source-flow.md) |
+| views | No | Naming-standard views (sigma, ecs, cim, ocsf) with per-source overrides |
 
 A source-scoped component is logical config, not a deployment the operator
 manages. One transform-vector deployment may run the transforms of twenty
-sources; the source says *this source needs a vector transform with this
+sources. The source says *this source needs a vector transform with this
 config*, and the deployment layer decides which instance runs it.
+
+Detections are not a source component. A rule names its source (`source:` in its
+file under `config/rules/`), and a hunt runs rules on a schedule
+([source-detections.md](source-detections.md)).
 
 | Source component | Runs on | How |
 |-----------------|---------|-----|
@@ -50,7 +51,6 @@ config*, and the deployment layer decides which instance runs it.
 | `source.fetcher` | one fetcher instance per source | the stanza, and the org `fetcher.org` names, are compiled into its overlay |
 | `source.transform` | one transform instance per source | the stanza is compiled into its overlay |
 | `source.schema` | dfe-engine | DDL generated and applied by the engine |
-| `source.rules` | the hunt runner | SQL on a schedule, matches to alerts |
 | `source.views` | dfe-engine | naming-standard compatibility views |
 
 ## The `_source` label
@@ -85,7 +85,7 @@ read it directly and carry no routing config of their own.
   characters, so a 40-character name deploys on Kubernetes too.
 - Unique across all sources
 
-A hyphenated name has to be quoted in a ClickHouse identifier position, so the DDL generator backtick-quotes every identifier (`quote_ident` in `schema/schema_ddl.py`).
+A hyphenated name has to be quoted in a ClickHouse identifier position, so the DDL generator backtick-quotes every identifier (`quote_ident` in `src/dfe_engine/schema/schema_ddl.py`).
 
 ## Where to read next
 

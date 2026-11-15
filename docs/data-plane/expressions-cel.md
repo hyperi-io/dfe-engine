@@ -1,4 +1,4 @@
-# DFE Expression Language — CEL
+# DFE Expression Language -- CEL
 
 DFE uses **CEL (Common Expression Language)** for conditions across the Python engine, the Rust services and the CLI. CEL is not Turing-complete: no loops, no recursion, no side effects, so every expression terminates. An expression is compiled once and evaluated against every row.
 
@@ -6,7 +6,7 @@ DFE uses **CEL (Common Expression Language)** for conditions across the Python e
 
 | Language | Package | Notes |
 |----------|---------|-------|
-| Rust | `cel` (renamed from `cel-interpreter`) | Native implementation, through `scalo::expression` |
+| Rust | `cel` | Native implementation, through `scalo::expression` |
 | Python | `common-expression-language` | PyO3 bindings, through `scalo.expression` |
 
 scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
@@ -24,7 +24,7 @@ scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
 
 | System | Reason |
 |--------|--------|
-| `@directive: body` DSL (`@source`, `@generated`, etc.) | Schema metadata — column mapping instructions, not boolean conditions |
+| `@directive: body` DSL (`@source`, `@generated`, etc.) | Schema metadata -- column mapping instructions, not boolean conditions |
 | ClickHouse SQL in `@generated` expressions | Runs in ClickHouse, not our evaluator |
 | Hunt SQL queries / rule_rewriter | ClickHouse-native SQL |
 | Duration strings (`"1h"`, `"30m"`) | Simple config values, not expressions |
@@ -64,8 +64,8 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 
 | Feature | Reason |
 |---------|--------|
-| `map()`, `filter()`, `exists()`, `all()` | Per-element iteration — unpredictable performance on large lists |
-| `timestamp()`, `duration()` | ClickHouse handles time natively — no need to duplicate |
+| `map()`, `filter()`, `exists()`, `all()` | Per-element iteration -- unpredictable performance on large lists |
+| `timestamp()`, `duration()` | ClickHouse handles time natively -- no need to duplicate |
 | Macros | Complexity with no benefit for DFE use cases |
 
 ---
@@ -79,7 +79,7 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 | `string` | `str` | `String` | `String` |
 | `bool` | `bool` | `bool` | `Bool` |
 | `list` | `list` | `Vec<Value>` | `Array` |
-| `map` | `dict` | `HashMap<String, Value>` | — |
+| `map` | `dict` | `HashMap<String, Value>` | -- |
 | `null` | `None` | `Option::None` | `Nullable` |
 
 ---
@@ -135,35 +135,27 @@ This enables expressions written once in YAML to work both as in-memory evaluati
 
 ## Implementation Architecture
 
-```text
-┌─────────────────────────────────────────────┐
-│              DFE Expression Profile          │
-│         (subset of CEL, documented here)     │
-└─────────┬───────────────────┬───────────────┘
-          │                   │
-    ┌─────▼──────┐    ┌──────▼──────┐
-    │  scalo-py   │    │  scalo-rs    │
-    │ expression/ │    │ expression/  │
-    │             │    │              │
-    │ wraps:      │    │ wraps:       │
-    │ common-     │    │ cel          │
-    │ expression- │    │ crate        │
-    │ language    │    │              │
-    └─────┬──────┘    └──────┬──────┘
-          │                   │
-    ┌─────▼──────┐    ┌──────▼──────┐
-    │ dfe-engine  │    │ dfe-loader   │
-    │ hunts/      │    │ transformer  │
-    │ alert.py    │    │ .rs          │
-    └─────────────┘    └─────────────┘
+```mermaid
+flowchart TB
+    PROF["DFE expression profile<br/>a subset of CEL"]
+    PY["scalo-py scalo.expression<br/>wraps common-expression-language"]
+    RS["scalo-rs scalo::expression<br/>wraps the cel crate"]
+    ENG["dfe-engine<br/>hunts/alert.py, rule filters"]
+    LDR["dfe-loader<br/>src/transform/computed.rs"]
+    PROF --> PY & RS
+    PY --> ENG
+    RS --> LDR
 ```
 
-Both wrappers enforce the same DFE profile — identical allowed operators, functions, and types. The Rust crate is the single source of truth for parsing and evaluation semantics.
+Both wrappers enforce the same DFE profile: the same allowed operators, functions and types.
 
-### API Surface (Both Languages)
+### API surface
+
+scalo-py's names (`scalo.expression`):
 
 ```text
-compile(expr) → Program          # Parse + validate + compile to AST
-evaluate(expr, data) → Any       # One-shot convenience (compile + execute)
-validate(expr) → list[str]       # Syntax + profile check, returns errors for UI
+compile_expression(expr) -> Program    # Parse + validate + compile
+evaluate(expr, data) -> Any            # One-shot convenience (compile + execute)
+validate(expr) -> list[str]            # Syntax + profile check, returns errors for UI
+transpile_to_clickhouse(expr) -> str   # The SQL pushdown below
 ```

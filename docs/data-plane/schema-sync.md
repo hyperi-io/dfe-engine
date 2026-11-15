@@ -1,180 +1,34 @@
-# Cross-Repo Synchronisation
+# The engine and loader schema contract
 
-**Status:** Proposed
-**Last Updated:** 2026-02-28
+The engine renders and applies the DDL. dfe-loader reads the deployed table back out of ClickHouse and creates none. So the deployed table is the whole contract between them, and dfe-schemas is where the table's definition comes from.
 
----
+## dfe-schemas owns the definitions
 
-## Problem
+The dfe-schemas package holds the common-header profiles (`common-header/`), the source meta schemas (`meta/`), the hunt output schemas (`hunts/`) and the registries (`registries/`): table engines, the type system (primitive to ClickHouse type) and the default field maps.
 
-Two repos define overlapping schema structures:
+The engine reads the version-pinned `dfe-schemas` wheel through `importlib.resources` and ships no schema files of its own. It looks in `DFE_ENGINE_SCHEMAS_DIR`, then the installed package, then the image's seed directory (copied out of that wheel at build), and when none carries what it needs, loading fails with `No dfe-schemas tree carries ...: set DFE_ENGINE_SCHEMAS_DIR or install dfe-schemas` (`src/dfe_engine/schema/schema_loader.py`).
 
-| Concept | dfe-engine (Python) | dfe-loader (Rust) |
-|---------|--------------------|--------------------|
-| Common header fields | `type_maps.csv` + schema CSVs | `schemas/profiles/*.yaml` + `COMMON-HEADER.md` |
-| Field types | `type_maps.csv` (24 logical types) | `src/clickhouse/types.rs` (runtime parsing) |
-| Loader directives | Column `comment` in schema CSV | `DDL-EXPRESSION.md` + `field_mapping.rs` |
-| Profile definitions | Not yet (proposed in SOURCE.md) | `schemas/profiles/timeseries.yaml` etc. |
+## The deployed table is the runtime contract
 
-If these drift apart, the engine generates DDL that the loader can't
-correctly populate — or the loader expects columns that don't exist.
-
----
-
-## What Must Stay In Sync
-
-### 1. Common Header Profile Definitions
-
-The common header is the **contract** between the engine (which generates
-DDL) and the loader (which populates fields). Both must agree on:
-
-- Field names (`_timestamp`, `_org_id`, `_source`, etc.)
-- Field types (exact ClickHouse types)
-- Field order in ORDER BY
-- Loader directives (how each field is populated)
-- Profile versioning
-
-### 2. Type Primitives → ClickHouse Type Mapping
-
-The engine maps primitives to ClickHouse types when generating DDL.
-The loader parses ClickHouse types from `system.columns` at runtime.
-These must be compatible — the engine's output must be valid input for
-the loader's type parser.
-
-### 3. Loader Directive Syntax
-
-The engine writes `@source`, `@generated`, `@renamed`, `@captured`,
-`@computed` directives as column comments. The loader parses these
-directives. The syntax must match.
-
----
-
-## Synchronisation Strategy
-
-### Single Source of Truth: the dfe-schemas repo
-
-The **dfe-schemas repo** owns the canonical schema YAML (this landed after
-the original draft of this doc, which had the engine owning it):
-
-- Common header profile YAML files (`common-header/`)
-- Source meta schemas (`meta/`) and hunt output schemas (`hunts/`)
-- The registries (`registries/`): table engines, the type system (primitive -> ClickHouse mapping) and the default field maps
-- Loader directive syntax examples (documented, not parsed by engine)
-
-The engine owns the DDL generation. dfe-engine consumes dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through `importlib.resources`, and keeps no copies of its own: with neither the package nor `DFE_ENGINE_SCHEMAS_DIR` resolving, loading fails with an error naming what was searched. dfe-loader still consumes it as a `schemas/` git submodule.
-
-```text
-dfe-schemas (source of truth)
-  |
-  |  common-header/{timeseries,minimal,passthrough}.yaml
-  |
-  |--> dfe-engine (dfe-schemas wheel) - generates DDL
-  |
-  '--> dfe-loader (submodule + bundled fallback) - auto-init tables
+```mermaid
+flowchart LR
+    S[dfe-schemas wheel] --> E[dfe-engine<br/>renders + applies DDL]
+    E --> CH[(ClickHouse table)]
+    CH -->|system.columns,<br/>column COMMENTs| L[dfe-loader]
 ```
 
-dfe-loader reads column metadata from ClickHouse at runtime
-(`system.columns`), not from config files. The contract is the DDL itself -
-whatever the engine produces, the loader must handle.
+dfe-loader reads three things from the table, never a profile YAML or a source definition:
 
-### Runtime Contract: Deployed ClickHouse Schema is the ONLY SSoT
+1. Column types, from `system.columns`.
+2. Column COMMENTs, which carry the loader directives.
+3. The table COMMENT, which carries `@profile` and `@profile_version` for a header-composed table (dfe-schemas `render.py`).
 
-The Rust K8s services (loader, archiver) at scale **slave from the
-deployed ClickHouse schema ONLY**. They do NOT read profile YAMLs,
-Source definitions, or any config files at query/ingest time. They read:
+The loader caches that schema for `schema.cache_ttl_secs` (300 by default, dfe-loader `docs/config-schema.yaml`), so an applied change reaches it on the next refresh, and until then it carries on with the schema it holds.
 
-1. **Column types** from `system.columns` — the deployed table
-2. **Column comments** from `system.columns` — contain loader directives
-3. **Table comment** — contains `@profile`, `@profile_version` tags
+## What has to agree
 
-This means there is **never an in-flight mismatch**. The flow is strictly
-one-directional:
+- Directive vocabulary. The loader parses `@skip`, `@default`, `@source`, `@renamed`, `@computed` and `@coerce` (dfe-loader `src/column_meta/mod.rs`). `tests/unit/test_services/test_loader_directive_contract.py` restates that list as a literal and fails when the engine writes a directive the loader does not carry.
+- Types. The engine maps primitives through dfe-schemas `registries/types.yaml`. The loader parses whatever ClickHouse type `system.columns` reports.
+- Header columns. Both sides take them from the profile in `common-header/`.
 
-```text
-Source YAML → engine generates DDL → deploys to ClickHouse → Rust services read from ClickHouse
-                                                                    ↑
-                                                          ONLY source of truth at runtime
-```
-
-The engine writes, ClickHouse stores, Rust services read. No intermediate
-state, no config sync, no cache invalidation race. If the engine hasn't
-deployed a schema change yet, the Rust services continue operating on the
-current deployed schema. Once the DDL is applied, the Rust services pick
-up the change on their next `system.columns` refresh (TTL-based cache).
-
-Profile YAMLs are only needed for the loader's **auto-init** feature
-(creating the default table when no table exists). Once the table is
-created, the YAML is irrelevant — the deployed DDL is the truth.
-
-### CI Validation
-
-Add a CI step that:
-
-1. Generates DDL from dfe-engine profiles
-2. Parses the generated DDL with dfe-loader's type parser
-3. Validates that all column comments contain valid loader directives
-4. Fails if any incompatibility is detected
-
-```yaml
-# .github/workflows/schema-compat.yml
-- name: Generate DDL from profiles
-  run: python -m dfe_engine.schema.generate_profiles --output /tmp/ddl/
-
-- name: Validate loader compatibility
-  run: cargo test --manifest-path ../dfe-loader/Cargo.toml -- schema_compat
-  env:
-    DDL_DIR: /tmp/ddl/
-```
-
-This catches drift at PR time, not in production.
-
----
-
-## Version Contract
-
-Both repos must agree on version numbers:
-
-```text
-@profile: timeseries
-@profile_version: 1
-@schema_version: 2
-```
-
-When the engine bumps a profile version:
-
-1. Engine generates migration DDL (`ALTER TABLE ADD COLUMN`)
-2. Loader's `ProfileDiff` detects the version mismatch and applies migration
-3. CI validates compatibility before merge
-
-The version is embedded in the table comment — the loader reads it at
-startup and logs a warning if it's behind the current profile version.
-
----
-
-## What Each Repo Owns
-
-| Responsibility | Owner | Notes |
-|---------------|-------|-------|
-| Profile definitions (YAML) | dfe-engine | Canonical source |
-| Type primitive mapping | dfe-engine | `type_maps.csv` or equivalent |
-| DDL generation | dfe-engine | `SchemaBuilder` / `ClickHouseSchema` |
-| Loader directive syntax | dfe-loader | Defines the `@` expression language |
-| Loader directive documentation | dfe-engine | Documents what directives are available |
-| Column comment parsing | dfe-loader | `field_mapping.rs` |
-| Schema caching | dfe-loader | TTL-based from `system.columns` |
-| Auto-init DDL | dfe-loader | Uses profile YAMLs (from dfe-schemas) |
-| Profile migration | dfe-loader | `ProfileDiff` generates ALTER statements |
-| CI compatibility check | Both | Cross-repo CI step |
-
----
-
-## Monorepo Path
-
-If/when the repos merge into a monorepo (see [MONOREPO-MIGRATION.md](../archive/monorepo-migration.md)),
-the sync problem disappears. Profile YAMLs live in one place, CI runs
-both the Python and Rust tests in a single pipeline, and there's no
-package pin, submodule or copy-on-release ceremony.
-
-Both consumption paths are stepping stones — when the monorepo happens,
-the package dependency and the loader's submodule reference are replaced
-by a direct path.
+No cross-repo CI job runs the loader's type parser over engine-generated DDL, and the loader has no profile migration of its own: the engine's schema apply adds the columns a new profile version brings.

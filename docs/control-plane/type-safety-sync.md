@@ -1,12 +1,12 @@
-# Automagic type safety (dfe-engine → dfe-ui)
+# Type safety sync (dfe-engine -> dfe-ui)
 
 dfe-engine is the source of truth for the HTTP API contract and the RBAC scope catalog, and `openapi.json` carries both. It is synced into **dfe-ui** so the frontend can use strict TypeScript types and scope constants without hand-maintaining duplicates.
 
-## Goal
+## What it covers
 
-- **API types**: Routes, request bodies, and responses defined in FastAPI/Pydantic become TypeScript types in dfe-ui.
-- **RBAC scopes**: Permission strings in `scope_constants.py` become the `RbacScope` enum in the spec, and so in dfe-ui.
-- **Automation**: Merges to `main`/`master` that touch the spec open a PR in dfe-ui; frontend code can rely on compile-time checks against the latest engine contract.
+- API types: Routes, request bodies, and responses defined in FastAPI/Pydantic become TypeScript types in dfe-ui.
+- RBAC scopes: Permission strings in `scope_constants.py` become the `RbacScope` enum in the spec, and so in dfe-ui.
+- Automation: Merges to `main`/`master` that touch the spec open a PR in dfe-ui. Frontend code can rely on compile-time checks against the latest engine contract.
 
 ## Generators in this repo
 
@@ -25,7 +25,7 @@ uv run python scripts/generate_openapi.py
 
 The script loads the live FastAPI app and writes the OpenAPI 3 schema. That JSON is used for Prism mocks, contract checks, and (in dfe-ui) `openapi-typescript` code generation.
 
-See also [UI-API-GUIDE.md](ui-api-guide.md) for local mock/typegen workflows.
+See also [ui-api-guide.md](ui-api-guide.md) for local mock and typegen workflows.
 
 ### RBAC scope constants
 
@@ -49,25 +49,25 @@ Note: Changing only Python API files without regenerating and committing the Ope
 ### What the job does
 
 1. Checks out dfe-engine.
-2. Clones **dfe-ui** (repo from `DFE_UI_REPO`, default `hyperi-io/dfe-ui`) using `DFE_UI_TOKEN`.
-3. Copies into dfe-ui’s types package:
-   - `openapi/openapi.json` → `packages/dfe-engine-types/specs/openapi.json`
-   - `openapi/openapi.e2e.json` → `packages/dfe-engine-types/specs/openapi.e2e.json`
+2. Mints a token from the GitHub App and clones **dfe-ui** (repo from `DFE_UI_REPO`, default `hyperi-io/dfe-ui`).
+3. Copies into dfe-ui's types package:
+   - `openapi/openapi.json` -> `packages/dfe-engine-types/specs/openapi.json`
+   - `openapi/openapi.e2e.json` -> `packages/dfe-engine-types/specs/openapi.e2e.json`
 4. Runs `yarn install --immutable` and `yarn generate` in `packages/dfe-engine-types`, then generates `types/e2e.d.ts` from `openapi.e2e.json` and exports it as `@repo/dfe-engine-types/e2e`.
 5. Opens a PR in dfe-ui (closes older open sync PRs on the same branch naming pattern so only one sync PR is active).
 
 ### Secrets and configuration
 
-- **`DFE_UI_TOKEN`** (required): PAT with permission to push branches and open/close PRs in dfe-ui.
-- **`DFE_UI_REPO`** (optional): `owner/name` for the UI repo (default `hyperi-io/dfe-ui`).
+- `vars.GH_APP_CLIENT_ID` and `secrets.GH_APP_PRIVATE_KEY` (required): the GitHub App whose installation token, scoped to dfe-ui with contents and pull-requests write, pushes the branch and opens and closes the PRs.
+- `vars.DFE_UI_REPO` (optional): `owner/name` for the UI repo (default `hyperi-io/dfe-ui`).
 
 ## Developer workflow (dfe-engine)
 
 1. Change API or scopes in Python.
 2. Regenerate the specs: `uv run python scripts/generate_openapi.py`.
 3. Commit the updated `openapi/openapi.json` and `openapi/openapi.e2e.json` together with your code change.
-4. After merge to `main`/`master`, wait for **Sync dfe-engine-types** to open the dfe-ui PR; merge that PR to pick up types and scopes on the frontend.
+4. After merge to `main`/`master`, wait for **Sync dfe-engine-types** to open the dfe-ui PR. Merge that PR to pick up types and scopes on the frontend.
 
 ## Developer workflow (dfe-ui)
 
-Consume **`packages/dfe-engine-types`** (generated API types, `RbacScope` among them). Do not copy scope strings or paths by hand—import from the package so renames and new endpoints fail at compile time instead of at runtime.
+Consume **`packages/dfe-engine-types`** (generated API types, `RbacScope` among them). Do not copy scope strings or paths by hand. Import from the package so renames and new endpoints fail at compile time instead of at runtime.

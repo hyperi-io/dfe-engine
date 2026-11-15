@@ -2,7 +2,7 @@
 
 How DFE gets onto a cluster and how the engine's dials reach it. The engine
 never deploys backing services and never authors Argo Applications - it
-writes config, DDL, and overlay values into the deploy repo; dfe-infra's
+writes config, DDL, and overlay values into the deploy repo. Dfe-infra's
 charts and ApplicationSets do the deploying. This page carries the layered
 model, the tiers, the deploy-repo providers, the backing-service modes, and
 the network model. The system map is [../architecture.md](../architecture.md).
@@ -49,7 +49,7 @@ flowchart TB
 The deployment assumes ONLY a bare cluster. `bootstrap/bootstrap.sh` (in
 dfe-infra) lays down the baseline with a **detect-or-install** probe for every
 dependency: if a healthy controller + CRDs are present, ADOPT it (create only
-DFE's own CRs); if absent, INSTALL a DFE-owned copy. Covered: a default
+DFE's own CRs). If absent, INSTALL a DFE-owned copy. Covered: a default
 StorageClass (local-path fallback), cert-manager, External Secrets, and Argo
 CD itself.
 
@@ -66,8 +66,7 @@ Argo CD via ApplicationSets. DFE deploys its OWN backing services and
 never piggybacks a shared one. The backing services are decoupled from the
 deploy repo: layer2-data is a single source (base chart + profile/cloud
 values only), so they come up before any external git or in-cluster git host
-exists. (Validated live: the full set reaches Healthy on a bare cluster with
-no deploy repo present.)
+exists.
 
 ### Layer 2 - apps + config
 
@@ -93,17 +92,18 @@ each its own config). KEDA scaling is folded into each app chart - see
 
 ## Deployment tiers
 
-Five tiers, smallest to largest. The first is Docker; the rest are Kubernetes
-profiles selected by the cluster secret's `dfe.hyperi.io/profile`. Transport
+Four selectable tiers, smallest to largest, and `mesh` beside them. The first is
+Docker, and the rest are Kubernetes profiles selected by the cluster secret's
+`dfe.hyperi.io/profile`. Transport
 and the balancer per tier: [transports.md](transports.md).
 
 | Tier | Platform | Transport | Kafka | Sizing | Fits |
 |------|----------|-----------|-------|--------|-------|
 | **dfe-docker** | Docker Compose (NOT k8s) | four profiles: `slim-grpc`, `slim-kafka`, `single-grpc`, `single-kafka` (the default) | per profile | minimal | SME / single-host, anything smaller than `slim` |
-| **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s; smallest |
+| **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s. Smallest |
 | **single** | k8s | Kafka | **yes** (single broker) | reliability | one node of everything, with Kafka |
 | **scale** | k8s | Kafka | **yes** (multi-broker cluster) | reliability | everything clustered (ReplicatedMergeTree + dedicated Keeper) |
-| **mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | scale's replicas and ClickHouse cluster with no broker, see [transports.md](transports.md#buffering-without-a-bus) |
+| **mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | in the charts only: dfe-infra's `bootstrap.sh` refuses `DFE_PROFILE=mesh`. Scale's replicas and ClickHouse cluster with no broker, see [transports.md](transports.md#buffering-without-a-bus) |
 
 A tier sets defaults, and a deployer overrides any single dial. `mesh`
 composes as `scale` below with Kafka and Kafbat off and, like slim, no
@@ -147,7 +147,7 @@ fetchers or transforms.
 
 ### Admin UI links
 
-The deployer lists the admin UIs it stood up in `DFE_ENGINE_ADMIN_LINKS`, a JSON array of `{name, purpose, url, probe_url}`, and `GET /api/v1/deployment/admin-links` serves it to `admin` and `infra_admin`. The engine never discovers one. Any answer below 500 from the optional `probe_url` is `up`; a 5xx, timeout or refusal is `down`; no `probe_url` is `unknown`. A bad entry is dropped and counted on `admin_links_dropped_total`, and a URL carrying credentials is refused.
+The deployer lists the admin UIs it stood up in `DFE_ENGINE_ADMIN_LINKS`, a JSON array of `{name, purpose, url, probe_url}`, and `GET /api/v1/deployment/admin-links` serves it to `admin` and `infra_admin`. The engine never discovers one. Any answer below 500 from the optional `probe_url` is `up`. A 5xx, timeout or refusal is `down`. No `probe_url` is `unknown`. A bad entry is dropped and counted on `admin_links_dropped_total`, and a URL carrying credentials is refused.
 
 ## Why the tiers compose that way
 
@@ -158,7 +158,7 @@ or scale.
 
 **Observe is ALWAYS present, in EVERY tier - never optional.** Two purposes,
 which is why DFE ships an extended fork: (1) a separate self-monitoring
-telemetry sink, deliberately independent of the data pipeline; (2) the
+telemetry sink, deliberately independent of the data pipeline. (2) the
 data-discovery UI over ALL DFE data in ClickHouse, embedded in dfe-ui - the
 fork exists precisely to point Observe at the DFE tables, not only its own
 telemetry schema.
@@ -180,20 +180,20 @@ or `single` (Kafka).
 The deploy repo is just `config_repo_url` + revision + credentials. There is
 NO hard git-server dependency (the backing services do not depend on it).
 
-- **External git PRIMARY** (GitHub / GitLab) - the deployer sets
+- External git PRIMARY (GitHub / GitLab) - the deployer sets
   `DFE_CONFIG_REPO_URL` + creds (`DFE_CONFIG_REPO_TOKEN`+`_USER` for HTTPS,
   or `DFE_CONFIG_REPO_SSH_KEY`). bootstrap creates the Argo `repo-deploy`
   repository secret. No in-cluster git is deployed. The engine pushes over
   HTTPS with `DFE_CONFIG_REPO_TOKEN`, so with an SSH key alone Argo can read
   the repo but the engine cannot write to it.
-- **Forgejo FALLBACK** (in-cluster) - deployed ONLY when no external URL is
+- Forgejo FALLBACK (in-cluster) - deployed ONLY when no external URL is
   given, gated on the cluster label
   `dfe.hyperi.io/bundled-deploy-repo: "true"`. Forgejo, a Gitea-API-compatible
   git host, holds the deploy repo for tyre-kicking / air-gapped use, pulled from the canonical
   `code.forgejo.org` registry. Never a hard dependency.
 
 All providers use the same downstream mechanism (an Argo repository
-credential + a git-files generator); from Argo's perspective GitLab and
+credential + a git-files generator). From Argo's perspective GitLab and
 GitHub are identical external remotes.
 
 ## Data backing-service modes
@@ -202,39 +202,39 @@ DFE deploys its own data layer, mode-driven (`argocd/values/*.yaml` +
 cluster-secret annotations). Full swap matrix:
 [backing-services.md](backing-services.md).
 
-- **ClickHouse** - `single` (one node running Keeper embedded, small/test),
+- ClickHouse - `single` (one node running Keeper embedded, small/test),
   `cluster` (DFE-owned Keeper), or `external` (BYO or ClickHouse Cloud, connect
   only and deploy nothing). Every self-hosted mode needs Keeper and the
   `{cluster}`, `{shard}` and `{replica}` macros, because every DFE table is a
   `ReplicatedMergeTree` in a Replicated database, and the engine refuses a server
   without them. Admin password generated in-cluster
   by an ESO Password generator - no external secret backend required.
-- **Kafka** - Strimzi by default, Redpanda opt-in (BSL licence gate), or
+- Kafka - Strimzi by default, Redpanda opt-in (BSL licence gate), or
   external (incl. MSK IAM). With gRPC transport, Kafka is omitted entirely.
-- **DocumentDB** - Observe's document store, with the Mongo wire protocol.
-  On k8s it is the DocumentDB operator running on CloudNativePG PostgreSQL 18.
+- DocumentDB - Observe's document store, with the Mongo wire protocol.
+  On k8s it is the DocumentDB operator running on CloudNativePG PostgreSQL (the
+  image and version are in dfe-infra `helm/charts/documentdb/values.yaml`).
   dfe-docker runs the single-container `documentdb-local`. Nothing else in the
   stack uses PostgreSQL.
 
 ## Network model
 
-- **Pod / service CIDRs** are a config value with a sensible non-conflicting
+- Pod and service CIDRs are a config value with a sensible non-conflicting
   default: pods `198.18.0.0/16`, services `198.19.0.0/16` (RFC 2544
   benchmarking space - non-RFC1918, non-CGNAT, low corporate overlap). Any
-  other range is accepted at initial deploy; CIDRs are immutable once the
-  cluster is started. Canal IP-masquerades pod egress to the node IP, so the
-  customer needs no NAT or route change.
-- **CGNAT `100.64.0.0/10` is reserved SOLELY for edge-VPN clients**, never
+  other range is accepted at initial deploy. CIDRs are immutable once the
+  cluster is started (dfe-infra `argocd/values/common.yaml` `networkModel`).
+- CGNAT `100.64.0.0/10` is reserved SOLELY for edge-VPN clients, never
   for DFE pod/service ranges. The opt-in edge-fleet VPN (culvert) carves its
   tunnel subnets out of it.
-- **Receiver exposure is `exposure.groups.ingest`**, set in the deploy repo's
+- Receiver exposure is `exposure.groups.ingest`, set in the deploy repo's
   `infra/common.yaml`. Its `door` is one of three. `loadbalancer` (the
   default) is the receiver's own LoadBalancer Service, rendered only while
   `allow` lists CIDRs. `gateway` is `receiver.{domain}` on the gateway.
   `tunnel` is no public door, for a fleet that dials in over the edge VPN.
   The receiver then talks to internal Kafka (ClusterIP, private), and
   isolation is by NetworkPolicy.
-- **Engine ports.** The API listens on 8000. Health (`/livez`, `/readyz`) and
+- Engine ports: the API listens on 8000. Health (`/livez`, `/readyz`) and
   `/metrics` are on 9090, apart from the API traffic.
 
 ## Pipeline builds

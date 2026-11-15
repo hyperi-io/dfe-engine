@@ -21,7 +21,7 @@ whole point, and it is the acceptance test for every piece below.
 
 ```mermaid
 graph TD
-    CLI["CLI - dfe local governed"]
+    CLI["CLI - dfe local"]
     HelmRouter["Tier-1 router - api/v1/helm"]
     GovRouter["Tier-2 router - api/v1/governance"]
     ConfigRouter["Config router - api/v1/config"]
@@ -32,7 +32,6 @@ graph TD
     Argo["Argo CD reconciles the commit"]
 
     CLI --> GitCrud
-    CLI --> Actions
     HelmRouter --> GitCrud
     GovRouter --> Actions
     Actions --> GitCrud
@@ -58,13 +57,15 @@ surface small and the policy readable.
 `src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
 because every resource is git-backed config. A `ResourceClass` says where a class
 lives (a directory), how one resource is laid out, and which RBAC prefix governs
-it. The default registry covers the deploy repo: `helmvars` (the app-instance
-overlays under `values/`), `infravars` (the substrate and platform overlays under
-`infra/`), `sources` (the all-in-one source-definition docs under
-`config/sources/` - the first datamodel class in the deploy repo), `library` (the
-versioned artefact library under `config/library/`) and the `governance` class
-(`accounts`, `groups`, `roles`, `actions`, `policies` under `governance/`, plus
-the CH RBAC types).
+it. The default registry (`src/dfe_engine/gitcrud/registry.py`) covers the deploy repo:
+`helmvars` (the app-instance overlays under `values/`), `infravars` (the cluster
+and platform overlays under `infra/`), the datamodel classes `sources`,
+`compat_profiles` and `derived_schemas` (under `config/sources/`,
+`config/compat-profiles/` and `config/schemas/derived/`), `hunts` and `rules`
+(`config/hunts/`, `config/rules/`), `library` (the versioned artefact library
+under `config/library/`) and the governance classes (`accounts`, `groups`,
+`roles`, `actions`, `policies`, `ch_tiers`, `ch_service_roles` and
+`gov_settings` under `governance/`).
 
 `infravars` shares the `helmvars` RBAC prefix but needs its own directory: Argo
 hands the app generator's `values/*-values.yaml` glob to git as a pathspec, where
@@ -100,6 +101,8 @@ Nothing else moves to `BUNDLE` by default: the other versioned classes hold smal
 structured payloads that already diff well, so migrating them would cost a data
 migration in every deployed gitops repo for no gain.
 
+## One commit per mutation
+
 The engine is small on purpose. Read, flatten to dot-paths, set or delete a path,
 write a whole doc, delete a resource -- every mutation ends in one commit via
 `GitopsRepo` (which uses dulwich, so there is no shell-out to `git`). Three extras
@@ -117,7 +120,7 @@ code: it builds every message and its audit trailers (callers cannot hand-write
 them), rejects `latest`/unpinned image refs and controller-owned fields like
 `replicaCount`, and resolves direct-commit vs PR from the environment and class.
 
-## Writing a helm var, end to end
+## Writing a helm var
 
 ```mermaid
 sequenceDiagram
@@ -169,9 +172,13 @@ sequenceDiagram
     Crud-->>Op: diff + commit SHA
 ```
 
+## Protected vars and refused writes
+
 A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked `cls:name:path` globs that even Tier-1 must respect unless the caller holds the override grant. It is a policy object, not a per-var ACL. A set or revert at a parent, or a set below a locked scalar, is refused like a write to the var itself, because either one changes it. A whole-document write is gated only on the leaves it adds, changes or removes.
 
 Three policies ship and seed into every deploy repo. `baseline` locks image references. `storage-layout` locks the data-layer modes, the storage model, the `objectStore` / `tieredBlock` / `tieredObject` dial blocks, and the disk size and class. `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud. Seeding never rewrites an existing file, so a repo carrying the earlier `storage-model` policy keeps it and gains `storage-layout` beside it -- hence the pre-vocabulary key spellings in the shipped lock.
+
+## Refused writes no grant lifts
 
 Not everything unsafe is a protected var. A lower node or broker count is refused
 by the backing-services router itself, and by an action that leaves one in the infra overlay, with a 400 that names the reason, and the
@@ -183,7 +190,7 @@ the count, writing one renders nothing.
 
 Ahead of the count guard and the policy locks, the router, and an action writing the infra overlay, refuse a write or revert of a `read_only` value on a backing service DFE does not run (`managed_by` `provider` or `external`, per `src/dfe_engine/backing/providers.yaml`) with 409 `managed_by_provider`. The override grant does not lift it: the chart deploys no store there, so the commit would change nothing.
 
-### Constrained params -- a dial with detents, or a bounded knob
+## Constrained params -- a dial with detents, or a bounded knob
 
 An action may declare `params`, and every param carries a CLOSED constraint:
 an enum carries its full value list, a numeric carries both bounds. There is
@@ -193,7 +200,7 @@ the hole curation closed. A `VarChange.value` references a param as
 enum value into a per-var literal -- the admin still curates what each detent
 means. Substitution never reaches `cls`/`name`/`path`, and there is no string
 interpolation, so params add zero injection surface. Wiring errors (dangling
-reference, map not covering the enum) are rejected at DEFINE time; only the
+reference, map not covering the enum) are rejected at DEFINE time. Only the
 caller's supplied values can fail an invoke (422 `invalid_params`).
 
 A `value` of `{"$unset": true}`, alone or as a map entry, removes the path instead of setting it, which returns the var to the layer beneath the overlay (a chart default or a tier profile). Removing an absent path is a no-op that creates no file, an emptied parent map is removed with it, and the diff shows `new` as `{"$unset": true}`. A marker with any other content is rejected at define time.
@@ -202,7 +209,7 @@ A `value` of `{"$unset": true}`, alone or as a map entry, removes the path inste
 the convention the shipped roles grant on (`dfe_operator` and `infra_admin`
 carry `action:invoke:*`).
 
-### The contract exposes the closed sets
+## The contract exposes the closed sets
 
 Every stringly field on an action is a closed set, so the contract enumerates
 it rather than trusting hand-typed values: `GET /gitops/classes` (the registry,
@@ -214,61 +221,57 @@ fields carry `x-dfe-enum-source` annotations naming these endpoints, so
 generated clients render selects, not text boxes (the full convention:
 [ui-api-guide.md](ui-api-guide.md)).
 
-### The shipped action library
+## The shipped action library
 
 The deploy-repo template (dfe-deploy `governance/`) ships a standard library
 of dials -- `receiver-surge`/`receiver-normal` (KEDA ceiling detents),
 `hunts-pause`/`hunts-resume`, `hunts-throttle` (bounded concurrent-run cap) --
 plus a `baseline` protected-var policy locking `image.*` (images move through
 stack pins, not dials). Every shipped action's structure is CI-validated in
-that repo (`tools/validate_governance.py`); the chart vars they point at are
+that repo (`tools/validate_governance.py`). The chart vars they point at are
 owned by dfe-infra's chart validation. An action's `description` is its
 runbook line -- what it does, and which action reverts it.
 
-## ClickHouse data RBAC -- one user per group
+## ClickHouse data RBAC -- a tier and a tenant per identity
 
-`governance/ch_rbac.py`. Access control in dfe-hyperdx's app layer cannot contain a bad
-query. Quotas and resource limits can, and those live on the ClickHouse user. So a
-group maps to exactly one ClickHouse user carrying three controls:
+`src/dfe_engine/governance/ch/`. Access control in dfe-hyperdx's app layer cannot
+contain a bad query. Quotas and resource limits can, and those live in ClickHouse.
+So every ClickHouse identity composes two axes:
 
 ```mermaid
 graph LR
-    Group["RBAC group - e.g. soc-ro"]
-    User["ClickHouse user - dfe_grp_soc-ro"]
-    Grants["GRANTs + row policies - what data"]
-    Profile["Settings profile - per-query limits"]
-    Quota["Quota - rate and volume"]
+    Group["RBAC group"]
+    User["ClickHouse user<br/>bound to the group"]
+    Tier["Tier role - grants,<br/>settings profile, quota"]
+    Tenant["Tenant role - one row policy<br/>per _org_id table"]
+    Setting["SQL_current_tenant_id<br/>pinned read-only"]
 
     Group --> User
-    User --> Grants
-    User --> Profile
-    User --> Quota
+    User --> Tier
+    User --> Tenant
+    Tenant --> Setting
 ```
 
-`build_group_sql` renders the `CREATE USER` + `GRANT` + `CREATE SETTINGS PROFILE` +
-`CREATE QUOTA` (identifiers backtick-quoted, so a hyphenated group name is a valid
-CH name). The primary path is `ddl_artifact`, which emits that as a gitops DDL file
-under `ddl/ch-rbac/<group>.sql` -- applied by the same migration runner as the schema
-DDL, with the read-only core tiers supplied from dfe-schemas. The imperative
-`GroupChProvisioner` is the secondary, direct path. dfe-hyperdx then selects the
-connection bound to the user's group, so every query runs as that user and CH itself
-is the enforcing boundary.
+A group binding ties an RBAC group's ClickHouse user to one tier and at most one
+org. A tier is grants, a settings profile and a quota (`dfe_<tier>_role`,
+`_profile`, `_quota`). The tenant axis is one shared role plus a restrictive row
+policy on each `_org_id` table, reading the caller's `SQL_current_tenant_id`, which
+an org-tied user carries pinned read-only, so a `SETTINGS` override in a query is
+refused. The catalogue of tiers and service roles is data in dfe-schemas
+(`roles/clickhouse.yaml`), editable through the `ch_tiers` and `ch_service_roles`
+classes, and `ChRbacReconciler` renders whatever exists into idempotent DDL and
+runs it.
 
-This applies to **hunts too**, and it is the same mechanism. A hunt worker does not
-connect to ClickHouse as an unbounded account -- it runs its query as a CH user
-carrying a quota and a settings profile. The primary job there is a cost guard: a
-dumb or runaway hunt query (a full-table scan, an unbounded join) is killed by the
-quota or the `max_memory_usage`/`max_execution_time`/`max_rows_to_read` limits
-rather than taking the cluster down. The grants are a security scope on top if a
-hunt should only ever see certain data. So the per-group CH user has two consumers --
-interactive queries through Observe, and hunt execution -- and CH is the safety
-boundary for both.
+The hunt runner connects as the `dfe_hunt_runner` service role, which carries
+grants and no quota (`roles/clickhouse.yaml`, `src/dfe_engine/hunts/connect.py`). The catalogue's
+`hunt_tier_*` tiers carry per-query memory and time limits and an hourly quota for a
+group bound to one.
 
 ## The hunt runner
 
 `src/dfe_engine/hunts/`. A hunt is a rule query on a schedule that writes
-matched rows to a table. One pod proved it cannot service them all, so the runner is
-a pool -- but hunts are never *assigned* to pods. Workers pull due runs from a
+matched rows to a table. The runner is a pool, and hunts are never *assigned* to
+pods. Workers pull due runs from a
 ClickHouse lease table. Add a pod and it just starts pulling. Kill one and its leases
 expire and get reclaimed. There is no shard map to rebalance and nothing to go
 split-brain over.
@@ -286,7 +289,7 @@ graph TD
     W1["Worker"]
     W2["Worker"]
     CH["ClickHouse - run query, write results"]
-    WM["Watermark on timestamp_load"]
+    WM["Watermark on _timestamp_load"]
 
     W1 -->|claim| Claim
     W2 -->|claim| Claim
@@ -302,11 +305,14 @@ schedule fan out evenly and never stampede ClickHouse at the boundary. `latest_f
 names the most recent fire at or before now, and it stays owed until its watermark
 is written. A global cap hard-limits how much hits CH at once.
 
-A run never doubles up. To claim, a worker INSERTs a lease row for `(hunt, fire)`
-then reads the rows back for that key and settles on one deterministic winner (claim
-time, then owner id) after a short window -- so a single worker is exactly-once, and
-the rare multi-worker race is absorbed because the windowed INSERT is idempotent (the
-same window written twice is the same rows). Per-hunt state means an overrun defers
+## Claims, windows and coordination tables
+
+A run never doubles up. To claim, a worker reads the hunt free, INSERTs a lease row
+and a marker of its own, waits a settle, and keeps the claim only if its row landed
+within that settle and is still the latest. Lease writes reach a majority of
+replicas and lease reads go through `FINAL`, so every worker names the same winner
+(`src/dfe_engine/hunts/ch_coordinator.py`). Exclusion has to hold, because a window run twice
+writes its rows twice. Per-hunt state means an overrun defers
 rather than starting a second copy -- and flags `too_aggressive` so the UI can tell
 the user their schedule is too tight.
 
@@ -321,13 +327,16 @@ stateDiagram-v2
     deferred --> due: previous run finished
 ```
 
-Each run is incremental and crash-safe. The query carries a `{window}` placeholder;
-the worker substitutes `timestamp_load >= start AND < end`, runs it, and advances the
-watermark ONLY after the query commits. A pod killed mid-run re-runs the same window
-from the last committed watermark -- no gap, no loss. The watermark field is fixed to
-`timestamp_load`, the common-header column that is always present.
+Each run is incremental and crash-safe. The query carries a `{window}` placeholder.
+The worker substitutes the window predicate on the hunt's timestamp field, runs it,
+and advances the watermark ONLY after the query commits. A pod killed mid-run re-runs
+the same window from the last committed watermark -- no gap, no loss. The field
+defaults to `_timestamp_load`, the common-header column that is always present, and a
+hunt's `timestamp_field` overrides it (`src/dfe_engine/hunts/spec_loader.py`).
 
-The three coordination tables (ReplacingMergeTree, in the effective data database):
+The three coordination tables, all ReplacingMergeTree in the effective data database.
+`hunt_run` (one row per fire) and `hunt_runner_heartbeat` (one row per runner) sit
+beside them:
 
 ```mermaid
 erDiagram
@@ -353,21 +362,19 @@ erDiagram
 
 `HuntRunner.tick(now)` is one cycle -- find due hunts that are not already active,
 then claim up to the cap and execute each at its scheduled window. The daemon is
-`while: tick(); sleep`. Validated end to end against real ClickHouse: concurrent
-disjoint claims, lease reclaim, and incremental resume with no duplicate rows.
+`while: tick(); sleep`.
 
 ## The smaller pieces
 
-- **Runtime config** -- `GET /api/v1/config/client` (authenticated, any role) hands the UI
-  its API base, Observe URL, auth mode, and feature flags at runtime. This is what
-  lets one UI image run in every environment instead of baking the URLs in at build
-  time.
-- **Alerting** -- a scaffold only, deferred by design. A rule model (threshold over a
-  window, severity to a channel) and a pluggable dispatcher. The real senders and the
-  library choice wait until we reach that phase.
-- **CLI** -- `dfe local governed helm ...` and `action invoke` wrap the same services
-  the API uses, for CI and break-glass. A CLI is a thin window over the API, not a
-  second way of doing things.
+- `GET /api/v1/config/client` (authenticated, any role) hands the UI its API base,
+  Observe URL, auth mode and feature flags at runtime, so one UI image runs in every
+  environment.
+- `src/dfe_engine/alerting/` is a scaffold: a rule model (threshold over a window,
+  severity to a channel) and a dispatcher whose only sender logs. A hunt's own alert
+  destinations are delivered by `src/dfe_engine/hunts/delivery.py`.
+- `dfe local` (`ls`, `get`, `set`, `unset`, `rm`, `revert`, `restore`, `push`) wraps
+  GitCrud on a clone of the deploy repo, for break-glass when the engine is down. It
+  has no action invoke ([dfe-cli-design.md](dfe-cli-design.md)).
 
 ## What holds it together
 
