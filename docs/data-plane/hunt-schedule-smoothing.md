@@ -99,7 +99,7 @@ J trending down is the loop working. J low and flat is settled. The runner's own
 
 ## Derek's maths geek section
 
-> With apologies for Derek's maths-geek section here
+> With apologies for Derek's maths-geek section here. This is Derek's hand-written maths, scanned from his notebook and set in type.
 
 ### Setup
 
