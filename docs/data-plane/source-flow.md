@@ -56,9 +56,9 @@ flowchart LR
 
 Direct runs the receiver to loader path alone (the second diagram). A fetcher or a transform is an app of its own per source, and addressing a pool of those over gRPC needs the mesh, which is not GA. A source that needs one is refused at save on a direct deployment, and the compile leaves it out. `GET /api/v1/system/deployment` reports `transports.per_source_apps: false` there, and each `GET /api/v1/sources/catalogue` entry carries `runnable`, `runnable_reason` and `runnable_intakes`, judged by the same resolver as the save.
 
-The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic; on direct the receiver fans the record out to it beside the loader. A profile that apps.yaml does not offer dfe-archiver in, or that does not run it unasked (`default_in`) while no archiver instance is deployed, refuses `archive: true` at save, naming the profile, while a source stored with it before still reads and compiles.
+The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic. On direct the receiver fans the record out to it beside the loader. A profile that apps.yaml does not offer dfe-archiver in, or that does not run it unasked (`default_in`) while no archiver instance is deployed, refuses `archive: true` at save, naming the profile, while a source stored with it before still reads and compiles.
 
-**We parse mechanical transport at max efficiency at the edge.** dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats envelope) into JSON with the payload in `message`. Content-dependent parsing, such as a vendor body through grok, happens in a transform reading `message`. Raw capture (`_raw`) is off by default because it doubles every record. A first-hop parse bug is fixed in the receiver or fetcher, never by turning raw capture on.
+The first hop parses only the transport. dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats envelope) into JSON with the payload in `message`. Content-dependent parsing, such as a product's message body through grok, happens in a transform reading `message`. Raw capture (`_raw`) is off by default because it doubles every record. A first-hop parse bug is fixed in the receiver or fetcher, never by turning raw capture on.
 
 ## Two transports, one per deployment
 
@@ -68,12 +68,12 @@ A source declares `transport: bus` or `transport: direct`. Left unset, it takes 
 |---|---|---|---|
 | dfe-docker slim | direct | gRPC | one replica of each |
 | dfe-docker single | bus | Kafka topics on one broker | one replica of each |
-| slim | direct | gRPC | one replica; the KEDA ceiling of two would pin senders to pods |
+| slim | direct | gRPC | one replica. The KEDA ceiling of two would pin senders to pods |
 | single | bus | Kafka topics on one broker | consumer groups |
 | scale | bus | Kafka topics on a broker cluster | consumer groups |
-| mesh | direct | gRPC | a listener per stage pool, see [../deployment/transports.md](../deployment/transports.md) |
+| mesh (in the charts, refused by dfe-infra's bootstrap) | direct | gRPC | a listener per stage pool, see [../deployment/transports.md](../deployment/transports.md) |
 
-The source records bus-versus-direct only. Which bus (Kafka today) and which direct protocol (gRPC) are deployment facts, so a second bus provider joins behind the same `transport: bus` value without a change to the source model.
+The source records bus-versus-direct only. Which bus (Kafka) and which direct protocol (gRPC) are deployment facts, so a second bus provider joins behind the same `transport: bus` value without a change to the source model.
 
 ## Naming is generated, never typed
 
@@ -81,7 +81,7 @@ The source records bus-versus-direct only. Which bus (Kafka today) and which dir
 |---|---|---|
 | landing topic | `<label>_land` on the landing label, so `main_land` for a main-pushing fetcher | apps.yaml `source_binding` |
 | transformed topic | `<source>_load` | apps.yaml `source_binding` |
-| app instance (per-source apps only) | `dfe-<component>-<source>`, for example `dfe-transform-vrl-auth` | the instance overlay's `fullnameOverride` (and `component` for the dfe-common charts); stack-wide apps such as the receiver carry no suffix |
+| app instance (per-source apps only) | `dfe-<component>-<source>`, for example `dfe-transform-vrl-auth` | the instance overlay's `fullnameOverride` (and `component` for the dfe-common charts). Stack-wide apps such as the receiver carry no suffix |
 | Service and port per app | manifest `endpoints` | apps.yaml |
 | unmatched records | source `main`, table `main` | the main flow |
 
@@ -123,7 +123,7 @@ sequenceDiagram
   S->>P: rolling update, maxUnavailable 0, no downtime
 ```
 
-Without a webhook Argo polls every 300 s with up to 60 s jitter, so a routing change takes 5 to 9 minutes to reach a pod; with the Forgejo-to-Argo webhook it takes seconds plus the kubelet's ConfigMap sync of about a minute.
+Without a webhook Argo polls every 300 s with up to 60 s jitter, so a routing change takes 5 to 9 minutes to reach a pod. With the Forgejo-to-Argo webhook it takes seconds plus the kubelet's ConfigMap sync of about a minute.
 
 Every app rolls on every config change, so nothing here depends on which app can reload which key: the apps that also apply a change in place (the receiver's routing, Vector's transform files) gain nothing extra from it. apps.yaml's `hot_reload` and `restart_paths` count only where no chart renders the config, on Compose, where they decide whether a write hands the operator a restart command.
 
@@ -135,7 +135,7 @@ Two reads carry the facts a console would otherwise have to guess at. `GET /api/
 
 ## The main flow
 
-With no sources defined, every record the receiver accepts is stamped `_source: main`, lands in the `main` table, and can be searched. The `main` source is a normal source whose match rule is `operator: always`: it has the deployment's transport, may carry a transform, and may be archived on the bus form. It is read and written at `/api/v1/sources/main` like any other source and the console gives it a card of its own; nothing about it is special code.
+With no sources defined, every record the receiver accepts is stamped `_source: main`, lands in the `main` table, and can be searched. The `main` source is a normal source whose match rule is `operator: always`: it has the deployment's transport, may carry a transform, and may be archived on the bus form. It is read and written at `/api/v1/sources/main` like any other source and the console gives it a card of its own. Nothing about it is special code.
 
 ## Adding a transform
 
@@ -148,6 +148,8 @@ A transform can also be a pipeline you run yourself. `engine: external` deploys 
 The engine serves two sorts of file it does not own. The reference pipelines the library and the console's copy-paste view show are pinned in dfe-infra `versions.yaml` under `content:`, and the engine chart materialises them into `/etc/dfe-engine/content` with one init container running the pinned app image. Neither a ConfigMap nor a Helm value carries them, because either form re-serialises them into etcd on every Argo sync.
 
 The engine reads that directory through `DFE_ENGINE_LIBRARY_SEED_DIR`, which points at `<mount>/library`, laid out by artefact kind. Every file under it becomes a library artefact at startup: created when absent, published as a new version only when the pinned content differs from every version already in the series, and tagged `stack`. Seeded artefacts carry the group `stack` and the label `origin=stack`, so shipped content lists apart from authored content, and a version somebody published themselves stays where it is. The seed is idempotent across restarts, so a deployment that restarts for unrelated reasons writes nothing.
+
+## The source catalogue
 
 The source catalogue is the `catalogue/` tree of the dfe-schemas package the engine installs. Each file is the `POST /sources` write body for one source. A create with no intake takes the first of fetcher, beats and receiver the entry lists, because an Elastic-shipped event carries `data_stream.dataset` and no `_source` label. The engine reads the installed package, never the seeded schemas volume, because the seed never deletes and a dropped entry would survive there. The format is the Catalogue section of the dfe-schemas README, and a file that breaks it is left out with one warning naming it.
 

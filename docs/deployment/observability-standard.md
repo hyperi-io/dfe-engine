@@ -50,7 +50,7 @@ On Docker, `DFE_OTEL_EXPORTER_ENDPOINT` plays the same part. A profile that decl
 
 ## Logs
 
-Apps write structured JSON logs to stdout. The scalo logger is the reference for the output contract, masking of sensitive values included: scalo-py's `docs/core-pillars/LOGGING.md` and scalo-rs's `docs/core-pillars/logging.md`. A component in another language matches that output, not that code.
+Apps write structured JSON logs to stdout. The scalo logger is the reference for the output contract, masking of sensitive values included: scalo-py's `docs/core-pillars/logging.md` and scalo-rs's `docs/core-pillars/logging.md`. A component in another language matches that output, not that code.
 
 Stdout is the log path, so an app needs no OTLP logging SDK to reach `otel_logs`.
 
@@ -83,11 +83,15 @@ The runner has no HTTP listener, so nothing scrapes it. It pushes on the OTLP en
 
 A ClickHouse the runner cannot use never ends the process. At startup an outage (`reason=connection`), a refused login (`reason=authentication`, the runner's user not made yet) or a full server (`reason=capacity`) is retried on the `clickhouse.resilience` back-off, jittered and with no budget, and a tick that hits either is skipped until the next poll. Each one adds 1 to `dfe_hunt_clickhouse_unavailable_total` with `stage` `connect` or `tick`, and the outage logs one WARN line when it starts.
 
+## Failed fires and the detection cap
+
 A fire that fails holds its watermark, so the same fire stays due. The runner retries `hunts.failure_backoff_initial_seconds` (default 30, env `DFE_ENGINE_HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS`) after the first failure, doubling to `hunts.failure_backoff_max_seconds` (default 600, env `DFE_ENGINE_HUNTS_FAILURE_BACKOFF_MAX_SECONDS`), jittered. Each failure adds 1 to `dfe_hunt_fire_failures_total` with `reason` set to the ClickHouse error category (`not_found` for a missing table) or the hunt's own refusal (`empty_query`, which one refused rule also gives, `no_customers`, `unknown_customers`), and each held fire adds 1 to `dfe_hunt_fires_held_total`. The failure logs one line when it starts, again when its cause changes and every `hunts.failure_reminder_seconds` (default 3600, env `DFE_ENGINE_HUNTS_FAILURE_REMINDER_SECONDS`) while it lasts, and one INFO line when the hunt runs again. A missing table logs at WARN, since the hunt runs once the table is created, and any other cause at ERROR. An operator's run-now goes through the wait once.
 
 A rule compiled into a hunt writes at most `hunts.max_detections_per_run` detection rows per run (default 1000, env `DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN`), cut to `hunts.max_detections_per_run_ceiling` (default 10000, env `DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING`). A rule that matches more writes the cap plus one summary row: nil `matched_uuid`, `_json` of `{"dfe_capped": true, "matched": N, "written": cap, "rule_id": ...}`, and an `_org_id` only when every match shares one. The run logs one WARN line with the counts, adds 1 to `dfe_hunt_detections_capped_total` and adds the unwritten matches to `dfe_hunt_detections_dropped_total`.
 
 The watermark still advances and the run still records as `completed`, so the same flood is not re-run whole next fire. The next fire's overlap re-reads the end of it, and writes up to the cap again from the matches the cap left out there. A hunt that carries a direct `query` rather than `rules` runs uncapped, and says so in an INFO line each time its specs load.
+
+## Late rows: the safe horizon and the overlap
 
 A row whose `_timestamp_load` is inside a fire's window but which has not reached the replica the hunt reads is otherwise never matched. Two layers stop that, both on by default:
 
@@ -113,4 +117,4 @@ Both deployments ship a self-monitoring check beside the core data-path test.
 - dfe-infra: `argocd/values/common.yaml` (`telemetry`, `otel`, `clickhouse`), `argocd/values/apps/_common.yaml` (`telemetry.otlpEndpointTemplate`), `helm/charts/otel-collector/`
 - dfe-docker: <https://github.com/hyperi-io/dfe-docker/blob/main/docs/observability.md>, <https://github.com/hyperi-io/dfe-docker/blob/main/config/otel-collector/config.yaml>
 - scalo-rs: `charts/scalo-service/templates/_telemetry.tpl`, `docs/core-pillars/logging.md`
-- scalo-py: `docs/core-pillars/LOGGING.md`
+- scalo-py: `docs/core-pillars/logging.md`

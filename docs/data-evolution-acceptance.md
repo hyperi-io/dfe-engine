@@ -36,16 +36,16 @@ for its number.
 suite goes red the day that issue is fixed, which is how it gets removed.
 
 `part` says the test covers less than the row claims. 2.2 asserts the DDL is
-rendered and the table created; that the receiver reloads in place is the flow
+rendered and the table created. That the receiver reloads in place is the flow
 suite's routing check, and that records route by it is 2.3. 2.6 applies the ALTER
 directly rather than through a derived-schema edit, which is what 2.4 and 2.5
 cover. 1.2 re-imports into the SAME deployment under a second path, which proves
 the bundle carries what the import needs but not that it lands in a deployment
 that has never seen the schema -- that needs a second stack.
 
-No step is `none` any more. 2.8 drives the source that already has a transform instance rather than creating a second one, because Compose declares one service per transform app and binds it at deploy -- so it proves a different ENGINE on the same corpus, not a second binding. It also reads that source's match rule off the API instead of assuming one, since the source belongs to the deployment.
+2.8 drives the source that already has a transform instance, because Compose declares one service per transform app and binds it at deploy. So it proves a different engine on the same corpus, never a second binding. It reads that source's match rule off the API, since the source belongs to the deployment.
 
-Stage 3 was listed here as unable to pass at all, on the grounds that a derived schema had no way to say "stop populating `_json`". It has one: `capture_json: false` with `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`. 3.1 passes. 3.2 and 3.3 are xfail on dfe-engine#513 -- the deploy writes `table_capture_modes` and reports `restart_required: []`, but the loader logs no config reload, so the mode only takes effect once it is restarted by hand.
+A derived schema stops population with `capture_json: false` and `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`. 3.2 and 3.3 are xfail on dfe-engine#513: the deploy writes `table_capture_modes` and reports `restart_required: []`, but the loader logs no config reload, so the mode takes effect only once it is restarted by hand.
 
 ## Three carry the weight
 
@@ -71,7 +71,7 @@ One corpus of raw Cisco syslog feeds all three transforms -- transform-vrl,
 transform-vector and transform-elastic -- and each must produce the same typed
 columns.
 
-Two things to settle before building:
+Two constraints on that corpus:
 
 - **Input format.** Our VRL consumes the DFE 2.1 Kafka format
   (`{message, tags, timestamp}`) with a raw syslog line in `message`.
@@ -84,6 +84,6 @@ Two things to settle before building:
 The VRL also needs the `timezones.csv` enrichment table, and optionally
 `._conf.tz_offset` and `._conf.tz_map`.
 
-That is the target. 2.7 posts the Cisco IOS module alone today, through whichever
-transform app `DFE_E2E_TRANSFORM` names; widening it to all three at once is what
-turns it into the fixture above.
+2.7 posts the Cisco IOS module alone, through whichever transform app
+`DFE_E2E_TRANSFORM` names. Widening it to all three at once turns it into the
+fixture above.

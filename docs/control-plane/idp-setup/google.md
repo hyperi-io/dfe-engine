@@ -2,8 +2,6 @@
 
 DFE asks for two things from your Google Workspace: your users sign in to DFE with their Google account, and DFE reads which Google groups each user is in, so your groups decide their DFE roles. You set this up once in Google Cloud. Nothing is needed per user.
 
-Console paths checked 2026-10-10 against Google's documentation.
-
 The DFE operator who sent you this page gives you the redirect URI. It looks like this, and you paste it exactly as given:
 
 ```text
@@ -114,7 +112,7 @@ source_id: "<Cloud Identity group id>"
 
 Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google refuses it.
 
-## Vendor references
+## Google references
 
 - Cloud Identity API setup: <https://docs.cloud.google.com/identity/docs/how-to/setup>
 - OAuth consent screen: <https://developers.google.com/workspace/guides/configure-oauth-consent>

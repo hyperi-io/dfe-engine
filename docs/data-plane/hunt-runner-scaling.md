@@ -40,10 +40,10 @@ otherwise lives only in a running worker's memory (loaded from the gitops
 hunt configs). At zero workers there is nobody to ask.
 
 So the schedule is MATERIALISED into a small ClickHouse table, `hunt_schedule`, at
-config-deploy time. The scaler then reads it directly. Three tables already exist
-for coordination (`ch_coordinator.py`): `hunt_lease`, `hunt_watermark`,
-`hunt_state`. `hunt_schedule` is the fourth, and the only one written outside the
-worker loop.
+config-deploy time. The scaler then reads it directly. The runner's other tables
+(`src/dfe_engine/hunts/ch_coordinator.py`) are `hunt_lease`, `hunt_watermark`,
+`hunt_state`, `hunt_run` and `hunt_runner_heartbeat`. `hunt_schedule` is the only
+one written outside the worker loop.
 
 ```text
 hunt_schedule(hunt_id, interval_seconds, phase_offset, enabled, updated)
@@ -88,23 +88,23 @@ Autoscaling (when the BETA is enabled) is only safe if KEDA's view of "due"
 never diverges from a worker's. It cannot, because both compute the same
 thing from the same inputs:
 
-1. **Parity, tested.** The scaler predicate equals `runner.tick`'s own gate (via
+1. Parity, tested. The scaler predicate equals `runner.tick`'s own gate (via
    `schedule.latest_fire` + the watermark + lease checks) across a full matrix of
    (hunt_id, interval, now, watermark, lease), and the SQL implements that
    predicate against real ClickHouse - counting exactly the runnable hunts,
    excluding tombstoned / future-watermark / leased hunts, and returning 0 when
    every hunt is caught up.
-2. **Single source of truth for the offset.** The materialiser computes
+2. Single source of truth for the offset. The materialiser computes
    `phase_offset` with the same `schedule.phase_offset` the worker uses, so the two
    can never drift. Change the offset algorithm once and both move together.
-3. **Gate on the signal, not a timer.** KEDA polls the backlog query (via the
+3. Gate on the signal, not a timer. KEDA polls the backlog query (via the
    shim - a real readiness signal), it does not race a clock. Worst-case wake
    latency is
    `pollingInterval + pod-start`. For hunts (minute-plus intervals) that is
    immaterial. This is the "gate on the real condition" rule from the testing
    standard applied to autoscaling.
-4. **Self-healing.** If a worker claims a hunt then dies before writing the watermark, its lease expires (`lease_seconds`, default 300) and the fire is still owed (`watermark < fire`), so the scaler keeps >=1 worker and the hunt is reclaimed. Nothing double-runs (a hunt run twice writes and notifies twice): a claim stands only if acknowledged within a settle of its free read and still the latest row after it. A later claim is never released, as it may sit over the winner, but it holds nothing, so the next poll claims again.
-5. **No thundering herd.** The phase offset spreads same-interval hunts across the
+4. Self-healing. If a worker claims a hunt then dies before writing the watermark, its lease expires (`lease_seconds`, default 300) and the fire is still owed (`watermark < fire`), so the scaler keeps >=1 worker and the hunt is reclaimed. Nothing double-runs (a hunt run twice writes and notifies twice): a claim stands only if acknowledged within a settle of its free read and still the latest row after it. A later claim is never released, as it may sit over the winner, but it holds nothing, so the next poll claims again.
+5. No thundering herd. The phase offset spreads same-interval hunts across the
    interval, so `due_count` rises gradually and KEDA scales out smoothly rather
    than all-at-once at the boundary. The offset falls in the first
    `hunts.phase_spread_fraction` of the interval (default 0.8, env
@@ -112,7 +112,9 @@ thing from the same inputs:
    the materialised schedule all read it, so republish the schedule
    (`dfe-hunt-runner materialise`) after changing it.
 
-Bounded catch-up: a fire stays owed until its watermark is written, so a worker
+## Bounded catch-up
+
+A fire stays owed until its watermark is written, so a worker
 that ticks inside `[boundary, boundary+offset)` runs the previous interval's fire
 if nothing ran it, and the scaler counts it the same way. Without that, a hunt
 whose offset sits between two poll ticks (a 46s offset polled at :00/:15/:30/:45)
@@ -125,14 +127,14 @@ or a resident worker.
 This is the point of the pull-based design. Once deployed, the running system needs
 only ClickHouse:
 
-- **Workers** read hunt defs from the gitops config (mounted / cloned), coordinate
-  through the four CH tables, and execute queries against CH. No engine call on the
+- Workers read hunt defs from the gitops config (mounted / cloned), coordinate
+  through the coordination tables, and execute queries against CH. No engine call on the
   hot path.
-- **KEDA** reads `hunt_schedule` + the coordination tables from CH via the
+- KEDA reads `hunt_schedule` + the coordination tables from CH via the
   `dfe-keda-shim` - a separate, distinctly-labelled pod running the SAME
   engine container image under a different entrypoint (`dfe-keda-shim run`,
   not the live `dfe-engine` API service). No call to the running engine API.
-- **The engine's only role is at CONFIG-DEPLOY time**, not runtime: materialise
+- The engine's only role is at CONFIG-DEPLOY time, not runtime: materialise
   `hunt_schedule` when the hunt config changes, with the one-shot, idempotent
   `dfe-hunt-runner materialise`. The charts do not run it (see below).
 
@@ -146,8 +148,8 @@ only ClickHouse is guaranteed present.
 
 ### Coordination needs a SINGLE LOGICAL ClickHouse (scale-tier requirement)
 
-The four coordination tables are the shared source of truth every worker and KEDA
-read/write. That only works if all of them see the SAME tables. On the **scale
+The coordination tables are the shared source of truth every worker and KEDA
+read and write. That only works if all of them see the SAME tables. On the **scale
 tier's multi-node cluster behind a round-robin load balancer**, a plain
 `ReplacingMergeTree` (and a plain `CREATE DATABASE`) would land on one node, so
 workers whose connections land on other nodes would see an empty or absent table and
@@ -224,7 +226,9 @@ spec:
         valueLocation: "value"
 ```
 
-**The fail-safe** (`dfe_engine/keda_shim/shim.py`, `QueryShim.run`): every query
+## The shim's fail-safe
+
+The fail-safe (`src/dfe_engine/keda_shim/shim.py`, `QueryShim.run`): every query
 caches its last-good integer per (query, params). On ANY failure - CH
 unreachable, timeout, a bad query - the shim returns the CACHED value, so KEDA
 sees no change and the pod count FREEZES at current, so it can never run
@@ -239,7 +243,7 @@ Other notes: the shim is a separate, distinctly-labelled pod
 image under a different entrypoint - it is NOT the live engine API, so
 hunt-runner scaling still has no dependency on the engine service being up.
 Queries (including the backlog query's clamp/cold-hold/timeout) are
-config-driven (`keda_shim/queries.yaml` + an optional mounted override), so a
+config-driven (`src/dfe_engine/keda_shim/queries.yaml` + an optional mounted override), so a
 schema change or a tuning change is a config edit, not a shim rebuild.
 
 ### Proving it: the artificial scale test
@@ -268,18 +272,18 @@ submit and coordinate concurrently and reliably), not CPU/memory - and the
 large majority of deployments need exactly one pod. So the default is
 deliberately simple:
 
-- **`huntRunner.enabled` (default `true` on every tier):** deploys `dfe-hunt-runner` as ONE steady pod
+- `huntRunner.enabled` (default `true` on every tier): deploys `dfe-hunt-runner` as ONE steady pod
   (`replicas: 1`, no ScaledObject at all). This is the resting state for the
   large majority of deployments - a single always-on pod, not scale-to-zero.
-- **`huntRunner.autoscaling.enabled` (default `false`, BETA, keep it off,
-  see the top of this page):** opts into the ScaledObject described above. `replicas` is then omitted from the
+- `huntRunner.autoscaling.enabled` (default `false`, BETA, keep it off,
+  see the top of this page): opts into the ScaledObject described above. `replicas` is then omitted from the
   Deployment (KEDA owns the count) and the pod count floats between
   `minReplicaCount` (default **1**, not 0 - set it to `0` explicitly via
   values to additionally opt into scale-to-zero) and `maxReplicaCount`
   (default 5), driven by the due backlog. Work still divvies up safely across
   N pods via the existing `hunt_lease` mutual exclusion - KEDA picks the pod
   count, the leases decide who does what, so nothing double-runs.
-- **Disabled (operator choice):** set `huntRunner.enabled: false` in the
+- Disabled (operator choice): set `huntRunner.enabled: false` in the
   deploy overlay. No pod and no ScaledObject are rendered, so hunts do not fire.
   Re-enable by restoring the dial - the schedule + watermarks are still in
   ClickHouse, so the runner resumes cleanly from the last committed window.

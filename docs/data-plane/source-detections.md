@@ -137,5 +137,5 @@ views:
 
 A converted Sigma rule becomes a DFE rule tied to the source, querying the
 `{source}_sigma` view. The provider pipeline that keeps the rule catalogue
-current is [sigma.md](sigma.md); the mapping layer itself is
+current is [sigma.md](sigma.md). The mapping layer itself is
 [field-mapping.md](field-mapping.md).

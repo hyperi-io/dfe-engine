@@ -9,9 +9,8 @@ wheel), registries included, and the engine keeps no copies.
 
 This document is written for **data subject matter experts** -- people who
 understand their data, their queries, and their retention requirements. You
-do NOT need to be a ClickHouse expert. The schema system handles ClickHouse
-internals (codecs, index tuning, Nullable wrapping, type widths) under the
-hood. You pick meaningful types and describe how your data will be queried.
+do NOT need to be a ClickHouse expert. The schema system picks the codecs,
+indexes, Nullable wrapping and type widths. You pick meaningful types and describe how your data will be queried.
 The engine does the rest.
 
 If you need a specific ClickHouse type that the primitives don't cover,
@@ -39,18 +38,15 @@ from `system.columns` at runtime. There is nothing in between.
 Schema changes flow in one direction:
 
 ```text
-Source YAML (intent) → engine generates DDL → ClickHouse (deployed truth)
-                                                    ↑
-                                        Rust K8s services read at runtime
-                                        (loader, archiver -- ONLY SSoT)
+Source YAML (intent) -> engine generates DDL -> ClickHouse (deployed truth)
+                                                     ^
+                                        dfe-loader reads it at runtime
 ```
 
-The Rust K8s services at scale **slave from the deployed ClickHouse
-schema ONLY**. They read column types, comments, and table metadata
-from `system.columns` at runtime -- never from YAML, config files, or
-any intermediate store. This means there is **never an in-flight
-mismatch**: the engine deploys DDL, ClickHouse stores it, Rust services
-read it. No sync, no cache invalidation race, no drift.
+dfe-loader reads column types, comments and table metadata from
+`system.columns` at runtime, never from the YAML. It caches them for
+`schema.cache_ttl_secs`, so an applied change reaches it on the next refresh
+([schema-sync.md](schema-sync.md)).
 
 ### Schema Format: YAML
 
@@ -68,84 +64,44 @@ These are data files, not schema definitions.
 |-------|--------|
 | Source created | Engine generates `CREATE TABLE` from common header + source schema |
 | Schema field added | Engine generates `ALTER TABLE ADD COLUMN` |
-| Schema field modified | Engine generates `ALTER TABLE MODIFY COLUMN` (type/codec/comment) |
+| Index or TTL changed | The schema apply drops and re-adds the index, or moves the TTL. A changed column type is drift, applied only with `dfe schema apply --allow-drift` ([schema-bootstrap.md](schema-bootstrap.md)) |
 | Source disabled | No DDL change -- table stays, no new data |
 | Source deleted | Table preserved -- manual `DROP TABLE` if needed |
 
-The deployed ClickHouse table is always authoritative. If someone modifies
-the table directly (via SQL), the engine detects drift on next schema
-operation and can reconcile.
+The deployed ClickHouse table is authoritative. A change made to it directly is
+reported as drift by the next schema plan or apply.
 
 ---
 
-## Four axes
+## The axes
 
-A schema column definition has **four independent axes**:
+A schema column definition has independent axes, each optional where it has a
+default, plus the loader directive in `expr`:
 
 ```text
-type + attribute + use_case + comment (includes loader directives)
+type + cardinality + attribute + use_case, with expr (the loader directive) and comment (prose)
 ```
-
-Each axis is optional where it has sensible defaults.
 
 ---
 
 ## Schema Definition Format (YAML)
 
+The common header columns come from the profile (`common-header/` in
+dfe-schemas, see "Common Header Profiles" below). A meta schema declares the rest:
+
 ```yaml
 # meta_schema.yaml
 columns:
-  - name: _timestamp_load
-    type: timestamp
-    default: "now64(3)"
-    order: 0
-    comment: "@generated: now64(3)"
-
-  - name: _timestamp
-    type: datetime
-    use_case: range
-    order: 1
-    comment: "@source: timestamp | now()"
-
-  - name: _uuid
-    type: uuid
-    default: "generateUUIDv7()"
-    comment: "@generated: generateUUIDv7()"
-
-  - name: _org_id
-    type: string
-    cardinality: low
-    use_case: dimension
-    comment: "@source: org_id"
-
-  - name: _source
-    type: string
-    cardinality: low
-    use_case: dimension
-    comment: "@source: first(_source) | topic_name"
-
-  - name: _raw
-    type: text
-    use_case: substring_search
-    comment: "@captured: raw_payload"
-
-  - name: _json
-    type: json
-    comment: "@captured: raw_payload as JSON"
-
-  - name: _tags
-    type: json
-    comment: "@source: first(tags/_tags/meta/metadata.tags)"
-
   - name: user_name
     type: string
     use_case: dimension
-    comment: "@source: first(user_id/uid/id)"
+    expr: "@source: first(user_id/uid/id)"
+    comment: "User identifier"
 
   - name: source_ip
     type: ip
     use_case: range
-    comment: "@source: src_ip"
+    expr: "@source: src_ip"
 
   - name: severity
     type: string
@@ -158,7 +114,7 @@ columns:
 
   - name: event_id
     type: integer
-    comment: "@source: event_id"
+    expr: "@source: event_id"
 
   - name: latency_ms
     type: float
@@ -176,7 +132,8 @@ columns:
 | `use_case` | No | Query pattern hint -- determines indexing (see below) |
 | `default` | No | DEFAULT expression |
 | `order` | No | Position in ORDER BY / PRIMARY KEY |
-| `comment` | No | Human description + loader directives |
+| `expr` | No | The loader directive (`@source: ...`), see below |
+| `comment` | No | Human description. Never a directive |
 | `ch_override` | No | Exact ClickHouse type -- bypasses primitive mapping |
 
 ---
@@ -417,18 +374,16 @@ at validation time.
 
 Each primitive has a default nullability (defined in the type registry):
 
-- **Nullable by default:** `string`, `text`, `integer`, `float`, `datetime`, `date`, `ip`, `uuid`, `json`, `geo_point`
-- **NOT null by default:** `timestamp`, `boolean`, `enum`
+- Nullable by default: `string`, `text`, `integer`, `float`, `datetime`, `date`, `ip`, `uuid`, `json`, `geo_point`
+- NOT null by default: `timestamp`, `boolean`, `enum`, `map`, `vector`
 
 Override with `nullable` or `not_null` in the attribute list.
 
 ### Why nullable is not the default for everything
 
 ClickHouse stores `Nullable(T)` as two columns -- the data column plus a
-UInt8 bitmap tracking which rows are null. This **doubles storage** and
-**halves query speed** (measured: 229M rows/s -> 98M rows/s on GROUP BY
-with Nullable(Int64)). Booleans and `timestamp` are non-null by default
-for this reason.
+UInt8 bitmap tracking which rows are null -- so it costs storage and query
+speed. Booleans and `timestamp` are non-null by default for this reason.
 
 **Design decision: ORDER BY keys must not be Nullable.** ClickHouse
 refuses a Nullable column in a sorting key unless the merge-tree setting
@@ -481,8 +436,8 @@ your query pattern.
 ### Use Cases
 
 A use case names the question you ask the column, never the ClickHouse index
-that answers it. You declare the question; the engine picks the primitive, and
-can pick a different one on a later ClickHouse without your schema changing.
+that answers it. You declare the question. The engine picks the index, and can
+pick a different one on a later ClickHouse without your schema changing.
 
 | Use Case | The question | Example Columns |
 |----------|------------|-----------------|
@@ -532,21 +487,19 @@ vocabulary.
 
 | Use Case | ClickHouse Index Generated | Granularity | Notes |
 |----------|---------------------------|-------------|-------|
-| `dimension` | `set(0)` | 4 | Exact distinct values per granule |
+| `dimension` | `set(0)`, or `bloom_filter` on a Nullable column | 4 | Exact distinct values per granule |
 | `exact_match` | `set(0)` on `cardinality: low`, else `bloom_filter` | 4 | The bloom filter is probabilistic -- false positives, no false negatives |
 | `range` | `minmax` | 4 | Stores min/max per granule |
-| `word_search` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
+| `word_search` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index. Deterministic, no false positives, row-level filtering |
 | `substring_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
 | `key_search` | two indexes, `text(tokenizer=array)` over `mapKeys(col)` and `mapValues(col)` | 1 | A text index refuses a `Map` column itself, so the keys and the values are indexed apart |
-| `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 1 | `hnsw` is the only method the pinned ClickHouse implements |
+| `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 100000000 | One index per part. `hnsw` is the only method the pinned ClickHouse implements |
 | *(empty)* | No index | -- | |
 
 **Note on text indexes:** `word_search` and `substring_search` generate the GA
-text index (inverted index, v26.2+) instead of the older bloom-filter based
-`tokenbf_v1` and `ngrambf_v1`. The text index is deterministic (no false
-positives), provides row-level filtering instead of granule-level, and is
-10-100x faster for text search workloads. There is no pre-25.10 variant: every
-table gets the text index.
+text index instead of the older bloom-filter based `tokenbf_v1` and
+`ngrambf_v1`. The text index is deterministic (no false positives) and filters
+at row level rather than granule level. Every table gets the text index.
 
 Every index, partition and TTL clause comes from dfe-schemas, which owns the one
 table renderer and the DDL catalogue (`registries/ddl.yaml`). The engine builds
@@ -560,45 +513,50 @@ different tokenizers. `word_search` uses word-level tokenization
 `substring_search` uses character n-grams -- good for fragments inside longer
 strings, like partial hostnames or embedded error codes.
 
-**Retention (TTL):** every time-series table gets a TTL, 90 days unless the
+Retention (TTL): every time-series table gets a TTL, 90 days unless the
 deployment sets `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS` (`clickhouse.default_ttl_days`,
 0 = no default) or an admin sets a console value (below). Precedence is the source's
 `schema.ttl_days`, then the table's own dfe-schemas definition, then the console
 value, then the deployment default. State tables (the
 detection checkpoint, the engine's internal and hunt-coordination tables) keep
-whatever their definition declares and never take the default. The schema apply refuses a changed TTL on one of the engine's own tables as drift rather than expiring rows at boot; an undeclared TTL never removes a live one. Shortening a TTL expires the rows
+whatever their definition declares and never take the default. The schema apply refuses a changed TTL on one of the engine's own tables as drift rather than expiring rows at boot. An undeclared TTL never removes a live one. Shortening a TTL expires the rows
 older than the new value.
 
-**Changing the default:** an admin sets it with `PUT /api/v1/system/retention` (`system:write`, which only the `admin` role holds by default); `GET` reports the effective value, the console value and the deployment value. The console value is committed to the deploy repo at `governance/settings/retention.yaml` (`default_ttl_days`), so it survives the loss of the engine and every change is an audited commit; `null` clears it. The PUT applies the new value in the same request to every table that follows the default, the engine's own time-series tables and each deployed source's table, with `ALTER TABLE ... MODIFY TTL` (`REMOVE TTL` for 0). Every later build, plan, deploy and boot reads the same value.
+Changing the default: an admin sets it with `PUT /api/v1/system/retention` (`system:write`, which only the `admin` role holds by default). `GET` reports the effective value, the console value and the deployment value. The console value is committed to the deploy repo at `governance/settings/retention.yaml` (`default_ttl_days`), so it survives the loss of the engine and every change is an audited commit. `null` clears it. The PUT applies the new value in the same request to every table that follows the default, the engine's own time-series tables and each deployed source's table, with `ALTER TABLE ... MODIFY TTL` (`REMOVE TTL` for 0). Every later build, plan, deploy and boot reads the same value.
 
 On a restart the engine brings every deployed source's table to the effective default, but the schema apply refuses a changed default on its own tables, so after changing `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS` send the PUT with `null` to apply it there. `dfe schema plan` and `dfe schema apply` read the deployment settings, never the deploy repo, so while a console value is set they report the engine's time-series tables as TTL drift, and `dfe schema apply --allow-drift` rewrites those TTLs to the deployment default.
 
 ---
 
-## Comment Axis: Loader Directives
+## Loader directives (`expr`)
 
-The `comment` field serves double duty:
+A column's `expr` carries the `@` directive that tells dfe-loader how to fill it,
+and `comment` the human description. Both land in the ClickHouse column COMMENT,
+joined by ` - `.
 
-1. **Human documentation** -- plain text description
-2. **Loader directives** -- `@` prefixed expressions that tell dfe-loader
-   how to populate the field
+### The directives dfe-loader parses
 
-### Directive Types (from dfe-loader DDL Expression Language)
+dfe-loader's parser (`src/column_meta/mod.rs`) knows six directives and skips any
+other word:
 
 | Directive | Purpose | Example |
 |-----------|---------|---------|
-| `@source: field` | Copy from source data | `@source: timestamp \| now()` |
-| `@source: first(a/b/c)` | First non-null from list | `@source: first(user_id/uid/id)` |
-| `@generated: expr` | ClickHouse DEFAULT -- loader omits field | `@generated: now64(3)` |
-| `@renamed: field` | Zero-copy field rename | `@renamed: logoriginal` |
-| `@captured: payload` | Raw payload sidecar | `@captured: raw_payload as JSON` |
-| `@computed: expr` | Derived/enriched value | `@computed: geoip(ip).country_code` |
+| `@source: field` | Copy from source data, with an optional `\| fallback` | `@source: timestamp \| now()` |
+| `@source: first(a/b/c)` | First present field from a list | `@source: first(user_id/uid/id)` |
+| `@renamed: field` | Source field path(s), the hand-written form of `@source` | `@renamed: logoriginal` |
+| `@computed: expr` | A CEL expression producing the value | `@computed: risk_score > 80` |
+| `@default: value` | Substitute when the field is null or absent | `@default: unknown` |
+| `@skip` | Leave the column out of the insert | `@skip` |
+| `@coerce: category` | Override the type category for coercion | `@coerce: <category>` |
+
+dfe-schemas also writes `@generated: <expr>` on a column ClickHouse fills from
+its DEFAULT, such as `_uuid`. The loader does not parse it.
 
 ### Precedence
 
-When the loader resolves field mappings, column comments have **highest
-precedence** -- above built-in presets and external remap files. This means
-the schema definition IS the authoritative field mapping.
+The loader's config cascade wins over a column COMMENT: per-table
+`column_directives`, then global `column_directives`, then the COMMENT
+(dfe-loader `src/column_meta/mod.rs`).
 
 ### Comments in DDL
 
@@ -606,17 +564,14 @@ These directives are emitted as ClickHouse column comments in the generated
 DDL:
 
 ```sql
-`_timestamp` DateTime64(3,'UTC') CODEC(Delta, ZSTD(1))
-    COMMENT '@source: timestamp | now()',
-`_raw` Nullable(String) CODEC(ZSTD(3))
-    COMMENT '@captured: raw_payload',
+`_timestamp` DateTime64(3,'UTC') CODEC(Delta, LZ4)
+    COMMENT '@source: timestamp | now() - Event timestamp from source data',
 `user_name` Nullable(String) CODEC(ZSTD(1))
-    COMMENT '@source: first(user_id/uid/id)',
+    COMMENT '@source: first(user_id/uid/id) - User identifier',
 ```
 
-The loader fetches column comments from `system.columns` and uses them to
-build its per-table field mapping. No separate mapping config needed -- the
-schema IS the mapping.
+The loader fetches column comments from `system.columns` and builds its
+per-table field mapping from them, under whatever its config cascade sets.
 
 ---
 
@@ -670,8 +625,11 @@ are added incrementally.
 Tables are tagged with profile metadata in the table comment:
 
 ```sql
-COMMENT '@schema_source: core | @schema_version: 2 | @profile: timeseries | @profile_version: 1'
+COMMENT '@profile: timeseries | @profile_version: <header version> | @<table>_version: <schema version>'
 ```
+
+The engine writes these tags on a source table (`DDLGenerator._table_comment`),
+and dfe-schemas the first two on a header-composed manifest table.
 
 Profile migrations (adding new common header fields) use `ALTER TABLE ADD
 COLUMN` -- safe, non-destructive, and automated.
@@ -682,9 +640,9 @@ COLUMN` -- safe, non-destructive, and automated.
 
 `dfe.all_sources` is a ClickHouse Merge table over `main` and each registered source's MergeTree table, so one Observe source reads every source's rows. Core manifest tables other than `main` (even under a source's name) and tables without `_org_id` are never members.
 
-It declares `_timestamp_load`, `_timestamp`, `_timestamp_received`, `_org_id`, `_source`, `_raw` and `_json`, typed as on `main`. A member lacking one reads its default: epoch 0 for a timestamp, NULL for a Nullable column. `_raw IS NULL` misreads a member without `_raw`, since ClickHouse answers it from the `_raw.null` subcolumn while `optimize_functions_to_subcolumns` is on; test `length(_raw)` or use `coalesce`. The virtual column `_table` names each row's member.
+It declares `_timestamp_load`, `_timestamp`, `_timestamp_received`, `_org_id`, `_source`, `_raw` and `_json`, typed as on `main`. A member lacking one reads its default: epoch 0 for a timestamp, NULL for a Nullable column. `_raw IS NULL` misreads a member without `_raw`, since ClickHouse answers it from the `_raw.null` subcolumn while `optimize_functions_to_subcolumns` is on. Test `length(_raw)` or use `coalesce`. The virtual column `_table` names each row's member.
 
-The engine rebuilds it after every source deploy or delete. At startup it rebuilds once the [schema bootstrap](schema-bootstrap.md) converges or is switched off, never after a failed pass. Each rebuild reads the registry as it stands then; concurrent rebuilds in one engine fold into one. A deleted source leaves the members while its table stays.
+The engine rebuilds it after every source deploy or delete. At startup it rebuilds once the [schema bootstrap](schema-bootstrap.md) converges or is switched off, never after a failed pass. Each rebuild reads the registry as it stands then. Concurrent rebuilds in one engine fold into one. A deleted source leaves the members while its table stays.
 
 Each rebuild applies the tenant row policy ([rbac.md](../control-plane/rbac.md)) to `all_sources` itself. Member tables keep their own policies, which also fence a read through it.
 
@@ -692,7 +650,7 @@ The engine registers it on every team as the Observe source `all_sources`, timed
 
 ## The `dlq` Table
 
-`dfe.dlq` holds the dead letters every app writes, kept 30 days. The engine registers it on every team as the HyperDX source `dlq`, timed on `_timestamp`, alongside `all_sources` and with the same retry. A source cannot be named `dlq`, `detection` or `repository`, since its table would be the core table of that name.
+`dfe.dlq` holds the dead letters every app writes, kept 30 days. The engine registers it on every team as the HyperDX source `dlq`, timed on `_timestamp`, alongside `all_sources` and with the same retry. A source cannot take the name of a table the core manifest owns, such as `dlq` or `detection`, since its table would be that core table.
 
 ---
 
@@ -726,12 +684,12 @@ FROM {db}.{source}
 - Sigma rules query the view (standard Sigma field names)
 - Field mapping is per-source (different sources map differently)
 - Zero storage overhead (view, not materialised table)
-- Mappings resolved by `sigma/source_mapper.py` from the source's field map and sigma view
+- Mappings resolved by `src/dfe_engine/sigma/source_mapper.py` from the source's field map and sigma view
 
 ### Sigma Mapping as Source Metadata
 
 The Source definition declares its naming-standard views in the generic
-`views` list; the sigma entry carries the logsource binding and overrides:
+`views` list. The sigma entry carries the logsource binding and overrides:
 
 ```yaml
 # sources/windows_audit.yaml
@@ -749,17 +707,18 @@ The engine generates the Sigma view from source schema + the sigma view entry.
 
 ## Elastic Index Template Converter
 
-The existing Elastic/OpenSearch index template converter generates a
-source meta schema from a supplied Elastic template JSON. This remains --
-but now outputs YAML in the Source schema format:
+The Elastic/OpenSearch index template converter
+(`src/dfe_engine/services/schema/elastic_schema_service.py`) generates a source
+meta schema from a supplied Elastic template JSON, as YAML in the Source schema
+format:
 
 ```text
 Elastic Template JSON
   │
   ▼
 Template Converter (dfe-engine)
-  │  Maps Elastic types → primitives
-  │  Maps Elastic analyzers → use_cases
+  │  Maps Elastic types -> primitives
+  │  Maps Elastic analyzers -> use_cases
   │  Preserves field hierarchy as flat columns
   │
   ▼
@@ -774,20 +733,16 @@ Attached to a Source definition
 
 | Elastic Type | Primitive | Use Case | Notes |
 |-------------|-----------|----------|-------|
-| `keyword` | `string` | `dimension` | Exact match filtering |
-| `text` | `text` | `word_search` | Searching for whole words |
-| `long` | `integer` | | Default Int64 matches |
-| `integer` | `integer` | | |
-| `short` | `integer` | | ch_override: Int16 if needed |
-| `byte` | `integer` | | ch_override: Int8 if needed |
-| `double` | `float` | | |
-| `float` | `float` | | ch_override: Float32 if needed |
-| `boolean` | `boolean` | | |
-| `date` | `datetime` | | |
+| `keyword`, `wildcard`, `version` | `string` | | No use case: cardinality is unknown |
+| `constant_keyword` | `string` | `dimension` | Bounded by definition |
+| `text`, `match_only_text` | `text` | `word_search` | Searching for whole words |
+| `long`, `integer`, `short`, `byte`, `unsigned_long` | `integer` | `range` | ch_override narrows if needed |
+| `double`, `float`, `half_float`, `scaled_float` | `float` | `range` | |
+| `boolean` | `boolean` | `dimension` | |
+| `date`, `date_nanos` | `datetime` | `range` | |
 | `ip` | `ip` | `range` | |
 | `geo_point` | `geo_point` | | |
-| `object` | `json` | | |
-| `nested` | `json` | | |
+| `object`, `nested`, `flattened`, anything else | `json` (nullable) | | |
 
 The converter is invoked when creating a Source from an existing Elastic
 data source -- it bootstraps the schema so the user doesn't start from

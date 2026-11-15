@@ -2,8 +2,6 @@
 
 DFE asks for two things from your Microsoft Entra ID tenant: your users sign in to DFE with their work account, and DFE reads which security groups each user is in, so your groups decide their DFE roles. You set this up once as an app registration. Nothing is needed per user.
 
-Console paths checked 2026-10-10 against Microsoft's documentation.
-
 The DFE operator who sent you this page gives you the redirect URI. It looks like this, and you paste it exactly as given:
 
 ```text
@@ -111,7 +109,7 @@ source_id: "<group object id>"
 
 Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Entra refuses it.
 
-## Vendor references
+## Microsoft references
 
 - Register an app: <https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app>
 - Add a redirect URI: <https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri>

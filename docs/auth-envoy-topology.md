@@ -1,215 +1,74 @@
 <!--
 Project:   DFE (Data Forensics Engine) - product suite
 File:      docs/auth-envoy-topology.md
-Purpose:   How the Envoy front auth layer works, and how it differs between
-           the Kubernetes and Docker deploy modes.
+Purpose:   How a request is authenticated at the edge proxy and by each app,
+           on Kubernetes and on Docker.
 Language:  Markdown
 License:   see repository LICENSE
 Copyright: HyperI / DFE contributors
 -->
 
-# DFE auth - the Envoy front layer (k8s vs docker)
+# DFE auth at the edge (k8s vs docker)
 
-DFE authenticates every request with **one signed JWT**, verified by **one Envoy
-front layer** that behaves **identically** in Kubernetes and Docker. Only the
-config delivery and the networking plumbing differ - the auth filter chain,
-signature verification and path routing are the same in both. So the auth path
-is authored once and tested once, and a token minted in one mode verifies in the
-other.
+The engine is the only issuer of the token the apps trust: an ES384 JWT, published through the engine's JWKS and carried in the `dfe_token` cookie or an `Authorization: Bearer` header. The engine and dfe-hyperdx verify that token themselves. The edge proxy routes requests, and only on Kubernetes can it also check a token, an opt-in for an external IdP's.
 
-This doc covers the Envoy side. For the identity model (who issues the JWT, the
-RBAC/group pivot, local-vs-OIDC), see the auth design notes referenced at the end.
-
-## Where Envoy sits
-
-DFE is served **single-origin**: one host, three upstreams behind it.
-
-- `/` -> dfe-ui (the shell)
-- `/observe/*` -> hyperdx (embedded chromeless)
-- `/api/*` -> dfe-engine (control plane, PDP, JWT issuer)
-
-Envoy is the single gateway in front of all three. Because it is one origin, the
-embed iframe is same-site (no third-party-cookie problem) and the JWT rides every
-request - page loads, XHR and streaming alike.
-
-## Request flow (identical in both modes)
+## One issuer, verified by each app
 
 ```mermaid
 flowchart LR
-    B([browser]) -->|"request + JWT (cookie/Bearer)"| E[Envoy front layer]
-    E --> V{"jwt_authn:<br/>signature valid?"}
-    V -->|no| R401[["401"]]
-    V -->|yes| S[strip client<br/>X-Oidc-* / Authorization]
-    S --> RT{route by path}
-    RT -->|"/"| UI[dfe-ui]
-    RT -->|"/observe/*"| HX[hyperdx]
-    RT -->|"/api/*"| EN[dfe-engine]
-    UI -.re-verify JWT.-> J[(JWKS)]
-    HX -.re-verify JWT.-> J
-    EN -.re-verify JWT.-> J
-    E -.remote_jwks fetch+cache.-> J
+    B([browser]) --> P[edge proxy<br/>Envoy]
+    P -->|/api/v1/*| EN[dfe-engine<br/>issuer + verifier]
+    P -->|/| UI[dfe-ui]
+    P -->|own host or listener| HX[dfe-hyperdx]
+    EN -->|/.well-known/jwks.json| J[(JWKS)]
+    HX -.->|verifies dfe_token| J
 ```
 
-There is **one issuer: the engine**. The engine mints every token the apps see -
-local logins directly, and external OIDC logins by acting as the relying party (it
-validates the IdP's token, then re-mints its own engine token). So Envoy's
-`jwt_authn` filter verifies a single provider - the engine JWKS - and the external
-IdP's token never travels past the engine.
+- Local login: `POST /api/v1/auth/login`, and the engine signs the JWT (`src/dfe_engine/api/v1/auth.py`).
+- External OIDC: the engine is the relying party. `/api/v1/auth/oidc/{provider}/login` redirects to the IdP, and the callback validates the IdP's token and mints an engine token (`src/dfe_engine/api/v1/oidc_login.py`). The IdP's token stays on the engine-to-IdP leg.
+- dfe-hyperdx authenticates from the `dfe_token` cookie dfe-ui shares across the domain, so the fork is its own enforcement point.
+- The engine believes proxy-set `X-Oidc-*` identity headers only with `DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS=true` (default off, `settings.py` `auth.trust_proxy_auth_headers`). Turn it on only where a proxy strips those headers from the client and the engine is reachable through that proxy alone.
 
-## What the one Envoy does
+The engine signs with ES384 (ECDSA P-384 with SHA-384), `api.jwt_algorithm`. Ed25519 is not used: at 128-bit security it is below the CNSA 2.0 target. The `kid` is the RFC 7638 JWK thumbprint and the algorithm is a setting, so a post-quantum signature such as ML-DSA can replace ES384 once JOSE and Envoy can verify it (`src/dfe_engine/auth/jwt_authority.py`).
 
-1. **Verify** - `jwt_authn` checks the JWT signature (**ES384** - ECDSA P-384
-   with SHA-384, `EC` keys) against the engine JWKS, plus issuer and
-   expiry. `remote_jwks` fetches and caches each provider's key set.
-2. **Sanitise** - strip any client-supplied `Authorization` and `X-Oidc-*`
-   headers before they reach an app, so identity cannot be forged by a caller.
-3. **Route** - single-origin path routing to the three upstreams.
-4. **Forward** - pass the verified JWT upstream; each app re-verifies it
-   (defence in depth) and reads the claims below.
-
-Envoy never mints a token. Issuance happens elsewhere (see "Issuance" below).
-
-## k8s vs docker
-
-Same binary, same filter chain, same auth behaviour. The differences are where
-Envoy sits and how it is configured.
-
-| | Kubernetes | Docker (dfe-docker) |
-|---|---|---|
-| What Envoy is | the gateway (a Deployment / Gateway-API data plane) behind the cloud load balancer | one `envoy` service in the compose file, on the shared docker network |
-| Config delivery | xDS / control plane (or a rendered static config) | a static `envoy.yaml` mounted into the container |
-| Upstreams (clusters) | k8s `Service`s (`dfe-engine`, `hyperdx`, `dfe-ui`) | other compose services, by container DNS name |
-| JWKS source (`remote_jwks`) | engine `Service` `/.well-known/jwks.json` | engine container `/.well-known/jwks.json` |
-| Path routing | Envoy does it (no separate ingress needed) | Envoy does it - this replaces the ingress docker does not have |
-| Scale / HA | N Envoy replicas | single container (sufficient for the docker tier) |
-| Reachability guard | NetworkPolicy: only Envoy may reach the app pods | docker network isolation: apps not published to the host, only Envoy is |
-
-The single most important consequence: **path routing is free from the ingress in
-k8s, but in docker Envoy provides it**. That is why the same component is used in
-both - it closes the docker gap rather than adding a second reverse proxy.
-
-## Issuance vs verification
-
-Envoy only verifies, routes, sanitises and forwards. The token is minted by the
-identity source:
-
-- **Local auth** - the browser posts to `/api/v1/auth/login` (Envoy routes it to
-  the engine); the engine validates the password and signs an **ES384** JWT.
-- **External OIDC** - the engine is the **relying party**:
-  `/api/v1/auth/oidc/{provider}/login` redirects to the IdP, and the callback
-  validates the IdP's token then **re-mints an engine ES384 JWT**. The IdP's token
-  stays on the engine<->IdP leg and never reaches the apps.
-
-Either way, the token Envoy (and every app) verifies is the **engine's** ES384
-token - one issuer, one JWKS. Merged mode is just both login routes enabled.
+The engine mints the key on first boot and stores it create-only, as a PKCS#8 PEM, in the scalo.secrets backend at `api.jwt_key_path`. The engine does not encrypt it, so at-rest protection is the backend's.
 
 ## What the token carries
 
-Every token carries `sub`; a login token adds `email` and `groups`, and the local
-login also carries `roles`, `org_id` and `org_ids`. The engine re-resolves roles
-from the group files on every request, so what a token asserts about them never
-decides an engine answer.
+Every token carries `sub`. A login token adds `email` and `groups`, and the local login also carries `roles`, `org_id` and `org_ids`. The engine re-resolves roles from the group files on every request, so what a token asserts about them never decides an engine answer.
 
 One claim exists for a peer rather than for the engine:
 
 | Claim | Value | Read by |
 |---|---|---|
-| `role` | `admin` for an account holding the engine's `admin` or `infra_admin` role, `member` for any other account, and `admin` on the engine's own `svc:dfe-engine` service token | dfe-hyperdx |
+| `role` | `admin` for `admin` or `infra_admin` at system scope and for the engine's own `svc:dfe-engine` token, `member` for an account whose roles allow `query:write`, `viewer` for any other | dfe-hyperdx |
 
-dfe-hyperdx gates deleting and restoring the shipped dashboards on `role`: it
-allows `admin` and `owner`, refuses any other value with 403, and falls back to
-plain team membership when there is no claim at all. So the engine always writes
-one - `member` is a refusal where a missing claim would be a pass. `owner` is in
-the fork's accepted set and the engine never mints it, having no team-owner role
-to map onto.
+The fork reads the same value from `GET /api/v1/auth/me` (`hyperdx_role`), resolved from the account's groups at that request, and falls back to the token's claim only when that answer carries none. `admin` (or `owner`, which the engine never mints) may change what the whole team sees, `member` may save searches and dashboards, and `viewer` is refused every write (`src/dfe_engine/auth/hyperdx_role.py`).
 
-## Reference config (illustrative)
+## Kubernetes: Envoy Gateway
 
-This is a reference layout of the shared filter chain. The `jwt_authn` provider
-block and the route table are identical across modes; the **only** per-mode delta
-is the cluster endpoints (Service DNS vs container names).
+dfe-infra's `helm/edge/gateway` chart configures Envoy Gateway.
 
-```yaml
-# jwt_authn: one provider - the engine is the single issuer
-http_filters:
-  - name: envoy.filters.http.jwt_authn
-    typed_config:
-      providers:
-        engine:
-          issuer: "https://<origin>/api"           # the engine is the only issuer
-          remote_jwks:
-            http_uri: { uri: "http://dfe-engine/.well-known/jwks.json", cluster: engine, timeout: 5s }
-            cache_duration: 600s
-          from_cookies: ["dfe_token"]              # browser flow; also from Bearer
-          forward: true                            # pass the verified JWT upstream
-      rules:
-        # login + JWKS + discovery are public (they issue / expose keys)
-        - match: { prefix: "/api/v1/auth/login" }
-        - match: { prefix: "/api/v1/auth/oidc/" }
-        - match: { prefix: "/.well-known/" }
-        # everything else requires a valid engine token
-        - match: { prefix: "/" }
-          requires: { provider_name: engine }
+| Concern | What the chart does |
+|---|---|
+| Routing | dfe-ui and the engine share one hostname, the engine on its `/api/v1` path families. dfe-hyperdx has its own hostname. |
+| Infra routes | Argo CD and the other infra-class routes carry an OIDC `SecurityPolicy` that requires one of the admin groups. Kafbat is the exception (`edgePolicy: false`, `ownLogin: true`): it runs its own OIDC login. |
+| Product routes | With `oidc.enabled: false`, the default, dfe-ui, the engine and dfe-hyperdx carry no edge OIDC policy and the apps check the engine token. Turned on, the engine route takes a `SecurityPolicy`, because the default `oidc.targetRoutes` names `dfe-engine`. dfe-hyperdx is left out on purpose: it is framed inside dfe-ui, where an interactive redirect cannot complete. |
+| Edge JWT (opt-in) | `jwtAuthn.enabled` (default `false`) adds Envoy's `jwt_authn` for an external OIDC issuer's Bearer token. It strips client `X-Oidc-*` headers first, then maps the token's claims into them. |
+| TLS | One `ClientTrafficPolicy`: TLS 1.2 minimum by default (1.3 for a high-security overlay), AES-256-GCM, P-384 ECDHE, and the hybrid ML-KEM group offered. |
+| Reachability | dfe-infra's `network-policies` chart (`templates/dfe-namespace.yaml`) admits ingress to the DFE namespaces only from the gateway namespace, the other DFE namespaces, KEDA on the shim port and the OTel collector. |
 
-# route table: single-origin path routing
-route_config:
-  virtual_hosts:
-    - name: dfe
-      domains: ["*"]
-      request_headers_to_remove: ["x-oidc-subject", "x-oidc-groups"]  # trust boundary
-      routes:
-        - match: { prefix: "/observe/" }
-          route: { cluster: hyperdx }
-        - match: { prefix: "/api/" }
-          route: { cluster: engine }
-        - match: { prefix: "/" }
-          route: { cluster: ui }
-```
+## Docker: one static Envoy config
 
-In k8s the `engine` / `hyperdx` / `ui` / `idp` clusters resolve to k8s `Service`s
-and the config is delivered by the gateway control plane; in docker they resolve
-to compose container names and the same block is mounted as `envoy.yaml`.
+dfe-docker's `config/proxy/envoy.yaml` runs the router filter only, with no token check:
 
-## Cryptographic posture (CNSA 2.0)
+- One listener sends `/api/v1/` to `dfe-engine:8000` and everything else to `dfe-ui:3000`.
+- A second listener serves the dfe-hyperdx embed from `dfe-hyperdx:8090`.
+- The auth profile adds three oauth2-proxy gates (`compose/oauth2-proxy.yml`).
 
-DFE targets CNSA 2.0 compliance where feasible - national-security deployment is
-in scope, so algorithm strength is chosen for compliance, not throughput. The
-user base is small and high-value, so signing and cipher CPU cost is not a
-constraint.
-
-- **JWT signature: ES384** (ECDSA P-384 + SHA-384) - the CNSA classical /
-  CNSA-2.0-transitional algorithm, verifiable across the whole chain (Envoy
-  `jwt_authn`, PyJWT, Node `jose`). Ed25519 is deliberately not used: at 128-bit
-  security it is below the CNSA target.
-- **Post-quantum (roadmap):** CNSA 2.0's target signature is ML-DSA-87 (FIPS
-  204), but it is not yet feasible for JWTs - the JOSE binding is an IETF draft,
-  Envoy `jwt_authn` cannot verify it, and its ~4 KB signature stresses
-  cookie/header limits. The design keeps algorithm agility (kid-tagged keys,
-  config-driven `alg`, multi-issuer JWKS) so ML-DSA (or the smaller FN-DSA when
-  standardised) is a config change, not a rewrite.
-- **Transport:** TLS 1.3, AES-256-GCM, SHA-384, P-384 curves, with hybrid ML-KEM
-  key exchange at the Envoy edge where the TLS stack supports it - the CNSA 2.0
-  key-establishment step that is feasible today.
-- **At rest:** the signing private key is AES-256 wrapped.
-
-Transport, certificate (P-384) and at-rest crypto are handled at the deployment
-layer; this document covers the app-signing (ES384 JWT) side.
-
-## Trust boundary
-
-The security root is the **JWT signature** (ES384), verified at Envoy *and* at each
-app - forging identity needs the signing key, so it does not depend on the
-deployer's network config being perfect. The network controls are defence in
-depth:
-
-- apps are reachable **only** via Envoy (NetworkPolicy in k8s; unpublished ports +
-  docker network in docker),
-- Envoy strips inbound `X-Oidc-*` / `Authorization` so a caller cannot inject
-  identity ahead of verification.
+The engine API is also published on the host's loopback, port `DFE_ENGINE_PORT` (default 8003), for local tools.
 
 ## See also
 
-- The DFE auth design (JWT authority, RBAC group pivot, local-vs-OIDC merged) -
-  auth design notes / `project_dfe_authz_standard` (agent memory).
-- The embedded hyperdx fork - the dfe-hyperdx repo, `docs/fork/` (README,
-  design, sync-cycle, leaving-upstream). It moved there with the fork itself.
+- The embedded HyperDX fork: the dfe-hyperdx repo, `docs/fork/`.
+- RBAC and sign-in: [control-plane/rbac-sign-in.md](control-plane/rbac-sign-in.md).
