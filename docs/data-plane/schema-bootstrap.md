@@ -7,7 +7,7 @@ not a Job, not an init container, not an app at runtime, not the OTel collector.
 
 `dfe-schemas` is where those objects are DEFINED. `manifest.yaml` lists every one
 of them in dependency order, and the engine iterates that list and nothing else.
-Adding a table is a manifest edit plus a definition file; it is never an engine
+Adding a table is a manifest edit plus a definition file. It is never an engine
 release.
 
 ## What runs, in what order
@@ -86,7 +86,7 @@ consulted -- the pod is not restarted out from under whoever is reading it.
 ## The overlay
 
 A deployment's own schema tree is additive. It may declare objects the core does
-not; an object of its own whose definition sits under a core directory
+not. An object of its own whose definition sits under a core directory
 (`tables/core/`, `tables/internal/`, `tables/otel/`, `tables/meta/`,
 `common-header/`, `registries/`, `roles/`, `topics/`, `views/`) is refused by name
 and reported, and the core apply is unaffected. The overlay is optional: an
@@ -98,7 +98,7 @@ install with no deploy repo boots core-only.
 |---|---|---|
 | `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES` | `true` | Apply the manifest at startup. Off reports the schema state as unknown and gates nothing. |
 | `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
-| `DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default -- the widest Elastic vendor table is 688 KB -- is sent with its own size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's own SQL never gets the setting. |
+| `DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default, such as a wide Elastic meta schema's table, is sent with its own size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's own SQL never gets the setting. |
 | `DFE_ENGINE_CLICKHOUSE_PLATFORM` | `auto` | The ClickHouse platform schema DDL is rendered for: `auto` probes the server, then reads the hostname. `cloud` or `self_hosted` pins it, for a server the probe reads wrongly. Anything else refuses to start. |
 | `DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
 | `DFE_ENGINE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |

@@ -22,7 +22,7 @@ Broker scale-in is a human decision. Brokers KEDA adds stay until someone sets `
 
 The broker autoscaler renders only for `kafka.provider: strimzi`, so Redpanda brokers are sized by hand. Redpanda's own guidance is to keep Kubernetes autoscalers off its brokers ([scaling Redpanda](https://docs.redpanda.com/streaming/current/manage/kubernetes/k-scale-redpanda/)) and to decommission one broker at a time ([decommissioning brokers](https://docs.redpanda.com/streaming/current/manage/kubernetes/k-decommission-brokers/)).
 
-DFE sizes ClickHouse and doesn't autoscale it. The official operator has no autoscaler: scaling is an edit to `spec.replicas` or `spec.shards`, and a new shard takes new writes only, because the operator moves no existing rows ([operator scaling](https://clickhouse.com/docs/products/kubernetes-operator/guides/scaling)). Autoscaling it may come if a paying customer needs it.
+DFE sizes ClickHouse and doesn't autoscale it. The official operator has no autoscaler: scaling is an edit to `spec.replicas` or `spec.shards`, and a new shard takes new writes only, because the operator moves no existing rows ([operator scaling](https://clickhouse.com/docs/products/kubernetes-operator/guides/scaling)).
 
 Nodes are the platform's job. KEDA adds pods, and on AWS Karpenter adds the nodes they need. On-premises DFE ships no node autoscaler, so the node pool is sized for the peak (dfe-infra [autoscaling](https://github.com/hyperi-io/dfe-infra/blob/main/docs/autoscaling.md) and [node autoscaling](https://github.com/hyperi-io/dfe-infra/blob/main/docs/deployment/node-autoscaling.md)).
 
@@ -33,8 +33,8 @@ Nodes are the platform's job. KEDA adds pods, and on AWS Karpenter adds the node
 **scalo ScalingPressure, on by default for the ingest apps**: an app's dfe-infra values carry
 the `pressure-trigger` trigger fragment, and `keda.pressure.*` sets its target,
 shim address and reported service. KEDA takes the higher of it and the CPU
-trigger. It is read via the owned, fail-safe `dfe-keda-shim` (folded into the dfe-engine chart,
-runs the engine container image as `dfe-keda-shim run`) rather than any
+trigger. It is read via the owned, fail-safe `dfe-keda-shim` (rendered by dfe-infra's
+`dfe-extras` chart, running the engine container image as `dfe-keda-shim run`) rather than any
 Prometheus/Kedify path. The signal is read from the OTel pipeline's
 ClickHouse table (`otel_metrics_gauge`). Full fail-safe mechanics:
 [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md).

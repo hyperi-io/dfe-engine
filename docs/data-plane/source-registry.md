@@ -41,7 +41,7 @@ The deployed apps follow the same declaration. Every source write ends by
 reconciling the deploy repo: the receiver's rules and the loader's table map
 are recompiled from the active sources, and a fetcher-based source has a
 fetcher instance named for it while it is active and deployed, and none
-otherwise. The write reports what it changed (`apps_synced`); a failed
+otherwise. The write reports what it changed (`apps_synced`). A failed
 reconcile never fails the write, and `POST /api/v1/sources/reconcile-apps`
 retries it.
 
@@ -77,13 +77,13 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 
 | Operation | Effect |
 |-----------|--------|
-| **Create** | Validates the definition and updates receiver match rules. No topics, no DDL -- those land on deploy |
-| **Create from catalogue** | Reads one file of the dfe-schemas `catalogue/` tree the engine installs, which is the write body for the entry, swaps in the match rule the chosen intake derives (beats before receiver when no intake is named) and the variant the caller picks, then takes the ordinary create path. A variant the deployed transform's contract does not list is refused with 409 `missing_variant` ([source-flow.md](source-flow.md)) |
-| **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
-| **Read** | Definition plus status overlay (topic exists, table exists, transform running) |
-| **Update** | Validates, migrates the schema if fields changed, recompiles receiver and transform config |
-| **Delete** | Removes the definition (one attributed git commit on the gitcrud backend) and the topics its deploys created; table and data preserved. To pause instead, set `state: dormant` or `disabled` |
-| **List** | All sources with status overlay (healthy, degraded, disabled) |
+| Create | Validates the definition and updates receiver match rules. No topics, no DDL -- those land on deploy |
+| Create from catalogue | Reads one file of the dfe-schemas `catalogue/` tree the engine installs, which is the write body for the entry, swaps in the match rule the chosen intake derives (beats before receiver when no intake is named) and the variant the caller picks, then takes the ordinary create path. A variant the deployed transform's contract does not list is refused with 409 `missing_variant` ([source-flow.md](source-flow.md)) |
+| Deploy | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
+| Read | Definition plus status overlay (topic exists, table exists, transform running) |
+| Update | Validates, migrates the schema if fields changed, recompiles receiver and transform config |
+| Delete | Removes the definition (one attributed git commit on the gitcrud backend) and the topics its deploys created. Table and data preserved. To pause instead, set `state: dormant` or `disabled` |
+| List | All sources with status overlay (healthy, degraded, disabled) |
 
 **Topics are created on deploy.** DFE creates `<source>_land` (unless the source lands on the shared topic, which the landing source owns) and `<source>_load` when that version has a transform, rather than leaving them to the broker's `auto.create.topics.enable`, which yields mis-partitioned unmanaged topics and on Confluent Cloud non-Dedicated is not available at all. A source on the bus transport fails its deploy when a topic is not created: the call answers 502 `topics_not_created`, naming each topic and the broker's error code, and the source is not marked deployed, because its receiver would answer 503 for every record. The table is already in place, so the next deploy re-runs both steps. Off the bus a topic that could not be created comes back in `topics_failed` and the deploy goes ahead. Width comes from `DFE_ENGINE_KAFKA_TOPIC_PARTITIONS` and `DFE_ENGINE_KAFKA_TOPIC_REPLICATION_FACTOR`, and the message size from `DFE_ENGINE_KAFKA_TOPIC_MAX_MESSAGE_BYTES`, the same size the bootstrap topics carry. A brokerless profile (`DFE_ENGINE_TRANSPORT_BUS_PRESENT=false`) skips it, since reaching for a broker that is not there costs every deploy the admin timeout, and `DFE_ENGINE_KAFKA_ENSURE_TOPICS=false` turns it off where a broker does exist.
 
@@ -91,7 +91,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 engine creates a source's topics also deletes that pair when the source is
 deleted, because a topic nothing can write to still costs a partition assignment
 in every loader. Deleting a topic destroys what is on it, so the removal is in
-the audit record; turn `DFE_ENGINE_KAFKA_ENSURE_TOPICS` off to keep the topics and reap
+the audit record. Turn `DFE_ENGINE_KAFKA_ENSURE_TOPICS` off to keep the topics and reap
 them yourself.
 
 ## The API surface
@@ -122,4 +122,4 @@ Transform, fetcher and views are sections of the source write body, not
 sub-resources. The global service configs (receiver, loader, archiver) live
 under the service-config API and carry infrastructure concerns only -- their
 per-source routing is compiled, and a hand edit to it is drift. Adding a data
-source is one POST; the engine handles the topics, the DDL and the wiring.
+source is one POST. The engine handles the topics, the DDL and the wiring.

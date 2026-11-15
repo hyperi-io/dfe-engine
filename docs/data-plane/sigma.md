@@ -12,8 +12,8 @@
 Sigma is off by default: every path under `/api/v1/sigma` answers 404 until the engine runs with `sigma.enabled` set, which is `DFE_ENGINE_SIGMA_ENABLED=true` in its environment. A `sigma` entry in a source's `views` is a field-map view and deploys either way.
 
 DFE turns community + commercial Sigma rules into live DFE detections. External
-feeds are pulled into an operator-curated catalogue; the operator SELECTS the
-rules they want; propagation then generates a DFE detection rule and a per-source
+feeds are pulled into an operator-curated catalogue. The operator SELECTS the
+rules they want. Propagation then generates a DFE detection rule and a per-source
 hunt for each selection, running against a per-source Sigma VIEW that exposes the
 Sigma-aligned columns. Everything is stored in the deploy repo via gitcrud, so
 every change is one attributed commit (survivable + audited).
@@ -45,7 +45,7 @@ signals, tagged with a provenance `origin`). Three kinds ship:
 
 A provider config holds only a secret PATH, never a value. Reach is confined at
 register time (`_validate_provider_reach`): a `local_files` directory must resolve
-under the config dir; a `git_repo` url / `valhalla` base_url must be http(s), must
+under the config dir. A `git_repo` url / `valhalla` base_url must be http(s), must
 not target a loopback/link-local host (the `169.254.169.254` metadata endpoint is
 link-local), and - when `DFE_ENGINE_SIGMA_ALLOWED_HOSTS` is set - must be allow-listed.
 
@@ -55,7 +55,7 @@ link-local), and - when `DFE_ENGINE_SIGMA_ALLOWED_HOSTS` is set - must be allow-
 gitcrud catalogue (`catalog.py`). The upsert is idempotent and local-edit
 preserving: an operator can edit a catalogued rule and a later re-sync keeps that
 edit (via `deep_merge`, where the operator's lists replace upstream's), reporting drift when the upstream
-changed. The operator then SELECTS the rules to activate; selection is its own
+changed. The operator then SELECTS the rules to activate. Selection is its own
 gitcrud object.
 
 ## Propagation - selection to live detections
@@ -70,7 +70,7 @@ hand-edits are detected. Deselecting a rule leaves its binding STALE until prune
 The conversion is the [pysigma-backend-clickhouse](https://pypi.org/project/pysigma-backend-clickhouse/) backend, which owns the Sigma modifiers, wildcards and LIKE, regex and CIDR escaping. `sigma_backend_clickhouse.py` subclasses it to emit the bare condition, quote field names through the engine's column quoting and match a text-indexed column through `lower(col) LIKE`. What does not convert is recorded as `failed` in the report:
 
 - A correlation rule, which is a whole query and not a condition.
-- A keyword-only rule (`- needle`), which has no column to search. About 3% of the SigmaHQ set.
+- A keyword-only rule (`- needle`), which has no column to search.
 
 Plain string equality is case-sensitive, where Sigma matches case-insensitively (`OriginalFileName: CertUtil.exe` misses `certutil.exe`). A JSON-derived view column with no `type` reads as `Nullable(String)`, so `|contains`, `|startswith`, equality and lists work whatever type each row sent, and a missing field is still NULL. Numbers in an equality or a list are compared as quoted text, which suits that column. A `|gt` or `|lt` needs a numeric `type` such as `UInt32`: the view reads it with `toUInt32OrNull`, so a row whose value is not a number reads NULL and matches nothing. Any other declared type reads through `accurateCastOrNull`, with the same NULL for a value that does not convert.
 
@@ -98,7 +98,7 @@ Every ClickHouse query the engine issues carries a JSON `DfeQueryTags` `log_comm
 (service / feature / tenant / kind / id), stamped by the `ClickHouseClientWrapper`
 from a request-scoped `tags_context` (feature = the API route) or, for a hunt run,
 directly by the worker (feature=hunts, id=the hunt). A materialised view over
-`system.query_log` (`clickhouse/query_log_archive.py`) lifts the tagged rows into
+`system.query_log` (`src/dfe_engine/clickhouse/query_log_archive.py`) lifts the tagged rows into
 `<data database>.query_log_archive`, exploding the JSON into typed columns. dfe-schemas declares the table as optional. `GET
 /api/v1/queries/cost-leaderboard` ranks the heaviest cost consumers (query count,
 read rows/bytes, duration, peak memory) grouped by the attribution id - the

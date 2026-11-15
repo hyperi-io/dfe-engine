@@ -6,11 +6,11 @@ A label-based query interface over ClickHouse parameterised views, with multi-te
 
 ## Overview
 
-- **No raw SQL from clients** - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
-- **Mandatory tenant isolation** - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
-- **Scope-based access control** - `query:read` browses the views and `query:execute` runs them
-- **Declared parameters only** - the executor passes on only the parameters the view declares, unvalidated, and ClickHouse checks their types
-- **Native JSON responses** - dict rows via clickhouse-connect, no intermediate wire format
+- No raw SQL from clients - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
+- Mandatory tenant isolation - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
+- Scope-based access control - `query:read` browses the views and `query:execute` runs them
+- Declared parameters only - the executor passes on only the parameters the view declares, unvalidated, and ClickHouse checks their types
+- Native JSON responses - dict rows via clickhouse-connect, no intermediate wire format
 
 ### Supported Datasources
 
@@ -411,15 +411,14 @@ A failure is an RFC 9457 problem response with a stable `code`:
 
 Two distinct things, one implemented, one wire-format-only:
 
-- **View catalog cache (implemented).** The `ViewCatalog` discovers view
+- View catalog cache (implemented): the `ViewCatalog` discovers view
   definitions from ClickHouse and caches them with a TTL (default 60s,
-  `cache_ttl` on the catalog). A newly deployed view appears within one TTL;
-  there is no invalidation endpoint - expiry is the mechanism.
-- **Result caching (wire format only).** `QueryOptions.cache` and the
+  `cache_ttl` on the catalog). A newly deployed view appears within one TTL.
+  There is no invalidation endpoint - expiry is the mechanism.
+- Result caching (wire format only): `QueryOptions.cache` and the
   `cached`/`cache_key` metadata fields exist in the request/response models,
   but no server-side result cache is implemented - the flag has no
-  effect. Treat result caching as a client-side concern until the engine
-  grows one.
+  effect. Treat result caching as a client-side concern.
 
 ---
 
@@ -432,7 +431,7 @@ there is no per-query role list:
 |---|---|
 | `query:read` | browse the view catalog (list/get views, namespaces) |
 | `query:execute` | execute views |
-| `raw_query:execute` | run raw datasource queries; only `admin` holds it |
+| `raw_query:execute` | run raw datasource queries. Only `admin` holds it |
 
 ```mermaid
 flowchart TD

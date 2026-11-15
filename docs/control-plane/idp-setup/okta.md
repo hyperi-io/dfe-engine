@@ -2,8 +2,6 @@
 
 DFE asks for two things from your Okta org: your users sign in to DFE with their Okta account, and DFE reads which Okta groups each user is in, so your groups decide their DFE roles. You set this up once as an app integration plus a groups claim. Nothing is needed per user.
 
-Console paths checked 2026-10-10 against Okta's documentation.
-
 The DFE operator who sent you this page gives you the redirect URI. It looks like this, and you paste it exactly as given:
 
 ```text
@@ -98,7 +96,7 @@ source_id: "<Okta group name>"
 
 A linked group admits its members only once it carries a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta refuses it.
 
-## Vendor references
+## Okta references
 
 - Create an OIDC app integration: <https://help.okta.com/en-us/content/topics/apps/apps_app_integration_wizard_oidc.htm>
 - Authorization servers and API Access Management: <https://developer.okta.com/docs/concepts/auth-servers/>

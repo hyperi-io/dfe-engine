@@ -1,9 +1,7 @@
 # Running dfe-engine locally
 
 The fastest way to work on the engine is to run it as a plain local process -- a
-`uv` virtualenv and one command, no containers and no Kubernetes. This is the
-setup a contributor uses to iterate on an endpoint, and the one the auth/attributes
-and rule-authoring work is developed against.
+`uv` virtualenv and one command, no containers and no Kubernetes.
 
 ```sh
 make dev                         # -> Swagger UI at http://localhost:8003/docs
@@ -14,21 +12,20 @@ The console script `dfe-engine` maps to `dfe_engine.api:run_dev_server`, which
 serves the API on `DFE_ENGINE_API_PORT`: 8000 in code, 8003 from `.env.example`, and
 8003 is what `make dev` and the other repos' local docs assume.
 
-Two things trip people up on a fresh clone:
+Two things trip people up on a fresh clone.
 
-- **The schemas come from the `dfe-schemas` package**, which `uv sync` installs
-  -- there is nothing to check out. `DFE_ENGINE_SCHEMAS_DIR` is deliberately left unset
-  by `make dev`; set it only to point the engine at your own tree. `config/` is
-  a plain directory: `make dev` points `DFE_CONFIG_DIR` at `./config`, the engine
+- The schemas come from the `dfe-schemas` package, which `uv sync` installs,
+  so there is nothing to check out. `make dev` leaves `DFE_ENGINE_SCHEMAS_DIR` unset.
+  Set it only to point the engine at your own tree. `config/` is
+  a plain directory. `make dev` points `DFE_CONFIG_DIR` at `./config`, the engine
   seeds its auth store and registries into whatever that directory is, and
   tolerates it being empty or a throwaway. It does NOT need to pre-exist with
   content. The minted signing key and per-group ClickHouse passwords go to
   `.secrets/` in the CURRENT directory (`DFE_ENGINE_SECRETS_PATH`, default `./.secrets`),
   not under `DFE_CONFIG_DIR`, so a second engine started from the same directory
   reuses that key.
-- **You need a `.env`** for `make dev` (`cp .env.example .env`). For pure
-  auth/attributes work you do not want the example's ClickHouse pointed at a real
-  cluster -- set `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with
+- `make dev` needs a `.env` (`cp .env.example .env`). For auth or attributes
+  work with no ClickHouse, set `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with
   no ClickHouse at all.
 
 ## With and without ClickHouse
@@ -48,7 +45,7 @@ env DFE_ENGINE_ENV=dev \
 
 - No token is needed. `DFE_ENGINE_AUTH_ENABLED=false` with `DFE_ENGINE_ENV=dev` hands every
   unauthenticated request the `admin` role, so you can call any endpoint straight
-  from `curl`/Swagger. The engine still mints an ephemeral ES384 JWT authority at
+  from `curl`/Swagger. The engine still loads or mints its ES384 signing key at
   boot. You just don't need it on this path. (The offline `auth` subcommands live
   on the separate `dfe` CLI, not the `dfe-engine` daemon.)
 - Accounts and groups are YAML files under `DFE_CONFIG_DIR/auth`.
@@ -70,11 +67,10 @@ env DFE_ENGINE_ENV=dev \
 ```
 
 Get it wrong and the engine logs `SSL: WRONG_VERSION_NUMBER` (TLS against a
-plain port) or connection refused (the native 9000), retries for a minute, then
-serves degraded with `/readyz` answering 503 `{"clickhouse": false}` while
-`/livez` stays alive. Tenant isolation uses ClickHouse custom settings under the
-`SQL_` prefix; dfe-docker's `clickhouse/server-custom.xml` declares that prefix
-and a stock image does not.
+plain port) or connection refused (the native 9000), retries for up to 180
+seconds (`DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`), then serves degraded with
+`/readyz` reporting `clickhouse` false while `/livez` stays alive. Tenant isolation
+reads the ClickHouse custom setting `SQL_current_tenant_id`.
 
 ## Port and collector snags
 
@@ -125,25 +121,24 @@ runner.
 ## Running against the interdependent repos
 
 The engine is the OIDC issuer and control plane the rest of the local stack trusts.
-When Kay runs dfe-engine + dfe-hyperdx + dfe-ui + a local dfe-deploy clone together
-(all as git clones, not containers), the wiring is:
+Running dfe-engine, dfe-hyperdx, dfe-ui and a local dfe-deploy clone together, all
+as git clones rather than containers, the wiring is:
 
-- **dfe-hyperdx (the fork)** trusts the engine's signing key over JWKS. Point the
+- dfe-hyperdx (the fork) trusts the engine's signing key over JWKS. Point the
   fork at `DFE_ENGINE_JWKS_URL=http://localhost:8003/.well-known/jwks.json` (the
-  standard OIDC discovery path; its `engineOrigin()` derives the engine base URL
+  standard OIDC discovery path. Its `engineOrigin()` derives the engine base URL
   from that). Set `DFE_ENGINE_ISSUER=https://dfe.local/api` to match the engine's
   advertised issuer (`/.well-known/openid-configuration`), enforced as the token
   `iss`. The fork's `/dfe/*` routes forward the caller's `dfe_token` to the engine.
   Under a dev `DFE_ENGINE_ENV` that cookie is set without `Secure`, so a plain-http stack
-  keeps it; production sets `Secure`, like the session cookie.
-- **dfe-ui** talks to the engine API at `http://localhost:8003/api` and embeds the
-  fork; the fork's create-rule button opens `${DFE_UI_BASE_URL}/rules/{id}`.
-- **The deploy repo (dfe-deploy)** is the gitops target. Either disable gitops
+  keeps it. Production sets `Secure`, like the session cookie.
+- dfe-ui talks to the engine API at `NEXT_PUBLIC_API_URL` (`http://localhost:8003`
+  in its `.env.example`) and embeds the fork. The fork's create-rule button opens
+  `<NEXT_PUBLIC_DFE_UI_BASE_URL>/rules/{id}`.
+- The deploy repo (dfe-deploy) is the gitops target. Either disable gitops
   (`DFE_ENGINE_GITOPS_ENABLED=false`) or point it at your local clone with
-  `DFE_ENGINE_GITOPS_REPO_URL`/`DFE_ENGINE_GITOPS_LOCAL_PATH`; with it off the live auth store IS
+  `DFE_ENGINE_GITOPS_REPO_URL`/`DFE_ENGINE_GITOPS_LOCAL_PATH`. With it off the live auth store IS
   the durable store, so there is nothing to commit.
 
-> The single-process boot above is verified. The full four-repo local stack is the
-> target for the per-repo local-dev docs (see each repo's `CONTRIBUTING`); bring it
-> up one repo at a time, engine first, and confirm each speaks to the engine before
-> adding the next.
+Bring the stack up one repo at a time, engine first, and confirm each speaks to the
+engine before adding the next. Each repo's `CONTRIBUTING.md` has its own local setup.

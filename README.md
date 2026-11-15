@@ -51,7 +51,7 @@ Every setting is an environment variable with the `DFE_ENGINE_` prefix, apart fr
 | `DFE_CONFIG_DIR` | `/app/config` | `./config` with `make dev`, else `/app/config` | The deployment's config: a mounted volume or ConfigMap on Kubernetes, a checkout of the deployment's config repo for local dev. The engine finds `sources/`, `source-builds/`, `source-plans/`, `source-deploys/`, `fieldmaps/`, `services/`, `hunts/`, `rules/` and `alert-destinations/` under it. |
 | `DFE_ENGINE_SCHEMAS_DIR` | `/app/schemas` | unset | The schema tree root. Unset, the engine reads the trees from the installed `dfe-schemas` package. |
 
-The image bakes the dfe-schemas trees in at `/app/schemas` and an empty `/app/config`, so neither directory variable needs setting in a container. The deployment supplies the config by mount and the secrets and connection settings by env, and a container with none of those refuses to start on the placeholder JWT secret. A per-registry variable such as `DFE_ENGINE_SOURCES_DIR` wins over the subdirectory derived from `DFE_CONFIG_DIR`. The names are exact: a bare `CONFIG_DIR` is not read. ClickHouse and Kafka connection settings follow the same prefix.
+The image ships the dfe-schemas trees at `/app/schemas-seed`, copies them into `/app/schemas` on the first run of each engine version, and has an empty `/app/config`, so neither directory variable needs setting in a container. The deployment supplies the config by mount and the secrets and connection settings by env, and a container with none of those refuses to start on the placeholder JWT secret. A per-registry variable such as `DFE_ENGINE_SOURCES_DIR` wins over the subdirectory derived from `DFE_CONFIG_DIR`. The names are exact: a bare `CONFIG_DIR` is not read. ClickHouse and Kafka connection settings follow the same prefix.
 
 ## Documentation
 
@@ -59,7 +59,7 @@ The image bakes the dfe-schemas trees in at `/app/schemas` and an empty `/app/co
 - [docs/control-plane/](docs/control-plane/README.md): the API, auth, RBAC and governed gitops.
 - [docs/data-plane/](docs/data-plane/README.md): sources, schemas, DDL, the query API and hunts.
 - [docs/deployment/](docs/deployment/README.md): the chart, the image and the deployment contract.
-- [docs/reference/](docs/reference/README.md): the API and CLI reference.
+- [docs/reference/api-route-map.md](docs/reference/api-route-map.md): where each API operation moves in the resource hierarchy.
 
 The suite's published docs are at <https://dfe.docs.hyperi.io>, this repository's pages at <https://dfe.docs.hyperi.io/dfe-engine/>, and [dfe-infra](https://github.com/hyperi-io/dfe-infra) deploys the whole suite.
 

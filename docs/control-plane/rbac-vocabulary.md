@@ -21,9 +21,9 @@ ClickHouse tenant model.
 Roles split across two orthogonal planes, and conflating them is the most common
 modelling mistake:
 
-- **Control plane** - what you can DO. Static roles granting API actions:
+- Control plane - what you can DO. Static roles granting API actions:
   configure sources, run hunts, deploy services, manage groups.
-- **Data plane** - what you can SEE. Dynamic, driven by `org_ids`, and
+- Data plane - what you can SEE. Dynamic, driven by `org_ids`, and
   restricted to data browsing (Observe, Kibana-style). A user can be a powerful
   analyst on the control plane and see exactly one org's rows.
 
@@ -67,18 +67,18 @@ it stands, because a parallel name would mean two groups granting one role.
 
 ## org_viewer -- the org-tied exception role
 
-`org_viewer` (renamed from `customer_viewer`) is the one role hard-tied to the org_id CRUD: a user or group carrying it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the Observe iframe inside dfe-ui, dfe-hyperdx connects as that org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values, always. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends. See [rbac.md](rbac.md) sections 5-6 for the mechanism.
+`org_viewer` is the one role hard-tied to the org_id CRUD: a user or group carrying it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the Observe iframe inside dfe-ui, dfe-hyperdx connects as that org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values, always. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends. See [rbac.md](rbac.md) sections 5-6 for the mechanism.
 
 ## Naming conventions
 
-- **Roles**: `snake_case`, singular, describing the person - `data_analyst`, not
+- Roles: `snake_case`, singular, describing the person - `data_analyst`, not
   `DataAnalystRole` or `ANALYST_USER`.
-- **Groups**: `kebab-case`, plural, `dfe-` prefixed - `dfe-analysts`. The prefix
+- Groups: `kebab-case`, plural, `dfe-` prefixed - `dfe-analysts`. The prefix
   matters because these names land in customers' own IdPs alongside their groups.
-- **Per-org groups**: `dfe-<org>-viewers`, paired with `scope: org:<org>`.
-- **Permissions**: `resource:action`, colon-separated, `*` wildcards -
+- Per-org groups: `dfe-<org>-viewers`, paired with `scope: org:<org>`.
+- Permissions: `resource:action`, colon-separated, `*` wildcards -
   `hunt:read`, `service:*:config:*`.
-- **Orgs / tenants**: the term is **org** everywhere in the product surface (`org_id`, `org_ids`, `scope: org:<name>`). "Tenant" appears only inside the ClickHouse isolation model (the tenant role, the tenant setting and its row policies). One concept, and the boundary between the two words is exactly that model.
+- Orgs and tenants: the term is **org** everywhere in the product surface (`org_id`, `org_ids`, `scope: org:<name>`). "Tenant" appears only inside the ClickHouse isolation model (the tenant role, the tenant setting and its row policies). One concept, and the boundary between the two words is exactly that model.
 
 ## Who consumes what
 
@@ -87,19 +87,19 @@ it stands, because a parallel name would mean two groups granting one role.
 | dfe-engine | roles + groups | Defines them, enforces via `_resolve_group_grants` and `RoleConfig` |
 | dfe-ui | roles | Shows/hides UI by resolved role from `GET /auth/me`, and must not hardcode its own names |
 | dfe-infra | groups | ArgoCD RBAC group mappings, ESO secret wiring for providers |
-| dfe-deploy | groups | Deployment-time group seeding |
+| dfe-deploy | nothing | Ships no group files. The engine seeds the default groups at boot |
 | dfe-schemas | orgs | `org_id` column semantics for tenant row policies |
 | Test environments | both | The OIDC test fixture renders these names into dex, Entra and Okta |
 
 ## Rules
 
-1. **Add roles here first.** A role that exists in a consumer but not in
+1. Add roles here first. A role that exists in a consumer but not in
    `roles.yaml` grants nothing - unknown groups resolve to zero roles, which
    presents as a broken IdP rather than a config error.
-2. **Never rename in a consumer.** Renaming propagates from this document and
+2. Never rename in a consumer. Renaming propagates from this document and
    the two engine files outward, in one change.
-3. **Group names are external contract.** They are created in customers' Entra,
+3. Group names are external contract. They are created in customers' Entra,
    Okta and Workspace directories. Renaming one is a customer-facing migration,
    not a refactor.
-4. **Map roles on stable ids where the provider has them**, and display names.
+4. Map roles on stable ids where the provider has them, and display names.
    Entra emits group GUIDs, not names. See the OIDC architecture doc.

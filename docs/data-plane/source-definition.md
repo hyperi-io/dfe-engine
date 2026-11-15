@@ -11,7 +11,7 @@
 One YAML file per source, and it carries the whole stream: identity, where the
 records come from, whether they are transformed, the table they land in, and
 the standard views they expose. What a Source IS lives in
-[source.md](source.md); this is the file itself.
+[source.md](source.md). This is the file itself.
 
 ## A full source
 
@@ -148,7 +148,7 @@ receiver's router splits on. It is not a ClickHouse column reference: a
 `_json.` prefix would be read as a first path segment that no payload has.
 
 `ttl_days` is optional. A source that leaves it unset gets the deployment
-default (the admin's console value, else `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none); a value
+default (the admin's console value, else `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none). A value
 here wins over that default and over the table's dfe-schemas definition. The
 next schema apply moves an existing table onto a changed value with `ALTER
 TABLE ... MODIFY TTL`, and shortening it expires the rows older than the new
@@ -160,13 +160,12 @@ meta schema does not define is a hard error, never an appended column, and
 `index` is the only per-column key it may set -- `type`, `expr`, `comment` and
 `attribute` all resolve from the base. `additional_fields` is still the append
 layer. A derived schema also carries `capture_json` and `capture_raw` for this
-table, both on by default; turning them off tells dfe-loader to stop populating
+table, both on by default. Turning them off tells dfe-loader to stop populating
 `_json` and `_raw` without removing either column. Its CRUD surface is
 `/api/v1/schemas/definitions/derived/<group>/<name>`.
 
-The 2.1 keys `sigma`, `mapping_standards` and `field_mappings` were a clean
-break in 2.2, not a deprecation -- a write carrying one is rejected with a
-"removed in 2.2" error. Declare naming-standard views under `views` instead.
+A write carrying the 2.1 keys `sigma`, `mapping_standards` or `field_mappings` is
+rejected with a "removed in 2.2" error. Declare naming-standard views under `views`.
 
 ## The smallest source that works
 
@@ -200,8 +199,8 @@ Source: filebeat
 ```
 
 The type registry (dfe-schemas `registries/types.yaml`) maps primitives to ClickHouse types
-and is global, not per-source. The schema section feeds the `SchemaBuilder` /
-`ClickHouseSchema` pipeline. Create and migrate
+and is global, not per-source. The schema section feeds `SchemaBuilderV2`
+(`src/dfe_engine/schema/schema_builder_v2.py`). Create and migrate
 are triggered from the source's state rather than from a standalone
 schema config.
 
@@ -227,7 +226,7 @@ full type system, the primitive-to-ClickHouse mapping and the use cases are in
 | Source event | Schema action |
 |-------------|---------------|
 | created / active | `CREATE TABLE IF NOT EXISTS` (idempotent) |
-| schema YAML updated | `ALTER TABLE` via SchemaModifier (add/modify columns) |
+| schema YAML updated | the schema applier (`src/dfe_engine/schema/applier.py`) adds the columns the table lacks with their indexes, and moves its TTL |
 | dormant | none -- the table is retained, pre-positioned for reactivation |
 | disabled | none -- routing and transforms turn off, the table and its data stay |
 | deleted | none -- the table is retained. Drop it by hand if the data is not wanted |
@@ -246,17 +245,17 @@ emits the schema YAML, which the source then names. The mapping table is in
 | match and `when` | compile to rows scalo.rules accepts under the receiver's CEL Fast profile, at most 32 of them, else 422 `invalid_rule` with each problem's field and span. `always` only on the reserved `main` source |
 | compatibility profiles | each binding names a stored profile, a version it publishes and only opt-in rows it offers, one version of a profile per deployment, and every alias is unique per profile across non-disabled sources (409 `alias_conflict`) |
 | fetcher route | must not name its own source, and compares one field with `equals` |
-| fetcher connector type | one type per source, however many connections it polls; the refusal names the source and the types |
+| fetcher connector type | one type per source, however many connections it polls. The refusal names the source and the types |
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
 | transform mode and detect | `mode` and `detect` only for an app whose manifest declares `mode_path` and `detect_path` (`elastic`). `detect` only with `mode: agentless`, which takes no `variant`. `detect.fallback` is required when `unmatched` is `fallback` and refused otherwise, and `candidates` holds distinct non-blank names |
 | catalogue entry | the intake must be one the entry arrives by, the variant one it compiles to and not one a mounted contract of the deployed transform leaves out (409 `missing_variant`), and the source name a legal label |
-| schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |
+| schema | files exist and pass `SchemaBuilderV2` validation, and carry `_source` as a column (injected if missing) |
 
 The connector-type rule is the source-schema alignment, enforced: one source is
 one schema, so it is one type, and the many connections of that type - accounts,
 tenants, regions, each with its own credential - all land in the one table.
 `DFE_ENGINE_SOURCE_ALLOW_MIXED_FETCHER_TYPES=true` (`source.allow_mixed_fetcher_types`)
 turns the enforcement off for a deployment that knowingly wants a mixed fetcher,
-and past that dial you are on your own: no suite support, no schema alignment,
+and past that dial there is no suite support, no schema alignment,
 and dfe-fetcher's own many-to-many semantics apply to what lands in the table.

@@ -6,10 +6,10 @@
 
 ## Overview
 
-- **No raw SQL from clients** - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
-- **Mandatory tenant isolation** - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
-- **Scope-based access control** - `query:read` browses the views and `query:execute` runs them
-- **Native JSON responses** - dict rows via clickhouse-connect, no Arrow/pyarrow dependency
+- No raw SQL from clients - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
+- Mandatory tenant isolation - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
+- Scope-based access control - `query:read` browses the views and `query:execute` runs them
+- Native JSON responses - dict rows via clickhouse-connect, no Arrow/pyarrow dependency
 
 ---
 
@@ -51,12 +51,16 @@ df.groupby("event_type").count()
 
 ### HTTP Mode
 
-HTTP mode posts to `/api/v1/queries/views/{label}/execute` and sends no credentials, so it is answered only by an engine with auth disabled (a dev `DFE_ENGINE_ENV`):
+HTTP mode posts to `/api/v1/queries/views/{label}/execute` and sends the `credential` it is given the way the `dfe` CLI does: an API key in `X-API-Key` (`api_key_header`), a token as `Authorization: Bearer`. With none it sends nothing, which only an engine with auth disabled (a dev `DFE_ENGINE_ENV`) answers:
 
 ```python
 from dfe_engine.query import QueryClient
+from scalo.cli.openapi import Credential
 
-client = QueryClient(base_url="http://localhost:8000")
+client = QueryClient(
+    base_url="http://localhost:8000",
+    credential=Credential(account="ci", api_key="dfe_ak_..."),
+)
 result = client.query(
     "analytics/user_activity",
     params={"event_types": ["login"]},
@@ -91,6 +95,9 @@ class QueryClient:
         base_url: str | None = None,  # API URL for HTTP mode
         direct: bool = False,  # Use in-process execution
         timeout_seconds: int = 30,  # Default query timeout
+        *,
+        credential: Credential | None = None,  # scalo.cli.openapi: a token or an API key
+        api_key_header: str = "X-API-Key",
     ): ...
 ```
 
@@ -128,7 +135,7 @@ result = client.query(
 | `query_label` | `str` | Query identifier (e.g., `"analytics/user_activity"`) |
 | `params` | `dict` | The view's parameters. Undeclared names are dropped, and values are not validated |
 | `limit` | `int` | Maximum rows (clamped to query/global max) |
-| `offset` | `int` | Skip first N rows (offset-based pagination); not combinable with `after_key` |
+| `offset` | `int` | Skip first N rows (offset-based pagination). Not combinable with `after_key` |
 | `order_by` | `str` | Column to order and page by (keyset pagination) |
 | `order_dir` | `str` | Sort direction: `"asc"` or `"desc"` (default: `"asc"`) |
 | `after_key` | `str \| int \| float` | `order_by` value of the previous page's last row |
@@ -188,7 +195,7 @@ Returned by `query()`.
 | `num_rows` | `int` | Number of rows |
 | `num_columns` | `int` | Number of columns |
 | `metadata` | `QueryMetadata` | Execution metadata |
-| `explain` | `ExplainPlan \| None` | Always `None` from `query()`; the client requests no EXPLAIN |
+| `explain` | `ExplainPlan \| None` | Always `None` from `query()`. The client requests no EXPLAIN |
 
 ### QueryMetadata
 

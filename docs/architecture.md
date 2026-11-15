@@ -3,8 +3,7 @@
 DFE is a deployable product suite: event-data ingest, ClickHouse storage,
 scheduled detection, and exploration, all governed through one git-backed
 control plane. This page is the map - where each repo sits, the two principles
-that define the system, the invariants, and links into the depth docs. It
-describes how DFE works today, grounded in code, not a proposal.
+that define the system, the invariants, and links into the depth docs.
 
 ## Where the engine sits in the suite
 
@@ -53,9 +52,9 @@ flowchart TB
 | dfe-engine | config control plane + API server | the engine itself |
 | dfe-infra | charts, ApplicationSets, bootstrap | consumes engine-authored overlays via the deploy repo |
 | dfe-ui | web UI | consumes the engine API only |
-| dfe-hyperdx | the Observe view: our extended fork of the upstream HyperDX project, explore UI + telemetry sink | embedded in dfe-ui; reads ClickHouse |
-| dfe-schemas | every table, view, role and bootstrap topic, plus the apply manifest | the only place they are defined; the engine applies the manifest at boot ([schema bootstrap](data-plane/schema-bootstrap.md)) |
-| scalo-py / scalo-rs | shared libraries (neutral-identity OSS) | engine imports scalo-py; Rust services import scalo-rs |
+| dfe-hyperdx | the Observe view: our extended fork of the upstream HyperDX project, explore UI + telemetry sink | embedded in dfe-ui, reads ClickHouse |
+| dfe-schemas | every table, view, role and bootstrap topic, plus the apply manifest | the only place they are defined. The engine applies the manifest at boot ([schema bootstrap](data-plane/schema-bootstrap.md)) |
+| scalo-py / scalo-rs | shared libraries (neutral-identity OSS) | engine imports scalo-py, Rust services import scalo-rs |
 | dfe-receiver/loader/archiver/fetcher/transform-* | Rust runtime services | read YAML config the engine writes |
 | dfe-deploy | example deploy/overlay repo | the GitOps hand-off surface |
 
@@ -81,7 +80,7 @@ flowchart LR
 Adding a service instance is a git write of one
 `values/<service>-<instance>-values.yaml` file - the git-files ApplicationSet
 generator fans out one Argo Application per values file. Removing the file
-removes the app. The engine declares instances; the appset deploys them.
+removes the app. The engine declares instances. The appset deploys them.
 An instance removed while its source still exists leaves the files authored into it in `values/<service>-<instance>-parked.yaml`, which the glob does not match, and its next deploy restores them.
 Depth: [deployment/README.md](deployment/README.md) and
 [control-plane/governed-ops-design.md](control-plane/governed-ops-design.md).
@@ -104,7 +103,7 @@ flowchart LR
     MAPS --> HUNTS[hunts] & QAPI[query API] & XPLR[explore UI]
 ```
 
-One definition, enforced end to end: the receiver routes an event by its
+One definition, read by every stage: the receiver routes an event by its
 `_source`, the loader inserts into the topology-correct table for that
 source's schema, and the field-mapping layer projects the same columns back
 out as standard vocabularies (Sigma, ECS, CIM) for detection and query. There
@@ -114,7 +113,7 @@ is no separate ETL config to fall out of sync. Depth:
 ## The control pyramid
 
 Four layers, each a narrower, more guarded window onto the one below. The API
-is the single control plane; the CLI and UI only ever consume it; the API
+is the single control plane. The CLI and UI only ever consume it. The API
 never reaches past git to the cluster.
 
 ```mermaid
@@ -163,51 +162,51 @@ flowchart TB
     RUST --> SUB
 ```
 
-- **config repo** - the engine's working data: service configs, deployment
+- The config repo is the engine's working data: service configs, deployment
   configs, field maps, rules/hunts, OIDC providers, accounts/groups.
   Engine-written AND directly human-editable. Writes are read-before-write
   with git blob-SHA ETags: `If-Match` mismatch returns `409 Conflict` with a
   diff rather than clobbering a human or CI edit.
-- **deploy repo** - the GitOps hand-off. Engine writes compiled artifacts;
+- The deploy repo is the GitOps hand-off. Engine writes compiled artifacts.
   Argo reads them. With gitops enabled it also holds the source definitions
   SSoT (`config/sources/`) and the hunt definitions and detection rules
   (`config/hunts/`, `config/rules/`), one attributed commit per mutation via
-  gitcrud; standalone deployments fall back to plain directories in the config
+  gitcrud. Standalone deployments fall back to plain directories in the config
   repo. The hunt runner git-syncs those last two directories, so on Kubernetes
   they are how a hunt reaches the pod that runs it. Provider-agnostic:
   GitHub / GitLab external git, or the in-cluster Forgejo fallback (see
   [deployment/README.md](deployment/README.md)).
-- **dfe-infra** - the pinned deployment vehicle. Never written by the engine.
+- dfe-infra is the pinned deployment vehicle. Never written by the engine.
 
 In small deployments the config repo and deploy repo can be one repo with
 different subtrees (`config/` and `values/` + `ddl/`).
 
 ## First principles (invariants)
 
-1. **Generic product, not an internal tool.** Ships into a customer cluster
-   the vendor never sees. Nothing site-specific in code.
-2. **YAML + git is the single source of truth.** No config database. Rust
-   services read config files directly; the engine reads/writes them through
+1. Generic product, not an internal tool. Ships into a customer cluster
+   we never see. Nothing site-specific in code.
+2. YAML + git is the single source of truth. No config database. Rust
+   services read config files directly. The engine reads/writes them through
    GitCrud on the deploy repo, or a cached YAML directory (DirectoryConfigStore
    from scalo) for registries that live off it. Identity
    comes from the FILENAME, never a field inside the YAML (the store loads
    YAML 1.1, where `off`/`yes`/`no` become booleans).
-3. **Engine writes config, never installs infrastructure.** The hard
+3. Engine writes config, never installs infrastructure. The hard
    engine<->infra boundary: dfe-infra deploys backing services and owns
-   ApplicationSets; the engine writes config + DDL + OIDC values into the
+   ApplicationSets. The engine writes config + DDL + OIDC values into the
    deploy repo and turns dials through overlays. If the engine is about to
    install ClickHouse or author an Argo Application, the work belongs in
    dfe-infra.
-4. **Assume only a bare cluster.** Layer 0 detect-or-install brings
+4. Assume only a bare cluster. Layer 0 detect-or-install brings
    everything else: a default StorageClass, cert-manager, External Secrets,
    and Argo CD, installed into `argocd` or, where one already runs, adopted.
-5. **ClickHouse is the only operational store.** All non-gitops state -
+5. ClickHouse is the only operational store. All non-gitops state -
    events, results, watermarks, leases - lives in CH via
    `effective_data_database`. The DocumentDB store is Observe's own, never
    DFE state.
-6. **A commit is not a deployment.** The engine reports what it committed;
+6. A commit is not a deployment. The engine reports what it committed.
    Argo (and any org approval gate) decides when it is live.
-7. **Fully operable from the repos alone.** Engine and UI down = running
+7. Fully operable from the repos alone. Engine and UI down = running
    system unaffected, manageable by editing the repos directly.
 
 ## Layered deployment model (summary)
@@ -215,10 +214,11 @@ different subtrees (`config/` and `values/` + `ddl/`).
 Layer 0 platform baseline (Argo CD + detect-or-install operators) ->
 Layer 1 backing services (ClickHouse, optional Kafka, DocumentDB, Observe) ->
 Layer 2 apps + config (digest-pinned thin charts built from each app's
-deployment contract + engine-authored overlays). Five tiers select defaults:
+deployment contract + engine-authored overlays). Four tiers select defaults:
 **dfe-docker** (Compose), **slim** (gRPC, no Kafka), **single** (+
-single-broker Kafka), **scale** (everything clustered), **mesh** (scale's
-replicas and ClickHouse cluster over gRPC, no broker). Observe ships in EVERY tier - it is the explore UI over all DFE
+single-broker Kafka) and **scale** (everything clustered). A fifth, **mesh**
+(scale's replicas and ClickHouse cluster over gRPC, no broker), is in the
+charts, but dfe-infra's bootstrap refuses to select it. Observe ships in EVERY tier - it is the explore UI over all DFE
 data and the self-monitoring sink, not an add-on. Full detail including the
 per-tier composition table, deploy-repo providers, backing-service modes, and
 the network model: [deployment/README.md](deployment/README.md).
@@ -259,7 +259,7 @@ alert grouping or cooldown.
 | Ingress / OIDC | Envoy Gateway (k8s) / oauth2-proxy (docker) | native OIDC at the edge |
 | Expression language | CEL (Python + Rust), DFE subset | one standard, tiered for performance |
 | Field mapping | YAML, two-tier (default + source) | human-editable, git-tracked, UI-editable |
-| Stage transport | one per source, `bus` or `direct`, default from the profile | a flow is never mixed; the bus provider (Kafka) is a deployment fact, so a second provider joins without a model change |
+| Stage transport | one per source, `bus` or `direct`, default from the profile | a flow is never mixed. The bus provider (Kafka) is a deployment fact, so a second provider joins without a model change |
 
 ## The docs tree
 
@@ -268,7 +268,7 @@ alert grouping or cooldown.
 | Control-plane surface | [control-plane/README.md](control-plane/README.md) | governed ops, gitops commit standard, RBAC, OIDC, CLI, UI API, type-safety sync |
 | Data plane | [data-plane/README.md](data-plane/README.md) | sources, schemas, field mapping, CEL, query API, hunts |
 | Deployment | [deployment/README.md](deployment/README.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
-| Integrations | [integrations/README.md](integrations/README.md) | dfe-ui guide, dfe-hyperdx fork maintenance |
+| Integrations | [integrations/README.md](integrations/README.md) | dfe-ui guide, and where the dfe-hyperdx fork runbook lives |
 | Archive | [archive/README.md](archive/README.md) | superseded research + snapshots, kept for the decision trail |
 
 Edge auth topology notes live in [auth-envoy-topology.md](auth-envoy-topology.md).

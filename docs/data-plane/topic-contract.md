@@ -26,7 +26,7 @@ Once `_load` is gone the loader reads `_land` from `earliest`, the scalo-rs cons
 | `GET /api/v1/kafka/topics` | Per-topic existence, partitions, replication factor, config and drift against what the source asks for. Reads only. |
 | `POST /api/v1/kafka/topics/ensure` | Creates what is missing. Idempotent, and it never reshapes a topic that already exists. |
 | `POST /api/v1/kafka/topics/update` | Converges an existing topic: an incremental alter of the configs the spec names, and a partition increase. |
-| `POST /api/v1/kafka/topics/remove` | Deletes one source's topics. Needs `confirm=true`; the records on them go with them. |
+| `POST /api/v1/kafka/topics/remove` | Deletes one source's topics. Needs `confirm=true`. The records on them go with them. |
 
 Each takes `?source=` to narrow to one source and `?dry_run=true` to report without
 changing anything. The topic names are never typed by the caller - the request
@@ -74,11 +74,11 @@ spend the admin timeout finding that out.
 
 ## Reaching the broker
 
-`kafka.provider` derives `security.protocol` and `sasl.mechanism`; the mechanism
+`kafka.provider` derives `security.protocol` and `sasl.mechanism`. The mechanism
 is never hand-set. One key names one LISTENER, so a DFE-owned broker on the
 TLS-off listener the deploy charts stand up is `strimzi-no-tls` or
 `redpanda-no-tls`, not `strimzi` with something turned down. SCRAM is a
-challenge-response, so the password never reaches the wire on that listener; no
+challenge-response, so the password never reaches the wire on that listener. No
 PLAIN or OAUTHBEARER provider has a TLS-off key.
 
 A delete never fails on the topic step: the source is already gone by the time its topics are removed, so an unreachable broker is reported on the response instead. A deploy of a source on the bus does fail on it, with 502 `topics_not_created` for a topic the broker did not create. An old `_load` topic never fails it: the deploy reports one it could not delete yet in `topics_pending_removal`.
