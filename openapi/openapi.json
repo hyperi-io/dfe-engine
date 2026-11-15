@@ -12078,7 +12078,7 @@
           "Rules"
         ],
         "summary": "Create Rule",
-        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL->SQL transpilation,\nvalidates column references, and optionally estimates query cost. A rule\nwhose SQL the hunt runner could not compile is refused with 422. The cost\npreview counts only the orgs the hunts running the rule read, cut to the orgs\nits author may read.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new hunt rule via RuleCreationService.\n\nThe rule is written as SQL or as a structured ``condition``, which the engine\ncompiles to the SQL and stores with it. The service sanitizes the SQL,\napplies CEL->SQL transpilation, validates column references, and optionally\nestimates query cost. A rule whose SQL the hunt runner could not compile is\nrefused with 422. The cost preview counts only the orgs the hunts running the\nrule read, cut to the orgs its author may read.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "rules.create",
         "requestBody": {
           "required": true,
@@ -12348,6 +12348,98 @@
         }
       }
     },
+    "/api/v1/rules/preview": {
+      "post": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Preview Rule",
+        "description": "Compile a condition and check it exactly as a save would, writing nothing.\n\nRuns the creation pipeline of ``POST /rules`` (compile, parse, the forbidden-keyword\nand column checks, the matches-everything check and the alert-volume preview) under the\nsame org fence, and stops before the save. A condition the save would refuse comes back\nwith 200 and its reasons in ``sql_errors`` or ``matches_everything``, so a builder can\nshow them as the author edits. A body that is not a condition at all is 422.",
+        "operationId": "rules.preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RulePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulePreviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "rules",
+          "resource": "rules",
+          "hierarchy": [
+            "rules"
+          ],
+          "verb": "preview",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "rule:validate"
+        }
+      }
+    },
     "/api/v1/rules/{name}": {
       "get": {
         "tags": [
@@ -12445,7 +12537,7 @@
           "Rules"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as SQL or as a ``condition``, as on create, and a\nrule replaced with SQL no longer carries a condition.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
         "operationId": "rules.apply",
         "parameters": [
           {
@@ -14676,6 +14768,24 @@
               "title": "Search"
             },
             "description": "Case-insensitive search in name, display_name, customers, rules, source_table, target_table"
+          },
+          {
+            "name": "rule",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the hunts whose rules include this rule, by its exact name",
+              "title": "Rule"
+            },
+            "description": "Only the hunts whose rules include this rule, by its exact name"
           },
           {
             "name": "page_size",
@@ -48131,6 +48241,105 @@
         "title": "RuleBlockResponse",
         "description": "One block of the receiver's rule set: a source's rows, a profile's, or the default."
       },
+      "RuleCondition": {
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field",
+            "description": "Field a test reads: a column of the source table, or a dotted path inside the record as it arrived (e.g. 'tags.collector.type', or '_json.tags.collector.type'). Each part is letters, digits, '_' and '-', starting with a letter or '_'. Absent on a group"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "equals",
+                  "not_equals",
+                  "exists",
+                  "includes",
+                  "starts_with",
+                  "ends_with",
+                  "lt",
+                  "lte",
+                  "gt",
+                  "gte",
+                  "in"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator",
+            "description": "How a test compares ``field`` to ``value``: equals (the default for a test), not_equals, exists, includes, starts_with, ends_with, lt, lte, gt, gte, in. Absent on a group",
+            "x-dfe-operand-kinds": {
+              "ends_with": "text",
+              "equals": "text_or_number",
+              "exists": "none",
+              "gt": "number_or_date",
+              "gte": "number_or_date",
+              "in": "list",
+              "includes": "text",
+              "lt": "number_or_date",
+              "lte": "number_or_date",
+              "not_equals": "text_or_number",
+              "starts_with": "text"
+            }
+          },
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Scalar"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Scalar"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "Operand for the operator, by its kind: none for exists, text for includes, starts_with and ends_with, text or a number for equals and not_equals, a number or an ISO 8601 date or date-time for lt, lte, gt and gte, a list of texts or of numbers for in"
+          },
+          "negate": {
+            "type": "boolean",
+            "title": "Negate",
+            "description": "Invert this test or group",
+            "default": false
+          },
+          "all": {
+            "items": {
+              "$ref": "#/components/schemas/RuleCondition"
+            },
+            "type": "array",
+            "title": "All",
+            "description": "A group that holds when every part holds"
+          },
+          "any": {
+            "items": {
+              "$ref": "#/components/schemas/RuleCondition"
+            },
+            "type": "array",
+            "title": "Any",
+            "description": "A group that holds when at least one part holds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RuleCondition",
+        "description": "One test on a field, or ``all`` or ``any`` of several, as the rule builder writes it.\n\nA test compares one ``field`` with an ``operator``. ``all`` holds when every\npart does and ``any`` when at least one does. Each part is a condition of its\nown, so groups nest, and ``negate`` inverts the test or group it sits on.",
+        "x-dfe-max-nesting": 4
+      },
       "RuleCreateRequest": {
         "properties": {
           "display_name": {
@@ -48152,10 +48361,28 @@
             "default": "medium"
           },
           "user_sql": {
-            "type": "string",
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "User Sql",
-            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table)"
+            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table). Give this or ``condition``, not both. A rule saved this way has no ``condition``"
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The rule's structured condition, which the engine compiles to its SQL and stores with it, so the builder reopens on it. Reads the table of ``source``. Give this or ``user_sql``, not both"
           },
           "cel_filter": {
             "anyOf": [
@@ -48231,7 +48458,6 @@
         },
         "type": "object",
         "required": [
-          "user_sql",
           "name"
         ],
         "title": "RuleCreateRequest",
@@ -48525,6 +48751,146 @@
         "title": "RuleOrderResponse",
         "description": "The field's blocks as the reorder leaves them."
       },
+      "RulePreviewRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source label whose table the condition reads"
+          },
+          "condition": {
+            "$ref": "#/components/schemas/RuleCondition"
+          },
+          "cel_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cel Filter",
+            "description": "CEL expression ANDed in, as on save"
+          },
+          "cost_window_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Window Minutes",
+            "description": "Lookback window in minutes the volume preview counts over. Absent or 0 uses the deployment's preview window."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The rule being edited. The volume preview then counts the orgs of the hunts that run it and of the hunt it names, as its save would"
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name",
+            "description": "The hunt the rule names as its own, which the count follows. Defaults to the stored rule's"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "condition"
+        ],
+        "title": "RulePreviewRequest",
+        "description": "A condition to compile and check as a save would, without saving it."
+      },
+      "RulePreviewResponse": {
+        "properties": {
+          "user_sql": {
+            "type": "string",
+            "title": "User Sql",
+            "description": "The rule SQL the condition compiles to, empty when it does not"
+          },
+          "source_db": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Db"
+          },
+          "source_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Table"
+          },
+          "where_clause": {
+            "type": "string",
+            "title": "Where Clause",
+            "description": "The detection WHERE the rule would store"
+          },
+          "sql_errors": {
+            "items": {
+              "$ref": "#/components/schemas/SqlValidationError"
+            },
+            "type": "array",
+            "title": "Sql Errors",
+            "description": "Why a save would be refused as invalid"
+          },
+          "matches_everything": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matches Everything",
+            "description": "Why a save would be refused for matching every event, when it would"
+          },
+          "cost_estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_sql",
+          "where_clause"
+        ],
+        "title": "RulePreviewResponse",
+        "description": "What a save of the condition would compile to and find, and nothing written."
+      },
       "RuleResponse": {
         "properties": {
           "name": {
@@ -48577,6 +48943,17 @@
               }
             ],
             "title": "Cel Filter"
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The structured condition the SQL was compiled from, absent for a rule written as SQL"
           },
           "original_sql": {
             "type": "string",
@@ -48730,10 +49107,28 @@
             "default": "medium"
           },
           "user_sql": {
-            "type": "string",
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "User Sql",
-            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table)"
+            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table). Give this or ``condition``, not both. A rule saved this way has no ``condition``"
+          },
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The rule's structured condition, which the engine compiles to its SQL and stores with it, so the builder reopens on it. Reads the table of ``source``. Give this or ``user_sql``, not both"
           },
           "cel_filter": {
             "anyOf": [
@@ -48791,9 +49186,6 @@
           }
         },
         "type": "object",
-        "required": [
-          "user_sql"
-        ],
         "title": "RuleUpdateRequest",
         "description": "Update an existing hunt rule (re-runs creation pipeline, and ``source_type`` is not accepted)."
       },
@@ -49242,6 +49634,19 @@
         ],
         "title": "ScaffoldRequest",
         "description": "Body for a starter SELECT over a table's columns."
+      },
+      "Scalar": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          }
+        ]
       },
       "ScalingRequest": {
         "properties": {

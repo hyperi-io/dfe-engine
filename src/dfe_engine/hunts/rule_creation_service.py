@@ -47,8 +47,10 @@ from sqlglot.errors import ParseError
 
 from ..clickhouse.errors import ErrorCategory, parse_code, wrap_ch_error
 from ..clickhouse.quoting import plain_source_name, quote_identifier
+from ..schema.applier import SchemaApplyError, live_columns
 from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
+from .rule_condition import RuleCondition, RuleConditionError, compile_condition
 from .rule_guard import (
     VolumeBand,
     VolumeMeasure,
@@ -71,8 +73,10 @@ from .validator import rule_source
 class RuleCreateRequest(BaseModel):
     """Input for the rule creation pipeline.
 
-    At least one of ``user_sql`` or ``cel_filter`` must be provided.
-    ``source_type`` controls whether HyperDX sanitization is applied.
+    At least one of ``user_sql``, ``condition`` or ``cel_filter`` must be provided,
+    and ``user_sql`` and ``condition`` are two ways to write the same thing, so not
+    both. A ``condition`` reads the table of ``source``. ``source_type`` controls
+    whether HyperDX sanitization is applied.
     """
 
     name: str = Field(..., description="Human-readable rule name")
@@ -82,6 +86,9 @@ class RuleCreateRequest(BaseModel):
         description="SQL origin: 'raw' for clean SQL, 'hyperdx' for HyperDX-generated",
     )
     user_sql: str | None = Field(default=None, description="User-supplied SQL SELECT")
+    condition: RuleCondition | None = Field(
+        default=None, description="Structured condition, compiled to the rule's SQL"
+    )
     cel_filter: str | None = Field(default=None, description="CEL expression for query pushdown")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(
@@ -101,8 +108,14 @@ class RuleCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_sql_or_cel(self) -> RuleCreateRequest:
-        if not self.user_sql and not self.cel_filter:
-            raise ValueError("At least one of 'user_sql' or 'cel_filter' must be provided.")
+        if not self.user_sql and not self.cel_filter and self.condition is None:
+            raise ValueError(
+                "At least one of 'user_sql', 'condition' or 'cel_filter' must be provided."
+            )
+        if self.user_sql and self.condition is not None:
+            raise ValueError("Give 'user_sql' or 'condition', not both.")
+        if self.condition is not None and self.source_type != "raw":
+            raise ValueError("A condition is compiled by the engine, so its source_type is 'raw'.")
         return self
 
 
@@ -331,6 +344,8 @@ class RuleCreationService:
     Args:
         rewriter: Custom RuleRewriter instance (optional).
         hdx_sanitizer: Custom HdxSanitizer instance (optional).
+        data_database: The database a source's table is read from when a rule
+            is written as a condition.
         ch_config: ClickHouse config. With it, the parse check and the volume
             preview use the engine's pooled ClickHouse client.
         hunts: Hunt settings: the detection guard's thresholds and the load-time
@@ -344,12 +359,14 @@ class RuleCreationService:
         *,
         rewriter: RuleRewriter | None = None,
         hdx_sanitizer: HdxSanitizer | None = None,
+        data_database: str | None = None,
         ch_config: dict[str, Any] | None = None,
         hunts: HuntsSettings | None = None,
         ch_client: ChQueryClient | None = None,
     ) -> None:
         self._rewriter = rewriter or RuleRewriter()
         self._hdx_sanitizer = hdx_sanitizer or HdxSanitizer()
+        self._data_database = data_database
         self._ch_config = ch_config
         self._hunts = hunts or HuntsSettings()
         self._ch_client = ch_client
@@ -381,6 +398,12 @@ class RuleCreationService:
             RuleCreateResult with rule, validation errors, the match-everything
             verdict, cost estimate, and AI context.
         """
+        if request.condition is not None:
+            try:
+                compiled = self.condition_sql(request.source, request.condition)
+            except RuleConditionError as exc:
+                return self._refused_condition(request, rule_id, str(exc))
+            request = request.model_copy(update={"user_sql": compiled})
         sanitize_summary: dict[str, Any] = {}
         clean_sql = request.user_sql
         refusal: SqlValidationError | None = None
@@ -415,6 +438,7 @@ class RuleCreationService:
             severity=request.severity,
             user_sql=clean_sql or request.user_sql,
             cel_filter=request.cel_filter,
+            condition=request.condition,
             hunt_name=request.hunt_name,
             source=request.source,
         )
@@ -431,6 +455,7 @@ class RuleCreationService:
                 name=request.name,
                 severity=request.severity,
                 cel_filter=request.cel_filter,
+                condition=request.condition,
                 original_sql=clean_sql or request.user_sql or "",
                 hunt_name=request.hunt_name,
                 source=request.source,
@@ -493,6 +518,84 @@ class RuleCreationService:
     def validate_sql(self, sql: str) -> list[SqlValidationError]:
         """Standalone SQL validation without rule creation."""
         return self._validate_sql_syntax(strip_time_placeholder(sql))
+
+    def condition_sql(self, source: str | None, condition: RuleCondition) -> str:
+        """The rule SQL a condition on ``source`` compiles to.
+
+        The condition reads the source's table in the data database. A field is a
+        column of that table when ClickHouse reports one by that name, else a path
+        inside its ``_json`` column.
+
+        Args:
+            source: The source's label, which is also its table's name.
+            condition: A validated condition.
+
+        Returns:
+            ``SELECT * FROM <db>.<table> WHERE <condition>``, every name quoted.
+
+        Raises:
+            RuleConditionError: No source or data database to read, a source that
+                is not a table label, or a field that does not fit the table.
+        """
+        if not source:
+            raise RuleConditionError("a condition reads a source's table, so name the source")
+        if not self._data_database:
+            raise RuleConditionError("no data database is configured to read the source from")
+        try:
+            database, table = plain_source_name(source)
+        except ValueError as exc:
+            raise RuleConditionError(f"source {source!r} is not a table label: {exc}") from None
+        if database:
+            raise RuleConditionError(f"source {source!r} is a label, not a <db>.<table> name")
+        where = compile_condition(condition, self._table_columns(self._data_database, table))
+        target = f"{quote_identifier(self._data_database)}.{quote_identifier(table)}"
+        sql = f"SELECT * FROM {target} WHERE {where}"  # noqa: S608 - quoted names, and operands quoted by compile_condition
+        # What the stored condition says must be what the runner runs, so a rule read of the SQL may not change it.
+        parsed = self._rewriter.parse_user_sql(sql)
+        if parsed.where_clause != where:
+            if parsed.stripped_time_bounds:
+                raise RuleConditionError(
+                    "the hunt window bounds time for every rule, so a condition cannot compare a "
+                    f"time column with lt, lte, gt or gte: {', '.join(parsed.stripped_time_bounds)}"
+                )
+            raise RuleConditionError("reading the compiled condition as a rule changed it")
+        return sql
+
+    def _table_columns(self, database: str, table: str) -> frozenset[str] | None:
+        """The table's column names, or None when no ClickHouse is configured or the table is absent.
+
+        Raises:
+            RuleConditionError: ClickHouse is configured and could not be read, so a
+                column cannot be told from a JSON path and compiling would guess.
+        """
+        client = self._query_client()
+        if client is None:
+            return None
+        try:
+            columns = live_columns(client=client, database=database, table=table)
+        except SchemaApplyError as exc:
+            logger.warning(f"columns of {database}.{table} unavailable: {exc}")
+            raise RuleConditionError(
+                f"ClickHouse could not be read for the columns of {database}.{table}, so a "
+                "field cannot be told from a JSON path. Retry shortly"
+            ) from None
+        return frozenset(columns) or None
+
+    @staticmethod
+    def _refused_condition(
+        request: RuleCreateRequest, rule_id: str, message: str
+    ) -> RuleCreateResult:
+        """The result for a condition that does not compile, which the caller refuses on its error."""
+        rule = Rule(
+            rule_id=rule_id,
+            name=request.name,
+            severity=request.severity,
+            cel_filter=request.cel_filter,
+            condition=request.condition,
+            hunt_name=request.hunt_name,
+            source=request.source,
+        )
+        return RuleCreateResult(rule=rule, sql_errors=[SqlValidationError(message=message)])
 
     # -- Internal methods ----------------------------------
 

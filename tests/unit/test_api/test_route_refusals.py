@@ -55,6 +55,11 @@ VIEWER_REFUSED = [
         {"name": "viewer_rule", "severity": "low", "user_sql": "event_type = 'login'"},
     ),
     ("post", "/api/v1/rules/validate", {"sql": "event_type = 'login'"}),
+    (
+        "post",
+        "/api/v1/rules/preview",
+        {"source": "windows-audit", "condition": {"field": "host", "value": "a"}},
+    ),
     ("post", "/api/v1/services/seed", None),
     ("post", "/api/v1/synthetic-data/lookalike", {"rows": [{"a": 1}], "count": 1}),
     ("get", "/api/v1/system/defaults/drift", None),
