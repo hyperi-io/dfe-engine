@@ -39431,11 +39431,12 @@
             "type": "string",
             "enum": [
               "deploy-repo",
+              "registry",
               "deployment",
               "engine"
             ],
             "title": "Source",
-            "description": "deploy-repo when the stack version came from pins.yaml, deployment when it came from what deployed this pod, else engine."
+            "description": "deploy-repo when the stack version came from pins.yaml, registry when the published stack manifests matched the images this deployment runs, deployment when it came from what deployed this pod, else engine."
           },
           "backing": {
             "additionalProperties": {
@@ -56247,11 +56248,12 @@
             "type": "string",
             "enum": [
               "deploy-repo",
+              "registry",
               "deployment",
               "engine"
             ],
             "title": "Source",
-            "description": "deploy-repo when the stack version came from pins.yaml, deployment when it came from what deployed this pod, else engine."
+            "description": "deploy-repo when the stack version came from pins.yaml, registry when the published stack manifests matched the images this deployment runs, deployment when it came from what deployed this pod, else engine."
           },
           "python_version": {
             "type": "string",

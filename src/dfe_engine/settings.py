@@ -2159,6 +2159,49 @@ class DFESettings(BaseModel):
             "repo pins no stack. DFE_ENGINE_STACK_VERSION."
         ),
     )
+    stack_images: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The DFE images this deployment runs, each as ref@sha256:digest, comma-separated "
+            "in DFE_ENGINE_STACK_IMAGES. When set, the engine reads the published stack "
+            "manifests at startup and reports the newest stack whose digests agree with "
+            "every image listed, in place of the stack_version label. List DFE apps only: "
+            "an image no stack manifest names stops any stack matching."
+        ),
+    )
+    stack_manifest_repository: str = Field(
+        default="ghcr.io/hyperi-io/dfe-stack-manifest",
+        description=(
+            "host/path of the registry repository the stack manifests are published to, "
+            "read anonymously. Point it at a mirror for another organisation. "
+            "DFE_ENGINE_STACK_MANIFEST_REPOSITORY."
+        ),
+    )
+    stack_resolve: bool = Field(
+        default=True,
+        description=(
+            "Resolve the running stack from stack_images against the registry. Set false "
+            "on an air-gapped site, which then reports the stack_version label. "
+            "DFE_ENGINE_STACK_RESOLVE."
+        ),
+    )
+    stack_resolve_request_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "Longest one registry request in the stack resolution may take. "
+            "DFE_ENGINE_STACK_RESOLVE_REQUEST_TIMEOUT_SECONDS."
+        ),
+    )
+    stack_resolve_budget_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Longest the whole stack resolution may take, after which the stack_version "
+            "label answers. It runs in the background and never holds startup or readiness. "
+            "DFE_ENGINE_STACK_RESOLVE_BUDGET_SECONDS."
+        ),
+    )
     ui_version: str = Field(
         default="",
         description=(
@@ -2377,6 +2420,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS": "secrets.recovery_window_days",
             "DFE_ENGINE_SECRETS_TAGS": "secrets.tags",
             "DFE_ENGINE_STACK_VERSION": "stack_version",
+            "DFE_ENGINE_STACK_MANIFEST_REPOSITORY": "stack_manifest_repository",
             "DFE_ENGINE_UI_VERSION": "ui_version",
             "DFE_ENGINE_ENV": "env",
         },
@@ -2446,6 +2490,8 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
         {
             "DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS": "clickhouse.bootstrap_wait_seconds",
             "DFE_ENGINE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS": "hunts.detection_guard.preview_timeout_seconds",
+            "DFE_ENGINE_STACK_RESOLVE_REQUEST_TIMEOUT_SECONDS": "stack_resolve_request_timeout_seconds",
+            "DFE_ENGINE_STACK_RESOLVE_BUDGET_SECONDS": "stack_resolve_budget_seconds",
             "DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION": "hunts.phase_spread_fraction",
             "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS": "hunts.failure_backoff_initial_seconds",
             "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_MAX_SECONDS": "hunts.failure_backoff_max_seconds",
@@ -2497,6 +2543,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_GITOPS_PUSH": "gitops.push",
             "DFE_ENGINE_API_DOCS_ENABLED": "api.docs_enabled",
             "DFE_ENGINE_E2E_SERVER": "e2e_server",
+            "DFE_ENGINE_STACK_RESOLVE": "stack_resolve",
         },
     ),
     (
@@ -2541,6 +2588,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_ALERT_CHANNELS": "hunts.alert_channels",
             "DFE_ENGINE_HUNTS_LOOKUP_DATABASES": "hunts.lookup_databases",
             "DFE_ENGINE_API_CORS_ORIGINS": "api.cors_origins",
+            "DFE_ENGINE_STACK_IMAGES": "stack_images",
         },
     ),
 )
@@ -2607,7 +2655,12 @@ def _get_env_overrides() -> dict:
             if key not in overrides.get(section, {}):
                 _set_path(overrides, path, str(Path(config_dir) / subdir))
 
-    return {section: value for section, value in overrides.items() if value}
+    # Only an empty section goes: a top-level false or zero is the operator's answer.
+    return {
+        section: value
+        for section, value in overrides.items()
+        if value or not isinstance(value, dict)
+    }
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

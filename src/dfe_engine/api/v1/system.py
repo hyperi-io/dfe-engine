@@ -145,10 +145,11 @@ class VersionResponse(BaseModel):
             "dfe-ui, which then matches the ui field above."
         )
     )
-    source: Literal["deploy-repo", "deployment", "engine"] = Field(
+    source: Literal["deploy-repo", "registry", "deployment", "engine"] = Field(
         description=(
-            "deploy-repo when the stack version came from pins.yaml, deployment when it "
-            "came from what deployed this pod, else engine."
+            "deploy-repo when the stack version came from pins.yaml, registry when the "
+            "published stack manifests matched the images this deployment runs, deployment "
+            "when it came from what deployed this pod, else engine."
         )
     )
     python_version: str = Field(description="Python interpreter version")
@@ -285,10 +286,11 @@ class DeploymentResponse(BaseModel):
             "dfe-ui, which then matches the ui field above."
         )
     )
-    source: Literal["deploy-repo", "deployment", "engine"] = Field(
+    source: Literal["deploy-repo", "registry", "deployment", "engine"] = Field(
         description=(
-            "deploy-repo when the stack version came from pins.yaml, deployment when it "
-            "came from what deployed this pod, else engine."
+            "deploy-repo when the stack version came from pins.yaml, registry when the "
+            "published stack manifests matched the images this deployment runs, deployment "
+            "when it came from what deployed this pod, else engine."
         )
     )
     backing: dict[str, BackingFacts] = Field(
@@ -357,6 +359,17 @@ class SettingsSummary(BaseModel):
 # -- Endpoints ------------------------------------------------
 
 
+def _stack_source(
+    pinned: str | None, resolved: str | None, stack: str | None
+) -> Literal["deploy-repo", "registry", "deployment", "engine"]:
+    """Name where ``stack`` came from, in the order deployment_facts prefers them."""
+    if pinned:
+        return "deploy-repo"
+    if resolved:
+        return "registry"
+    return "deployment" if stack else "engine"
+
+
 def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
     """Everything this deployment can state about itself, read once.
 
@@ -364,10 +377,12 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
     the console footer shows and the versions its deployment card shows cannot
     disagree.
 
-    The pins win where there are any: they are what the operator chose. A deploy
-    with no pins base still knows what stood it up, because the chart passes that
-    in, so the footer shows a stack version rather than nothing. With neither, the
-    engine's own version is the whole answer.
+    The pins win where there are any: they are what the operator chose. Next comes
+    the published stack whose image digests match what this deployment runs, which
+    the engine resolves in the background after startup. A deploy with neither still
+    knows what stood it up, because the chart or compose passes that in, so the footer
+    shows a stack version rather than nothing. With none of them, the engine's own
+    version is the whole answer.
 
     Blocking: it reads the deploy repo, so a route calls it off the event loop.
     """
@@ -380,7 +395,8 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
         with gc.reading():
             pins = load_pins(gc.repo_path)
     pinned = stack_version(pins)
-    stack = pinned or settings.stack_version or None
+    resolved = getattr(request.app.state, "resolved_stack", None)
+    stack = pinned or resolved or settings.stack_version or None
     apps = component_overrides(pins)
     transport = settings.transport
     return DeploymentResponse(
@@ -402,7 +418,7 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
         engine=__version__,
         ui=apps.get(UI_COMPONENT) or settings.ui_version or None,
         apps=apps,
-        source="deploy-repo" if pinned else ("deployment" if stack else "engine"),
+        source=_stack_source(pinned, resolved, stack),
         backing=backing_facts(request),
     )
 

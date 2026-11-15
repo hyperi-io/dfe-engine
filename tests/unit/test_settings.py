@@ -209,6 +209,25 @@ class TestEnvOverrides:
             ),
             ("DFE_ENGINE_PROFILE", " mesh ", "deployment.profile", "mesh"),
             ("DFE_ENGINE_UI_VERSION", "v1.5.1", "ui_version", "v1.5.1"),
+            ("DFE_ENGINE_STACK_RESOLVE", "false", "stack_resolve", False),
+            (
+                "DFE_ENGINE_STACK_MANIFEST_REPOSITORY",
+                "registry.example/org/dfe-stack-manifest",
+                "stack_manifest_repository",
+                "registry.example/org/dfe-stack-manifest",
+            ),
+            (
+                "DFE_ENGINE_STACK_RESOLVE_REQUEST_TIMEOUT_SECONDS",
+                "2.5",
+                "stack_resolve_request_timeout_seconds",
+                2.5,
+            ),
+            (
+                "DFE_ENGINE_STACK_RESOLVE_BUDGET_SECONDS",
+                "12",
+                "stack_resolve_budget_seconds",
+                12.0,
+            ),
             (
                 "DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
                 "/custom/svc",
@@ -752,6 +771,14 @@ def _listed(settings: DFESettings, path: str, key: str | None) -> list:
 # it, the env value, the item key that identifies an entry, and what that value reads as.
 _LIST_SETTINGS = [
     pytest.param(
+        "stack_images",
+        "DFE_ENGINE_STACK_IMAGES",
+        "r.example/dfe-loader:1@sha256:aa, r.example/dfe-receiver:1@sha256:bb",
+        None,
+        ["r.example/dfe-loader:1@sha256:aa", "r.example/dfe-receiver:1@sha256:bb"],
+        id="stack_images",
+    ),
+    pytest.param(
         "api.cors_origins",
         "DFE_ENGINE_API_CORS_ORIGINS",
         "https://env.example",
@@ -795,6 +822,7 @@ _LIST_SETTINGS = [
 
 # The same fields as a config file sets them, plus admin_links, whose env form is a string.
 _FILE_LISTS = {
+    "stack_images": (["r.example/file:1@sha256:cc"], None, ["r.example/file:1@sha256:cc"]),
     "api.cors_origins": (["https://file.example"], None, ["https://file.example"]),
     "hunts.alert_channels": (["json://file.example"], None, ["json://file.example"]),
     "hunts.lookup_databases": (["intel"], None, ["intel"]),

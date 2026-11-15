@@ -656,11 +656,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             name="gitops-consolidation",
         )
 
+    # In the background: the registry is the internet's, so startup and readiness never wait on it.
+    from dfe_engine.stack_resolve import resolve_into
+
+    app.state.resolved_stack = None
+    app.state.stack_resolution = asyncio.create_task(
+        resolve_into(app.state, settings), name="stack-resolution"
+    )
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
     yield
     health.set_ready(False)
+    stack_resolution = getattr(app.state, "stack_resolution", None)
+    if stack_resolution is not None:
+        stack_resolution.cancel()
+        await asyncio.gather(stack_resolution, return_exceptions=True)
     oidc_group_sync = getattr(app.state, "oidc_group_sync", None)
     if oidc_group_sync is not None:
         # A sync writes group files and asks for a reconcile, so it stops before both close.

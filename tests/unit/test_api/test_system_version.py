@@ -99,6 +99,35 @@ class TestGetVersion:
         assert body["stack"] == "2.2.0-rc.13"
         assert body["source"] == "deployment"
 
+    def test_the_registry_match_answers_in_place_of_the_baked_label(
+        self, client, app, admin_headers
+    ):
+        # The label a build wrote down said 2.2.2-rc.5, the images running are 2.2.2's.
+        app.state.settings.stack_version = "2.2.2-rc.5"
+        app.state.resolved_stack = "2.2.2"
+
+        body = client.get("/api/v1/system/version", headers=admin_headers).json()
+
+        assert body["stack"] == "2.2.2"
+        assert body["source"] == "registry"
+
+    def test_the_registry_match_answers_with_no_baked_label(self, client, app, admin_headers):
+        app.state.resolved_stack = "2.2.2"
+
+        body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
+
+        assert body["stack"] == "2.2.2"
+        assert body["source"] == "registry"
+
+    def test_the_pins_win_over_the_registry_match(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        app.state.resolved_stack = "2.2.2"
+
+        body = client.get("/api/v1/system/version", headers=admin_headers).json()
+
+        assert body["stack"] == "2.2.0-rc.13"
+        assert body["source"] == "deploy-repo"
+
     def test_the_pins_win_over_what_deployed_the_pod(self, client, app, admin_headers, tmp_path):
         # The pins are what the operator chose. The deployment value is only
         # what happened to stand this pod up.
