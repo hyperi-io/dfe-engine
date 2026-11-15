@@ -3,6 +3,20 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.91](https://github.com/hyperi-io/dfe-engine/compare/v1.22.90...v1.22.91) (2026-11-15)
+
+### Bug Fixes
+
+* **appmgmt:** read open connections as a total ([#1144](https://github.com/hyperi-io/dfe-engine/issues/1144)) ([fb90130](https://github.com/hyperi-io/dfe-engine/commit/fb90130e45264fbd05607dbc57aafc94ddc608d8))
+* **capture:** stop seeding the loader's disable lists ([#1165](https://github.com/hyperi-io/dfe-engine/issues/1165)) ([575efc7](https://github.com/hyperi-io/dfe-engine/commit/575efc7a5bbe2bd6cbffde5c3a3079c0838d494f)), closes [hyperi-io/dfe-loader#347](https://github.com/hyperi-io/dfe-loader/issues/347) [hyperi-io/dfe-loader#347](https://github.com/hyperi-io/dfe-loader/issues/347)
+* **deps:** take opentelemetry-api 1.45.2 for CVE-2026-126360 ([1d175b0](https://github.com/hyperi-io/dfe-engine/commit/1d175b087686d771c2d813ae05b427f2f2e26b5a))
+* **gitcrud:** walk the deploy repo once per head ([#1143](https://github.com/hyperi-io/dfe-engine/issues/1143)) ([09085f9](https://github.com/hyperi-io/dfe-engine/commit/09085f9b9b9df4b3e773ce262933b11be4b3a082))
+* **image:** copy THIRD-PARTY-NOTICES from dist instead of the tree ([#1153](https://github.com/hyperi-io/dfe-engine/issues/1153)) ([f15039d](https://github.com/hyperi-io/dfe-engine/commit/f15039d5adf0dd88d6754cb8f692a387bcebaaf9))
+* **rules:** build a rule from a stored condition and preview it ([#1169](https://github.com/hyperi-io/dfe-engine/issues/1169)) ([b7a5e29](https://github.com/hyperi-io/dfe-engine/commit/b7a5e29f281f0e9a88334ce7d22cc98995e3e1c9))
+* **schema:** say what the lease table's TTL does after an idle week ([#1151](https://github.com/hyperi-io/dfe-engine/issues/1151)) ([173e84c](https://github.com/hyperi-io/dfe-engine/commit/173e84c80bc998e5a7291f0249d4f7c8556282e5))
+* **secrets:** mint passwords and keys from letters and digits ([#1168](https://github.com/hyperi-io/dfe-engine/issues/1168)) ([4180ddf](https://github.com/hyperi-io/dfe-engine/commit/4180ddf70e5e201fede70ad6aac8326eb2a13b6e))
+* **types:** clear the diagnostics ty 0.0.95 raises on the engine ([c11f9f3](https://github.com/hyperi-io/dfe-engine/commit/c11f9f334ad92086fb4e03e0d19f2a62d411ae62))
+
 ## [1.22.90](https://github.com/hyperi-io/dfe-engine/compare/v1.22.89...v1.22.90) (2026-11-12)
 
 ### Bug Fixes
