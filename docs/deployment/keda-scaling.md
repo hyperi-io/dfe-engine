@@ -24,7 +24,7 @@ The broker autoscaler renders only for `kafka.provider: strimzi`, so Redpanda br
 
 DFE sizes ClickHouse and doesn't autoscale it. The official operator has no autoscaler: scaling is an edit to `spec.replicas` or `spec.shards`, and a new shard takes new writes only, because the operator moves no existing rows ([operator scaling](https://clickhouse.com/docs/products/kubernetes-operator/guides/scaling)). Autoscaling it may come if a paying customer needs it.
 
-Nodes are the platform's job. KEDA adds pods, and on AWS Karpenter adds the nodes they need. On-premises DFE ships no node autoscaler, so the node pool is sized for the peak (dfe-infra `docs/autoscaling.md` and `docs/deployment/node-autoscaling.md`).
+Nodes are the platform's job. KEDA adds pods, and on AWS Karpenter adds the nodes they need. On-premises DFE ships no node autoscaler, so the node pool is sized for the peak (dfe-infra [autoscaling](https://github.com/hyperi-io/dfe-infra/blob/main/docs/autoscaling.md) and [node autoscaling](https://github.com/hyperi-io/dfe-infra/blob/main/docs/deployment/node-autoscaling.md)).
 
 ## The two triggers
 
