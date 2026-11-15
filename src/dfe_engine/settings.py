@@ -312,6 +312,15 @@ class HuntSmoothingSettings(BaseModel):
             "DFE_ENGINE_HUNTS_SMOOTHING_WINDOW_DAYS."
         ),
     )
+    cost_quantile: float = Field(
+        default=0.95,
+        gt=0,
+        le=1,
+        description=(
+            "The quantile over a hunt's fires in the window that stands for its cost. "
+            "DFE_ENGINE_HUNTS_SMOOTHING_COST_QUANTILE."
+        ),
+    )
     max_step_fraction: float = Field(
         default=0.1,
         gt=0,
@@ -2596,6 +2605,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_SMOOTHING_MAX_STEP_FRACTION": "hunts.smoothing.max_step_fraction",
             "DFE_ENGINE_HUNTS_SMOOTHING_HYSTERESIS": "hunts.smoothing.hysteresis",
             "DFE_ENGINE_HUNTS_SMOOTHING_WEIGHT_MEMORY": "hunts.smoothing.weight_memory",
+            "DFE_ENGINE_HUNTS_SMOOTHING_COST_QUANTILE": "hunts.smoothing.cost_quantile",
             "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS": "hunts.failure_backoff_initial_seconds",
             "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_MAX_SECONDS": "hunts.failure_backoff_max_seconds",
             "DFE_ENGINE_HUNTS_FAILURE_REMINDER_SECONDS": "hunts.failure_reminder_seconds",

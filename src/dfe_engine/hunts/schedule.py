@@ -13,7 +13,10 @@ so an irregular cron (business hours only) fires more often than its sparse wind
 imply. Either way the runner only sees ``interval_seconds``.
 
 Each hunt gets a deterministic offset below its interval, derived from its id, so hunts
-on one interval start at different points in it.
+on one interval start at different points in it. With ``hunts.smoothing.enabled`` the
+phase smoother learns better offsets and writes them to ``hunt_schedule``, and the
+runner, the API and KEDA all read that one table, so every fire-time function here
+takes an explicit ``offset`` that wins over the hash.
 
 KEDA can only wake the FIRST worker if "is any hunt due?" is answerable with NO
 worker running, i.e. as a ClickHouse query KEDA runs itself. The per-hunt schedule
@@ -34,6 +37,7 @@ to zero precisely when one would idle. See docs/data-plane/hunt-runner-scaling.m
 import hashlib
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from croniter import CroniterBadCronError, croniter
@@ -168,31 +172,47 @@ def phase_offset(
     return digest % window
 
 
+def effective_offset(
+    hunt_id: str, interval_seconds: int, fraction: float, offset: int | None
+) -> int:
+    """The learned *offset* when one is given, else the hash offset."""
+    return offset if offset is not None else phase_offset(hunt_id, interval_seconds, fraction)
+
+
 def next_due(
     hunt_id: str,
     interval_seconds: int,
     now_epoch: int,
     fraction: float = PHASE_SPREAD_FRACTION,
+    offset: int | None = None,
 ) -> int:
-    """Next fire time = next interval boundary + the hunt's stable phase offset."""
-    offset = phase_offset(hunt_id, interval_seconds, fraction)
+    """Next fire time = next interval boundary + the hunt's phase offset."""
+    phase = effective_offset(hunt_id, interval_seconds, fraction, offset)
     boundary = (now_epoch // interval_seconds) * interval_seconds
-    due = boundary + offset
+    due = boundary + phase
     if due <= now_epoch:
         due += interval_seconds
     return due
 
 
 def current_fire(
-    hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = PHASE_SPREAD_FRACTION
+    hunt_id: str,
+    interval_seconds: int,
+    now_epoch: int,
+    fraction: float = PHASE_SPREAD_FRACTION,
+    offset: int | None = None,
 ) -> int:
     """The scheduled fire time for the CURRENT interval (boundary + offset)."""
-    offset = phase_offset(hunt_id, interval_seconds, fraction)
-    return (now_epoch // interval_seconds) * interval_seconds + offset
+    phase = effective_offset(hunt_id, interval_seconds, fraction, offset)
+    return (now_epoch // interval_seconds) * interval_seconds + phase
 
 
 def latest_fire(
-    hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = PHASE_SPREAD_FRACTION
+    hunt_id: str,
+    interval_seconds: int,
+    now_epoch: int,
+    fraction: float = PHASE_SPREAD_FRACTION,
+    offset: int | None = None,
 ) -> int:
     """The most recent scheduled fire at or before now.
 
@@ -201,7 +221,7 @@ def latest_fire(
     before the offset (a 46s offset polled at :00/:15/:30/:45) still runs the hunt
     once per interval instead of never.
     """
-    fire = current_fire(hunt_id, interval_seconds, now_epoch, fraction)
+    fire = current_fire(hunt_id, interval_seconds, now_epoch, fraction, offset)
     return fire if now_epoch >= fire else fire - interval_seconds
 
 
@@ -222,13 +242,76 @@ def ensure_schedule_schema(ch: Any, database: str) -> None:
     require_objects(ch, database=database, object_ids=(_SCHEDULE_ID,), what="the hunt schedule")
 
 
+@dataclass(frozen=True, slots=True)
+class ScheduleRow:
+    """One enabled hunt's row in ``hunt_schedule``.
+
+    Attributes:
+        interval_seconds: The interval the offset was written for.
+        phase_offset: Seconds into the interval the hunt fires.
+        updated: Epoch seconds the row was last written, the smoother's cool-down clock.
+    """
+
+    interval_seconds: int
+    phase_offset: int
+    updated: int
+
+
+def read_schedule_rows(ch: Any, database: str) -> dict[str, ScheduleRow]:
+    """Every enabled hunt's row as the table stands, newest write per hunt."""
+    rows = ch.query(
+        "SELECT hunt_id, interval_seconds, phase_offset, toUnixTimestamp(last_updated) FROM ("  # noqa: S608 - quoted configured database
+        "SELECT hunt_id, argMax(interval_seconds, updated) AS interval_seconds, "
+        "argMax(phase_offset, updated) AS phase_offset, argMax(enabled, updated) AS enabled, "
+        "max(updated) AS last_updated "
+        f"FROM {quote_identifier(database)}.hunt_schedule GROUP BY hunt_id) WHERE enabled = 1"
+    ).result_rows
+    return {str(r[0]): ScheduleRow(int(r[1]), int(r[2]), int(r[3])) for r in rows}
+
+
+def read_schedule(ch: Any, database: str) -> dict[str, tuple[int, int]]:
+    """Every enabled hunt's ``(interval_seconds, phase_offset)`` as the table stands."""
+    rows = read_schedule_rows(ch, database)
+    return {hunt_id: (row.interval_seconds, row.phase_offset) for hunt_id, row in rows.items()}
+
+
+def write_offsets(ch: Any, database: str, offsets: Mapping[str, tuple[int, int]]) -> None:
+    """Write ``hunt_id -> (interval_seconds, phase_offset)`` rows, enabled, touching no other hunt.
+
+    The smoother writes one moved hunt this way, so ``updated`` moves only for that
+    hunt and the cool-down it clocks stays per hunt.
+    """
+    rows = [[hunt_id, interval, offset, 1] for hunt_id, (interval, offset) in offsets.items()]
+    if rows:
+        ch.insert(
+            "hunt_schedule",
+            rows,
+            column_names=_COLUMNS,
+            database=database,
+            settings=keep_identical_rows(ch),
+        )
+
+
+def learned_offsets(
+    schedule: Mapping[str, tuple[int, int]], specs: Mapping[str, HuntSpec]
+) -> dict[str, int]:
+    """The offsets in *schedule* still valid for *specs*: the hunt exists and its interval is unchanged.
+
+    An interval change drops the hunt back to its hash offset until the smoother
+    writes a new one, because an offset learned for one interval says nothing about
+    another.
+    """
+    offsets = {}
+    for hunt_id, (interval, offset) in schedule.items():
+        spec = specs.get(hunt_id)
+        if spec is not None and spec.interval_seconds == interval:
+            offsets[hunt_id] = offset
+    return offsets
+
+
 def _enabled_ids(ch: Any, database: str) -> set[str]:
     """hunt_ids currently materialised as enabled (for tombstone diffing)."""
-    rows = ch.query(
-        "SELECT hunt_id FROM (SELECT hunt_id, argMax(enabled, updated) AS e "  # noqa: S608 - quoted configured database
-        f"FROM {quote_identifier(database)}.hunt_schedule GROUP BY hunt_id) WHERE e = 1"
-    ).result_rows
-    return {r[0] for r in rows}
+    return set(read_schedule(ch, database))
 
 
 def publish_schedule(
@@ -237,19 +320,23 @@ def publish_schedule(
     specs: Mapping[str, HuntSpec],
     *,
     fraction: float = PHASE_SPREAD_FRACTION,
+    offsets: Mapping[str, int] | None = None,
 ) -> int:
-    """Materialise the deterministic schedule KEDA scales on. Returns live count.
+    """Materialise the schedule KEDA scales on. Returns live count.
 
-    Writes one enabled=1 row per live hunt carrying the SAME phase offset the worker
-    computes (phase_offset - single source of truth, so KEDA's due view can
-    never drift from the worker's), and tombstones (enabled=0) any hunt that was
-    enabled before but is absent now, so a deleted hunt no longer wakes KEDA.
+    Writes one enabled=1 row per live hunt carrying its offset from *offsets* where
+    that names it, else the SAME hash offset the worker computes, and tombstones
+    (enabled=0) any hunt that was enabled before but is absent now, so a deleted
+    hunt no longer wakes KEDA. The smoother passes the offsets it learned, and
+    ``dfe-hunt-runner materialise`` passes :func:`learned_offsets` of the live table
+    when smoothing is on, so neither overwrites what the other wrote.
 
-    Idempotent: safe to call on every hunt-config change (the Argo post-sync hook).
-    A hunt removed and then re-added writes a block identical to an earlier one, and
-    it has to land over the tombstone, so the insert keeps identical rows.
+    Idempotent: safe to call on every hunt-config change. A hunt removed and then
+    re-added writes a block identical to an earlier one, and it has to land over the
+    tombstone, so the insert keeps identical rows.
     """
     ensure_schedule_schema(ch, database)
+    learned = offsets or {}
     rows: list[list[Any]] = []
     live_ids: set[str] = set()
     for spec in specs.values():
@@ -257,7 +344,9 @@ def publish_schedule(
             [
                 spec.hunt_id,
                 spec.interval_seconds,
-                phase_offset(spec.hunt_id, spec.interval_seconds, fraction),
+                effective_offset(
+                    spec.hunt_id, spec.interval_seconds, fraction, learned.get(spec.hunt_id)
+                ),
                 1,
             ]
         )
@@ -273,6 +362,28 @@ def publish_schedule(
             settings=keep_identical_rows(ch),
         )
     return len(live_ids)
+
+
+def restore_hash_offsets(ch: Any, database: str, *, fraction: float = PHASE_SPREAD_FRACTION) -> int:
+    """Rewrite every enabled row whose offset is not the hash offset. Returns the rows rewritten.
+
+    What turning smoothing off does to the table. A table with no rows, the default
+    on Kubernetes where nothing runs ``materialise``, stays empty, and a table already
+    on the hash offsets is not written to at all.
+    """
+    rows: list[list[Any]] = []
+    for hunt_id, (interval, offset) in read_schedule(ch, database).items():
+        if interval > 0 and offset != phase_offset(hunt_id, interval, fraction):
+            rows.append([hunt_id, interval, phase_offset(hunt_id, interval, fraction), 1])
+    if rows:
+        ch.insert(
+            "hunt_schedule",
+            rows,
+            column_names=_COLUMNS,
+            database=database,
+            settings=keep_identical_rows(ch),
+        )
+    return len(rows)
 
 
 def due_query(database: str) -> str:

@@ -59,6 +59,8 @@ COST_MEM_BYTES = "hunt_cost_mem_bytes"
 COST_DURATION_MS = "hunt_cost_duration_ms"
 PHASE_OFFSET = "hunt_phase_offset"
 PHASE_SHIFTS = "hunt_phase_shift_total"
+OBSERVED_OVERLAP_PEAK = "hunt_observed_overlap_peak"
+OBSERVED_MEM_PEAK = "hunt_observed_mem_peak_bytes"
 
 
 class HuntRunnerMetrics:
@@ -185,6 +187,17 @@ class HuntRunnerMetrics:
         )
         self._phase_shifts = manager.counter(
             PHASE_SHIFTS, "Offset moves the controller committed", ["hunt_id"]
+        )
+
+        self._observed_overlap = manager.gauge(
+            OBSERVED_OVERLAP_PEAK,
+            "Most hunt queries finishing in one bucket of the trailing hour, read from "
+            "query_log_archive",
+        )
+        self._observed_mem = manager.gauge(
+            OBSERVED_MEM_PEAK,
+            "Largest summed peak memory of hunt queries finishing in one bucket of the "
+            "trailing hour, read from query_log_archive",
         )
 
     @property
@@ -366,6 +379,13 @@ class HuntRunnerMetrics:
         self._phase_shifts.labels(hunt_id=hunt_id).inc()
         self._phase_offset.labels(hunt_id=hunt_id).set(offset)
 
+    def observed(self, *, overlap_peak: int, mem_peak_bytes: float) -> None:
+        """Record the trailing hour's load as the archive saw it, the evidence beside the model."""
+        if self._manager is None:
+            return
+        self._observed_overlap.set(overlap_peak)
+        self._observed_mem.set(mem_peak_bytes)
+
 
 def create(app_name: str = SERVICE_NAME) -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -416,6 +436,8 @@ __all__ = [
     "DUPLICATES_SKIPPED",
     "FIRES_HELD",
     "FIRE_FAILURES",
+    "OBSERVED_MEM_PEAK",
+    "OBSERVED_OVERLAP_PEAK",
     "OVERLAP_ROWS_REREAD",
     "OVERRUNS",
     "PHASE_OFFSET",

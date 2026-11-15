@@ -645,6 +645,7 @@ class TestEnvOverrides:
             ("hunts.smoothing.cycle_seconds", "HUNTS_SMOOTHING_CYCLE_SECONDS", 300.0, "60", 60.0),
             ("hunts.smoothing.bucket_seconds", "HUNTS_SMOOTHING_BUCKET_SECONDS", 30, "10", 10),
             ("hunts.smoothing.window_days", "HUNTS_SMOOTHING_WINDOW_DAYS", 7, "3", 3),
+            ("hunts.smoothing.cost_quantile", "HUNTS_SMOOTHING_COST_QUANTILE", 0.95, "0.9", 0.9),
             (
                 "hunts.smoothing.max_step_fraction",
                 "HUNTS_SMOOTHING_MAX_STEP_FRACTION",
@@ -756,6 +757,7 @@ class TestEnvOverrides:
             {"smoothing": {"hysteresis": 1.0}},
             {"smoothing": {"max_step_fraction": 0}},
             {"smoothing": {"weight_memory": 1.5}},
+            {"smoothing": {"cost_quantile": 1.5}},
             {"failure_backoff_initial_seconds": 0},
             {"failure_backoff_initial_seconds": 60, "failure_backoff_max_seconds": 30},
         ],
@@ -1362,14 +1364,6 @@ class TestEverySettingIsRead:
     # Read inside settings.py by e2e_routes_enabled, which this search skips.
     KNOWN_UNREAD = {
         ("DFESettings", "e2e_server"),
-        # Declared ahead of the smoothing controller that reads them.
-        ("HuntSmoothingSettings", "cooldown_cycles"),
-        ("HuntSmoothingSettings", "cycle_seconds"),
-        ("HuntSmoothingSettings", "horizon_max_seconds"),
-        ("HuntSmoothingSettings", "hysteresis"),
-        ("HuntSmoothingSettings", "max_step_fraction"),
-        ("HuntSmoothingSettings", "memory_cap_bytes"),
-        ("HuntSmoothingSettings", "weight_memory"),
     }
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the
