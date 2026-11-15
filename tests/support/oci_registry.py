@@ -15,7 +15,7 @@ import hashlib
 import json
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -163,7 +163,7 @@ def _handler(registry: FakeRegistry) -> type[BaseHTTPRequestHandler]:
 
 
 @contextmanager
-def serve_registry() -> Iterator[FakeRegistry]:
+def serve_registry() -> Generator[FakeRegistry]:
     """Run a registry on a loopback port for the length of the block."""
     fake = FakeRegistry()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(fake))
