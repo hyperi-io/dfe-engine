@@ -161,7 +161,6 @@ def test_real_fires_leave_archive_rows_the_cost_model_groups_per_fire(ch_client,
         worker.run(spec, scheduled_start=fire)
     ch_client.command("SYSTEM FLUSH LOGS")
 
-    assert archive_has_cpu(ch_client, db) is False
     costs = read_costs(ch_client, db, window_days=1, quantile=0.95, with_cpu=False)
     assert hunt_id in costs
     cost = costs[hunt_id]
@@ -171,9 +170,14 @@ def test_real_fires_leave_archive_rows_the_cost_model_groups_per_fire(ch_client,
     assert cost.cpu_us is None
     # A hunt that never fired has no row, so the smoother leaves it on its offset.
     assert "never_fired" not in costs
-    overlap, mem = read_observed(ch_client, db, bucket_seconds=30)
+    overlap, mem, wait = read_observed(ch_client, db, bucket_seconds=30)
     assert overlap >= 1
     assert mem >= 0
+    assert wait == 0.0
+    # The 1.1.0 archive carries cpu_wait_us, read as seconds and never negative.
+    assert archive_has_cpu(ch_client, db) is True
+    _, _, wait = read_observed(ch_client, db, bucket_seconds=30, with_cpu=True)
+    assert wait >= 0.0
 
 
 def test_a_cycle_moves_one_colliding_hunt_and_leaves_a_hunt_with_no_cost_alone(
