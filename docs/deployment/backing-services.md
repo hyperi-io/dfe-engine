@@ -152,9 +152,13 @@ flowchart LR
 
 The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets an operator enters all go through `scalo.secrets`. With no `DFE_ENGINE_SECRETS_PROVIDER` they land in the `file` provider under `DFE_ENGINE_SECRETS_PATH` (default `./.secrets`), which is all dfe-docker needs.
 
-`DFE_ENGINE_SECRETS_PROVIDER=openbao` (or `vault`) reads `DFE_ENGINE_SECRETS_ADDR` for the server, `DFE_ENGINE_SECRETS_MOUNT` for the kv mount (default `dfe`) and `DFE_ENGINE_SECRETS_ROLE` for the AppRole role id.
+`DFE_ENGINE_SECRETS_PROVIDER=openbao` (or `vault`) keeps them in OpenBao at `DFE_ENGINE_SECRETS_ADDR`, falling back to `VAULT_ADDR`, under the KV v2 mount `DFE_ENGINE_SECRETS_MOUNT` (default `dfe`). The engine logs in with AppRole when `DFE_ENGINE_SECRETS_ROLE` holds the role id, taking the secret id from `VAULT_SECRET_ID`, and with `VAULT_TOKEN` otherwise. `VAULT_ROLE_ID` alone does not select AppRole.
+
+The engine's OpenBao policy needs create, read, update, delete and list on `<mount>/data/*` and `<mount>/metadata/*`. An OpenBao behind a private CA is trusted through `SSL_CERT_FILE`.
 
 `DFE_ENGINE_SECRETS_PROVIDER=aws` keeps them in AWS Secrets Manager as `<DFE_ENGINE_SECRETS_NAME_PREFIX>/<path>` in `DFE_ENGINE_SECRETS_REGION`, and the engine stops at startup without the region. Each is encrypted with `DFE_ENGINE_SECRETS_KMS_KEY_ID` (the AWS managed key when unset, with a startup warning), tagged with the `DFE_ENGINE_SECRETS_TAGS` JSON object, and deleted with no recovery window unless `DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS` sets 7-30. AWS finishes a forced delete in the background, so re-creating the same name retries for up to 30 seconds. Inside a window the name stays taken: re-creating that OIDC provider answers 409 with the remedy, and a reconcile re-creating that group fails naming the setting.
+
+More than one engine needs `openbao` or `aws`. Both store a secret only when the name is free (KV v2 `cas=0`, `CreateSecret`), so replicas minting the same secret keep one value.
 
 `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
 
