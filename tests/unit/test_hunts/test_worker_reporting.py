@@ -53,6 +53,12 @@ class _FakeCoordinator:
     def set_watermark(self, hunt_id: str, watermark: int) -> None:
         pass
 
+    def get_safe_horizon_mark(self, hunt_id: str, mark: str) -> int | None:
+        return None
+
+    def set_safe_horizon_mark(self, hunt_id: str, mark: str, value: int) -> None:
+        pass
+
     def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
         self.runs.append((hunt_id, fire, rows_written))
 

@@ -31,15 +31,21 @@ def window(
     last_watermark: int | None,
     scheduled_start: int,
     interval_seconds: int,
+    first_fire: int | None = None,
 ) -> tuple[int, int]:
     """Return (start, end) epoch bounds for the incremental query.
 
-    start = last committed watermark, or (scheduled_start - interval) on first run.
-    end   = scheduled_start. The query is `_timestamp_load >= start AND < end`.
+    start = last committed watermark, or an interval before the hunt's first fire
+    while there is none. ``first_fire`` is the fire the hunt first attempted, kept by
+    the worker, so a first fire that never completes does not move the start to a
+    later fire and skip the rows between. end = scheduled_start. The query is
+    `_timestamp_load >= start AND < end`.
     """
     end = scheduled_start
-    start = last_watermark if last_watermark is not None else scheduled_start - interval_seconds
-    return start, end
+    if last_watermark is not None:
+        return last_watermark, end
+    anchor = first_fire if first_fire is not None else scheduled_start
+    return anchor - interval_seconds, end
 
 
 def read_from(start: int, last_watermark: int | None, overlap_seconds: int) -> int:
