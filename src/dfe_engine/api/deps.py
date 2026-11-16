@@ -624,8 +624,8 @@ async def get_current_user(request: Request) -> AuthContext:
     3. JWT Bearer token -- standalone/Docker users
     4. Auth disabled -- dev/test root context
 
-    When ``auth.enabled=False`` (dev/test default), returns a root AuthContext
-    that bypasses authorization if no credentials are provided.
+    When ``auth.enabled=False`` (default on, and off only in a dev posture), returns
+    a root AuthContext that bypasses authorization if no credentials are provided.
     """
     # No auth.login.success here: this runs on every request and creates no
     # session, so the login audit belongs to the credential exchange

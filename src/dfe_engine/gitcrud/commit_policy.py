@@ -385,10 +385,9 @@ def resolve_mode(
     environment: str,
     rbac_class: str,
     protected: bool = False,
-    require_pr: bool = False,
     auto_merge: bool = False,
 ) -> str:
-    """'pr' for production posture / protected / governance / explicit, else 'direct'.
+    """'pr' for production posture / protected / governance, else 'direct'.
 
     PRs for production-controlling changes, direct-commit for low-risk - enforced at
     the git level (the standard). Production posture is anything DFE_ENGINE_ENV does not
@@ -398,6 +397,6 @@ def resolve_mode(
     """
     if auto_merge:
         return "direct"
-    if require_pr or protected or rbac_class == "governance" or not is_dev_posture(environment):
+    if protected or rbac_class == "governance" or not is_dev_posture(environment):
         return "pr"
     return "direct"

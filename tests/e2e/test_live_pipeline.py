@@ -192,22 +192,22 @@ def test_ui_deploys_schema_change_via_git(e2e: E2EConfig) -> None:
 
     # No publish call - see the note in the infra test above.
 
-    # VERIFY the generated DDL landed in the deploy repo (ddl/<table>.sql), and
-    # that it carries our additional column.
-    def _ddl_committed():
+    # VERIFY the source, with our additional column, landed in the deploy repo's
+    # config/sources/ (the sources resource class, source/registry.py).
+    def _source_committed():
         with tempfile.TemporaryDirectory() as d:
             repo = _clone_deploy_repo(e2e, Path(d) / "repo")
-            ddl_dir = repo / "ddl"
-            if not ddl_dir.exists():
+            sources_dir = repo / "config" / "sources"
+            if not sources_dir.exists():
                 return False
-            for sql in ddl_dir.glob("*.sql"):
-                text = sql.read_text()
+            for path in sources_dir.glob("*.yaml"):
+                text = path.read_text()
                 if source_name in text and "e2e_marker" in text:
                     return True
             return False
 
     assert poll_until(
-        _ddl_committed, timeout=90, interval=5, desc=f"DDL for {source_name} in deploy repo"
+        _source_committed, timeout=90, interval=5, desc=f"{source_name} in deploy repo"
     )
 
     # cleanup: remove the test source.
