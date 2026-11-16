@@ -22,16 +22,23 @@ A source has a tri-state lifecycle, not a boolean toggle:
 | `dormant` | retained -- pre-positioned, never dropped | off | held (conflict-checked -- it may activate later) |
 | `disabled` | retained -- nothing drops it, drop it by hand if the data is not wanted | off | released -- another source may claim it |
 
+A source moves freely between active, dormant and disabled, and its table stays in every state.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> active: create
-    active --> dormant: pause (schema stays)
-    dormant --> active: resume
-    active --> disabled: turn off (table stays)
-    dormant --> disabled
-    disabled --> active: re-enable
-    disabled --> dormant
+    direction LR
+    accTitle: L4 Detail -- Source lifecycle
+    accDescr: A source is created active. It can move between active, dormant and disabled in any direction, and its table stays in every state.
+    [*] --> Active: create
+    Active --> Dormant: pause
+    Dormant --> Active: resume
+    Active --> Disabled: turn off
+    Disabled --> Active: re-enable
+    Dormant --> Disabled: turn off
+    Disabled --> Dormant: pause
 ```
+
+*Figure 1. L4 Detail -- Source lifecycle. Each move is a `PATCH /api/v1/sources/{name}` naming the target `state`.* Up: [Data plane](README.md).
 
 Materialisation derives from the declared state alone: CREATE on active, and
 no DDL on dormant or disabled. Creates are idempotent, and nothing drops a
@@ -56,11 +63,11 @@ description never silently re-activates a dormant source. `PATCH
 
 One YAML file per source, managed by `SourceRegistry` over two backends:
 
-- **gitcrud** (preferred, active whenever gitops is enabled): the all-in-one
+- gitcrud, used whenever gitops is enabled: the all-in-one
   source YAML IS the gitcrud doc in the deploy repo's `config/sources/`
   (ResourceClass `sources`). Every mutation is one git commit attributed to the
   caller, and the stored doc carries the universal gitcrud `metadata` block.
-- **DirectoryConfigStore** (standalone fallback): a plain YAML directory as
+- DirectoryConfigStore, the standalone fallback: a plain YAML directory as
   SSoT -- the same cached, callback-driven store `ServiceConfigRegistry` uses. It
   never commits: governed writes go through gitcrud.
 
@@ -73,7 +80,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
       syslog.yaml                       ...
 ```
 
-## What each operation does
+What each operation does:
 
 | Operation | Effect |
 |-----------|--------|
@@ -118,8 +125,11 @@ POST   /api/v1/sources/bulk             # Bulk action: enable | disable | dorman
 POST   /api/v1/sources/seed             # Seed built-in sources (non-destructive)
 ```
 
+The rest of the source routes (flow, lag, signals, sample, export and import, the
+engine list, `reconcile-apps`) are in the OpenAPI spec, `openapi/openapi.json`.
+
 Transform, fetcher and views are sections of the source write body, not
 sub-resources. The global service configs (receiver, loader, archiver) live
-under the service-config API and carry infrastructure concerns only -- their
+under the service-config API and hold infrastructure settings and nothing else -- their
 per-source routing is compiled, and a hand edit to it is drift. Adding a data
 source is one POST. The engine handles the topics, the DDL and the wiring.

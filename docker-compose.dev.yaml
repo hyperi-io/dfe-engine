@@ -1,35 +1,20 @@
-# Development services for DFE Engine API
-#
-# Prism mock server -- frontend devs can develop against the API contract
-# without running the real backend:
-#
-#   docker compose -f docker-compose.dev.yaml up prism
-#
-# Then point dfe-ui at http://localhost:4010 instead of :8000
-#
-# TypeScript type generation (run from host):
-#   npx openapi-typescript openapi/openapi.json -o types.ts
+# Local dev services: docs/local-dev.md.
 
 services:
   prism:
-    # Digest-pinned (#106) so the floating major tag cannot be repointed.
     image: stoplight/prism:5@sha256:3f6d29e31bfe0b99587f0f6f79c423858dd6a2ea7e1e4658273ed930a78a9acf
     command: mock /spec/openapi.json --host 0.0.0.0
     ports:
       - "4010:4010"
     volumes:
       - ./openapi:/spec:ro
-    # Bounded so a runaway mock cannot take the dev host down (#106).
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
 
-  # A local ClickHouse for `make e2e-server`: plain HTTP on 127.0.0.1:8123 with
-  # the password .env.e2e.example carries. One node with its own Keeper, which the
-  # replicated tables need. The multi-arch digest of the 26.3 LTS tag dfe-infra
-  # pins, so it runs natively on Apple silicon.
+  # For `make e2e-server`. single-node.xml adds the Keeper the replicated tables need.
   clickhouse:
     image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
     environment:

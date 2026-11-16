@@ -1,8 +1,6 @@
 [project]
 name = "dfe-engine"
-# Placeholder: the real version is computed by semantic-release and stamped in
-# CI at release time (hyperi-ci#105). Never hand-bump this -- a committed
-# version here is a stale seed that a release can pick up by mistake.
+# A placeholder: CI stamps the release version. Never set it by hand.
 version = "0.0.0"
 description = "The DFE control plane: an API and CLI that turn operator changes into git commits a deployment runs from."
 authors = [{ name = "HYPERI PTY LIMITED", email = "engineering@hyperi.com.au" }]
@@ -11,87 +9,60 @@ requires-python = ">=3.14"
 readme = "README.md"
 
 dependencies = [
-    # The floor is the oldest scalo carrying every API the engine calls. <3 is the
-    # API-stability boundary, and a bound keeps Renovate raising PRs.
-    # [kafka]: scalo.kafka.providers needs the extra's genson. [metrics] carries
-    # prometheus_client and the OTel SDK: without it /metrics 404s while the
-    # backend still reports prometheus.
+    # [kafka] supplies genson to scalo.kafka.providers. Without [metrics], /metrics 404s.
     "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.7,<3",
-    # The schema trees as package data. Floor: the first release with catalogue/.
-    # <1 is the API-stability boundary while dfe-schemas is 0.x.
+    # Floor: the first release with catalogue/.
     "dfe-schemas>=0.2.29,<1",
-    # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.4",
-    # Database connections
     "clickhouse-connect>=1.10.0",
-    # Configuration and parsing
     "ruamel-yaml>=0.19.1",
-    # libyaml reads the source catalogue's thousand-odd files where ruamel's pure-Python parser takes seconds.
+    # libyaml, for the source catalogue's file count: ruamel's pure-Python parser is too slow there.
     "pyyaml>=6.0.3",
     "pydantic>=2.14.1",
-    # AWS
     "boto3>=1.43.113",
-    # Scheduling
     "croniter>=6.2.2",
-    # HTTP clients
-    # 0.28.1 (2024-12) is the latest stable. 1.0 is dev-only on PyPI (dev6, 2026-08-31) and upstream is active.
-    # Required by scalo's http extra.
+    # scalo's http extra needs it.
     "httpx>=0.28.1",
     "requests>=2.34.2",
     "urllib3>=2.7.0",
-    # Templating
-    # 3.1.6 (2025-03) is the latest release. Imported by pipeline/pipeline.py and required by pysigma.
     "Jinja2>=3.1.6",
-    # Sigma rules
     "pysigma>=2.0.2,<3",
-    # LGPL-3.0, one maintainer, 1.1.1 (2026-08-10). The only ClickHouse backend for pySigma.
+    # LGPL-3.0: the one ClickHouse backend for pySigma.
     "pysigma-backend-clickhouse>=1.1.1",
-    # Utilities
     "tabulate>=0.10.0",
     "pyparsing>=3.3.2",
     "platformdirs>=4.13.0",
     "psutil>=7.2.2",
-    # Git (deploy-repo gitops bridge) -- same lib scalo uses internally
     "dulwich>=1.2.7",
-    # Authentication
     "bcrypt>=5.0.0",
-    # OIDC relying-party (external IdP termination) + SCIM identity schema
     "authlib>=1.9.4",
     # authlib's HTTP client imports httpx2 first and warns on every start when it falls back to httpx.
     "httpx2>=2.13.1",
-    # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
-    # Starlette's SessionMiddleware imports it and does not require it, so this is the only thing that installs it.
+    # Starlette's SessionMiddleware signs the OIDC session cookie with it and does not install it.
     "itsdangerous>=2.2.0",
     # Held on 0.6: later 0.x minors change the SCIM models' API the engine is written against.
     "scim2-models>=0.6.12,<0.7",
-    # Alerting / notifications
     # Held below 2.0: the notification code is written against the 1.x API.
     "apprise>=1.11.0,<2",
-    # Transitive floor (apprise -> requests-oauthlib): CVE-2026-49265 (PKCE verifier timing compare, 4.0.0)
-    # and CVE-2026-49272 (device-flow bearer token, 4.0.1).
+    # Transitive floor (apprise -> requests-oauthlib): CVE-2026-49265 and CVE-2026-49272.
     "oauthlib>=4.0.1",
-    # API server
-    # Floor 0.142: the apps pass FastAPI(telemetry=...), which earlier releases reject.
+    # The apps pass FastAPI(telemetry=...), which earlier releases reject.
     "fastapi>=0.143.0",
     "python-multipart>=0.0.32",
     "starlette>=1.8.0",
-    # Floor 50: GHSA PKCS#7 Bleichenbacher oracle, vulnerable >=44,<50.
+    # Floor: the PKCS#7 Bleichenbacher oracle advisory.
     "cryptography>=50.0.0",
     "uvicorn[standard]>=0.54.0",
-    # Must stay >=2.14.0: CVE-2026-102274, one malformed JWK aborts parsing of the whole JWK Set.
+    # Floor: CVE-2026-102274, one malformed JWK aborts parsing of the whole JWK Set.
     "PyJWT[crypto]>=2.15.1",
     "sse-starlette>=3.4.5",
     "msal>=1.37.0",
     "google-auth>=2.62.0",
     "google-api-python-client>=2.198.0",
-    # Kafka topic admin: a source deploy creates its own _land/_load topics rather
-    # than leaving them to the broker's auto-create. Ships manylinux wheels for
-    # x86_64 and aarch64, so neither image platform builds librdkafka from source.
+    # Kafka topic admin: a source deploy creates its _land and _load topics.
     "confluent-kafka>=2.16.0",
-    # Sampler smart (the default) and anomaly modes. [enhanced] adds fuzzy dedup, which
-    # SamplerSettings.level (default enhanced) uses. >=3.5.3: every dependency ships a wheel
-    # (no drain3 sdist), which the image's UV_NO_BUILD=1 install needs.
+    # The sampler's smart and anomaly modes. [enhanced] adds the fuzzy dedup SamplerSettings.level uses.
     "logreducer[enhanced]>=3.5.6",
     "faker>=40.43.0",
     "sqlglot>=30.22.0",
@@ -126,7 +97,6 @@ dev = [
     "Faker>=40.43.0",
     "types-requests>=2.33.0.20261006",
     "python-dotenv>=1.2.2",
-    # 2.4.0 (2025-05) is the latest release and the repo is active (commit 2026-10-15).
     "pytest-timeout>=2.4.0",
 ]
 
@@ -143,8 +113,7 @@ python_files = "test_*.py"
 # /tmp is a shared tmpfs with a fixed inode cap: keep only failed-test dirs, one per name.
 tmp_path_retention_policy = "failed"
 tmp_path_retention_count = 1
-# No worker count here on purpose: hyperi-ci derives it from the host it runs
-# on, and a number pinned here is correct on exactly one machine (hyperi-ci#152).
+# No worker count: hyperi-ci sizes it to the host.
 addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
@@ -156,11 +125,9 @@ timeout_method = "thread"
 filterwarnings = [
     # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2.
     "ignore:Using .httpx. with .starlette.testclient",
-    # pytest-benchmark can't run under xdist and the suite runs under it, so
-    # benchmarks are intentionally disabled here (run them with -p no:xdist).
+    # Benchmarks need -p no:xdist.
     "ignore:Benchmarks are automatically disabled because xdist plugin is active",
-    # Deliberate signal: {customer_filters} only handles 0/1 surrounding spaces;
-    # the test documents that known limitation on purpose.
+    # A test reports the {customer_filters} spacing limit on purpose.
     "ignore:LIMITATION DETECTED",
 ]
 markers = [
@@ -181,7 +148,7 @@ exclude_lines = [
     "pragma: no cover",
     "except Exception as e:",  # Exclude generic exception handlers
 ]
-fail_under = 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
+fail_under = 70
 
 [tool.coverage.run]
 omit = [
@@ -230,10 +197,7 @@ external = ["V"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# hyperi-ci's docstring gate is `ruff check --select D`, and a CLI --select
-# turns `ignore` back on. per-file-ignores still holds, so D105 and D107 stay
-# off: a magic method's meaning is the protocol, and Google style documents
-# __init__ on the class.
+# hyperi-ci's `--select D` re-enables `ignore`, so D105 and D107 stay off here.
 "src/**/*.py" = ["D105", "D107"]
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
 # Each entry is a bare attribute access, which is how vulture sees a use.
@@ -279,10 +243,7 @@ dfe-hunt-runner = "dfe_engine.hunts.runner_cli:main"
 dfe-keda-shim = "dfe_engine.keda_shim.cli:main"
 
 [tool.bandit]
-# Skip B608 (hardcoded SQL) - This is a database library that generates SQL queries.
-# All queries use internal data from configuration/templates, not user input.
-# Skip B701 (jinja2_autoescape_false) - We generate YAML/SQL configs, not HTML.
-# XSS is not applicable. Autoescape would break template output.
+# B608: the SQL is built from config and templates. B701: the templates render YAML and SQL, not HTML.
 skips = [
     "B104",  # B104=hardcoded_bind_all_interfaces — 0.0.0.0 is intentional for containerised service
     "B608",  # B608=hardcoded_sql — queries use internal config/template data, not user input

@@ -24,17 +24,37 @@ overview: [schema.md](schema.md).
 
 ## Build pipeline
 
+`SchemaBuilderV2.build` composes and validates the columns, then writes the CREATE TABLE and the standard views for one source version.
+
 ```mermaid
 flowchart LR
-    SRCY[Source YAML] --> B[SchemaBuilderV2.build]
-    PROF[profile YAML] --> B
-    META[meta schema YAML] --> B
-    B --> V[validate vs TypeRegistry]
-    V --> DDL[DDLGenerator<br/>CREATE TABLE + indexes]
-    V --> VIEWS[ViewGenerator<br/>standard views]
-    DDL --> RES[SchemaBuildResult]
-    VIEWS --> RES
+    accTitle: L4 Detail -- Schema build
+    accDescr: SchemaBuilderV2 loads the header profile's columns and the source's schema columns, composes them, and validates them against the TypeRegistry. DDLGenerator writes the CREATE TABLE and ViewGenerator the standard views, and both go into the SchemaBuildResult.
+
+    profile["Header profile"]
+    schema["Source schema<br/>meta, derived, additional"]
+
+    compose["SchemaLoader<br/>compose"]
+
+    validate["Validate against<br/>TypeRegistry"]
+
+    ddl["DDLGenerator<br/>CREATE TABLE"]
+    views["ViewGenerator<br/>standard views"]
+
+    result["SchemaBuildResult"]
+
+    profile --> compose
+    schema --> compose
+    compose --> validate
+    validate --> ddl
+    validate --> views
+    ddl --> result
+    views --> result
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
 ```
+
+*Figure 1. L4 Detail -- Schema build. Validation errors go into the result and do not stop the build.* Up: [Data plane](README.md).
 
 ## Key classes
 

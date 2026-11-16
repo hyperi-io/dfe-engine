@@ -12,16 +12,20 @@ You need a Google Cloud project inside your Workspace organisation, where you ca
 
 ## How DFE reads groups
 
-Google puts no groups in its sign-in token. So DFE asks for a read-only groups scope at sign-in, then asks the Cloud Identity API for that user's groups with the user's own token. There is no service account, no domain-wide delegation and no admin role to grant.
+Google puts no groups in its sign-in token. So DFE asks for a read-only groups scope at sign-in, then asks the Cloud Identity API for that user's groups with the user's token. There is no service account, no domain-wide delegation and no admin role to grant.
+
+DFE signs in with Google by code exchange, then reads the user's groups from the Cloud Identity API with the user's token.
 
 ```mermaid
 sequenceDiagram
+    accTitle: L4 Detail -- Google sign-in
+    accDescr: The browser opens DFE sign-in and DFE redirects to Google with the Cloud Identity groups scope. DFE exchanges the code for an ID token and the user's access token, then searches the user's groups in the Cloud Identity API with that token.
     participant U as User's browser
     participant D as DFE
     participant G as Google sign-in
     participant C as Cloud Identity API
     U->>D: Open DFE sign-in
-    D->>G: Redirect with scopes openid email profile cloud-identity.groups.readonly
+    D->>G: Redirect with the Cloud Identity groups scope
     G-->>D: Authorisation code, via the redirect URI
     D->>G: Exchange the code with the client ID and secret
     G-->>D: ID token and the user's access token
@@ -30,7 +34,9 @@ sequenceDiagram
     D-->>U: Signed in, roles from the linked groups
 ```
 
-DFE asks for nested (transitive) membership first. Google serves that only on Workspace Enterprise Standard, Enterprise Plus, Enterprise for Education and Cloud Identity Premium. On other editions DFE falls back to direct membership, so map the groups users are directly in.
+*Figure 1. L4 Detail -- Google sign-in. Solid arrows are requests, dashed arrows are responses.* Up: [Identity provider setup](README.md).
+
+DFE asks for nested (transitive) membership first. Google serves that on Workspace Enterprise Standard, Enterprise Plus, Enterprise for Education and Cloud Identity Premium alone. On other editions DFE falls back to direct membership, so map the groups users are directly in.
 
 Google documents the Cloud Identity Groups API for apps acting for users who are not administrators. The check at the end confirms it works in your organisation: run it as a user who is not an admin.
 
@@ -40,7 +46,7 @@ Google documents the Cloud Identity Groups API for apps acting for users who are
 2. Go to **Menu > Google Auth Platform > Branding**. If the project is not configured yet, click **Get Started**. Enter an **App name** (for example `DFE`) and a **User support email**. Under **Audience** pick **Internal**, which limits sign-in to your organisation's accounts. Add a contact email, accept the User Data Policy and click **Create**.
 3. Open **Data Access** and click **Add or Remove Scopes**. Add `https://www.googleapis.com/auth/cloud-identity.groups.readonly`, pasting it in as a manual scope if it is not listed. Click **Save**.
 4. Open **Clients** and click **Create client**. Set **Application type** to **Web application** and give it a name. Under **Authorized redirect URIs**, add the redirect URI from the operator. Leave **Authorized JavaScript origins** empty. Click **Create**.
-5. Copy the client ID and the client secret now. Google shows the secret only at creation. Afterwards it shows the last four characters, and a lost secret means rotating it.
+5. Copy the client ID and the client secret at this step. Google shows the secret at creation and never again. Afterwards it shows the last four characters, and a lost secret means rotating it.
 6. If your organisation restricts apps under **Admin console > Security > Access and data control > API controls**, trust this client there. **Trust internal apps** covers it.
 
 ## Send these to the operator
@@ -60,9 +66,9 @@ DFE links a Google group on its Cloud Identity id: the part after `groups/` in t
 gcloud identity groups describe <group-email>
 ```
 
-The `name` field reads `groups/<id>`. Send the `<id>` part. Once one of the user's groups is linked, the check below also lists the ids of every group they are in.
+The `name` field reads `groups/<id>`. Send the `<id>` part. Once one of the user's groups is linked, the check below lists the ids of every group they are in as well.
 
-Google leaves a group out of the answer when the group's **Who can view members** setting does not include its own members. For each group that maps to a DFE role, open **Admin console > Directory > Groups**, pick the group, open **Access Settings** and let group members view members.
+Google leaves a group out of the answer when the group's **Who can view members** setting does not include the group's members. For each group that maps to a DFE role, open **Admin console > Directory > Groups**, pick the group, open **Access Settings** and let group members view members.
 
 ## Check it worked
 
@@ -72,7 +78,7 @@ Once the operator confirms the provider is in place, open this URL in a private 
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/login
 ```
 
-The page answers with JSON. `email` is the user, and `groups` lists their group ids. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere. A user in no linked group is refused, and DFE keeps no account for them.
+The page answers with JSON. `email` is the user, and `groups` lists their group ids. The JSON holds an `access_token` as well: it is a live DFE session, so do not paste it anywhere. A user in no linked group is turned away, and DFE keeps no account for them.
 
 ## Common failures
 
@@ -80,7 +86,7 @@ The page answers with JSON. `email` is the user, and `groups` lists their group 
 |---|---|---|
 | Google page: `Error 400: redirect_uri_mismatch` | The redirect URI on the client differs from the one DFE sent | Paste the operator's URI exactly: scheme, host, case and trailing slash all count |
 | Google page: `Error 403: org_internal` | The account is outside your organisation and the audience is Internal | Sign in with an account in your organisation |
-| DFE page: `OIDC login failed: invalid_client: ...` | DFE holds the wrong client secret | Rotate the secret and send the new one |
+| DFE page: `OIDC login failed: invalid_client: ...` | DFE holds the wrong client secret | Rotate the secret and send its value |
 | DFE page: `OIDC login refused: no DFE group with a role is linked to your identity provider groups.` | None of the user's groups is linked yet, or none was found: the Cloud Identity API is off in the client's project, the groups scope was not granted, API controls block the client, or the user's groups hide their members | Send the operator the ids from "Find the group ids". If they are linked, recheck steps 1, 3 and 6 and the group's **Who can view members**. The operator's log names Google's reason: `Google Cloud Identity refused the user-token group lookup (403)` |
 
 ## For the DFE operator
@@ -99,7 +105,7 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 }
 ```
 
-A `google` provider accepts only `api` mode, and DFE turns on `enrich_on_login` for it. Leave `scopes` unset: the default carries the Cloud Identity scope. The client secret goes to the secret store and the provider keeps only its path. A service account (`groups.service_account_json`) holding a groups admin role is optional: it runs the group sync and answers a sign-in the user's token could not. Without one the group sync has no directory to list, so the provider's `last_sync_status` reads `user_token` and `sync_error` stays empty.
+A `google` provider accepts `api` mode alone, and DFE turns on `enrich_on_login` for it. Leave `scopes` unset: the default holds the Cloud Identity scope. The client secret goes to the secret store and the provider keeps its path, never the value. A service account (`groups.service_account_json`) holding a groups admin role is optional: it runs the group sync and answers a sign-in the user's token could not. Without one the group sync has no directory to list, so the provider's `last_sync_status` reads `user_token` and `sync_error` stays empty.
 
 Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to an id the admin sent. A group file with a `source_id` and no `source_provider` loads unlinked, with a warning naming it in the engine log, and no sign-in reaches it through that id: see [rbac-groups.md, section 4.4](../rbac-groups.md#44-group-sync-process).
 
@@ -110,7 +116,7 @@ source_provider: "<provider-name>"
 source_id: "<Cloud Identity group id>"
 ```
 
-Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google refuses it.
+Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google turns it down.
 
 ## Google references
 

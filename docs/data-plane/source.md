@@ -1,16 +1,15 @@
 # Source - the top-level data abstraction
 
 A Source is one distinct stream of events entering the platform -- `filebeat`,
-`syslog`, `crowdstrike-edr`, `windows-audit`. It is the only entity the API,
-the CLI and the console CRUD, and everything a stream needs hangs off it:
+`syslog`, `crowdstrike-edr`, `windows-audit`. The API, the CLI and the console
+manage a stream through it, and everything a stream needs hangs off it:
 where records come in, whether they are transformed, the table they land in,
 the detections that run against it.
 
 Without it, onboarding a stream means editing four systems that share no
-concept of "this is one source" -- receiver match rules, a transform's own
+concept of "this is one source" -- receiver match rules, a transform's
 input and output topics, loader table routing, and a table definition with no
-link back to any of them -- and hoping the naming stays consistent. It never
-did.
+link back to any of them -- and hoping the naming stays consistent.
 
 ## Two tiers, not two systems
 
@@ -24,7 +23,7 @@ sizes, scaling.
 | loader | landing records to ClickHouse, schema-aware insert |
 | archiver | landing records to S3 or a file archive |
 
-**Sources** say *what*. Each one contains its own scoped components rather
+**Sources** say *what*. Each one holds its scoped components rather
 than being listed inside a service's config:
 
 | Component | Required | Purpose |
@@ -72,9 +71,9 @@ ClickHouse:
 ```
 
 Because it is stamped before the record reaches the bus, the downstream stages
-read it directly and carry no routing config of their own.
+read it directly and carry no routing config.
 
-### Naming rules
+The naming rules:
 
 - A Kubernetes DNS-1123 label starting with a letter: `[a-z]([a-z0-9-]*[a-z0-9])?`
 - Hyphens, never underscores. A source-bound app deploys one instance named for
@@ -87,7 +86,7 @@ read it directly and carry no routing config of their own.
 
 A hyphenated name has to be quoted in a ClickHouse identifier position, so the DDL generator backtick-quotes every identifier (`quote_ident` in `src/dfe_engine/schema/schema_ddl.py`).
 
-## Where to read next
+Where to read next:
 
 | Doc | Covers |
 |---|---|

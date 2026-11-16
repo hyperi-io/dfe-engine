@@ -5,9 +5,6 @@
 # READ THIS FOR PARAMETERS
 # https://github.com/vectordotdev/helm-charts/blob/develop/charts/vector/README.md
 #
-# v1.1    2024-06-25    Update for new caching and storage classes
-# v1.0    2023-06-29    PaaS migration for XDR 2.1
-#
 # (c) HyperI 2024
 #
 

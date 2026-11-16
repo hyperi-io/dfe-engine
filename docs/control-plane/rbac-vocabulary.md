@@ -16,28 +16,22 @@ Related: [oidc-rbac-architecture.md](oidc-rbac-architecture.md) for how external
 identities reach these roles, and [rbac.md](rbac.md) for enforcement and the
 ClickHouse tenant model.
 
-## The two planes
+Roles split across two planes, and conflating them is the most common modelling
+mistake. The control plane is what you can DO: static roles granting API actions,
+such as configuring sources, running hunts, deploying services and managing
+groups. The data plane is what you can SEE: driven by `org_ids` and limited to
+data browsing in Observe, so a user can be a powerful analyst on the control
+plane and see one org's rows. `org_viewer` is not a junior `admin`. It is a
+different axis.
 
-Roles split across two orthogonal planes, and conflating them is the most common
-modelling mistake:
+## Roles and default groups
 
-- Control plane - what you can DO. Static roles granting API actions:
-  configure sources, run hunts, deploy services, manage groups.
-- Data plane - what you can SEE. Dynamic, driven by `org_ids`, and
-  restricted to data browsing (Observe, Kibana-style). A user can be a powerful
-  analyst on the control plane and see exactly one org's rows.
-
-A role is not "more senior" than another across planes. `org_viewer` is not
-a junior `admin`. It is a different axis.
-
-## Canonical roles
-
-Defined in `roles.yaml`. `scoped: true` means the role never reads across orgs: its holders are held to their own orgs wherever it is bound, system-wide included.
+Roles are defined in `roles.yaml`. `scoped: true` means the role never reads across orgs: its holders are held to their orgs wherever it is bound, system-wide included.
 
 | Role | Plane | For |
 |---|---|---|
 | `admin` | control | Full access to all resources and all orgs |
-| `infra_admin` | control | Service configs, deployments, Helm, ArgoCD, orgs, groups, Governed Ops |
+| `infra_admin` | control | Service configs, deployments, Helm, Argo CD, orgs, groups, Governed Ops |
 | `infra_viewer` | control | Infrastructure read-only |
 | `data_analyst` | control | Hunt, query, source, fieldmap, alert, rule, transform CRUD |
 | `data_analyst_viewer` | control | Analyst scope, read-only |
@@ -45,10 +39,10 @@ Defined in `roles.yaml`. `scoped: true` means the role never reads across orgs: 
 | `dfe_operator` | control | Curated operational dials - invoke shipped actions, read governed state |
 | `org_viewer` | data | Org-restricted data viewer (`scoped: true`) |
 
-## Canonical default groups
+`org_viewer` is the one role hard-tied to the org CRUD: a user or group holding it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the Observe iframe inside dfe-ui, dfe-hyperdx connects as that org's pinned ClickHouse user. That user's READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends ([rbac.md](rbac.md) sections 5 and 6).
 
-The engine SEEDS the first four on bootstrap when the groups directory is empty.
-They are not suggestions - a fresh install has them, so every consumer can rely
+The engine SEEDS the first four default groups on bootstrap when the group store is empty.
+They are not suggestions: a fresh install has them, so every consumer can rely
 on them existing.
 
 | Group | Roles | Seeded | For |
@@ -62,44 +56,41 @@ on them existing.
 | `dfe-operators` | `dfe_operator` | no | Curated ops dials |
 | `dfe-<org>-viewers` | `org_viewer` | no | Per-org data plane, `scope: org:<org>` |
 
-Note `dfe-infra`, not `dfe-infra-admins`. The engine seeded that name first and
-it stands, because a parallel name would mean two groups granting one role.
+The admin group is `dfe-infra`, not `dfe-infra-admins`. The engine seeded that
+name first and it stands, because a parallel name would mean two groups granting
+one role.
 
-## org_viewer -- the org-tied exception role
-
-`org_viewer` is the one role hard-tied to the org_id CRUD: a user or group carrying it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the Observe iframe inside dfe-ui, dfe-hyperdx connects as that org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values, always. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends. See [rbac.md](rbac.md) sections 5-6 for the mechanism.
-
-## Naming conventions
+## Naming, rules and consumers
 
 - Roles: `snake_case`, singular, describing the person - `data_analyst`, not
   `DataAnalystRole` or `ANALYST_USER`.
 - Groups: `kebab-case`, plural, `dfe-` prefixed - `dfe-analysts`. The prefix
-  matters because these names land in customers' own IdPs alongside their groups.
+  matters because these names land in customers' IdPs beside their groups.
 - Per-org groups: `dfe-<org>-viewers`, paired with `scope: org:<org>`.
 - Permissions: `resource:action`, colon-separated, `*` wildcards -
   `hunt:read`, `service:*:config:*`.
-- Orgs and tenants: the term is **org** everywhere in the product surface (`org_id`, `org_ids`, `scope: org:<name>`). "Tenant" appears only inside the ClickHouse isolation model (the tenant role, the tenant setting and its row policies). One concept, and the boundary between the two words is exactly that model.
+- Orgs and tenants: the term is **org** everywhere in the product surface (`org_id`, `org_ids`, `scope: org:<name>`). "Tenant" appears inside the ClickHouse isolation model alone (the tenant role, the tenant setting and its row policies), and that model is the boundary between the two words.
 
-## Who consumes what
+Four rules follow:
+
+1. Add roles here first. A role a consumer uses that is not in `roles.yaml`
+   grants nothing: unknown groups resolve to zero roles, which presents as a
+   broken IdP rather than a config error.
+2. Never rename in a consumer. Renaming propagates from this document and
+   the two engine files outward, in one change.
+3. Group names are external contract. They are created in customers' Entra,
+   Okta and Workspace directories, so renaming one is a customer-facing
+   migration, not a refactor.
+4. Map roles on stable ids where the provider has them, and display names.
+   Entra emits group GUIDs, not names. See the OIDC architecture doc.
+
+Each repo consumes the vocabulary this way:
 
 | Repo | Consumes | How |
 |---|---|---|
 | dfe-engine | roles + groups | Defines them, enforces via `_resolve_group_grants` and `RoleConfig` |
-| dfe-ui | roles | Shows/hides UI by resolved role from `GET /auth/me`, and must not hardcode its own names |
-| dfe-infra | groups | ArgoCD RBAC group mappings, ESO secret wiring for providers |
+| dfe-ui | roles | Shows/hides UI by resolved role from `GET /auth/me`, and must not hardcode names of its making |
+| dfe-infra | groups | `adminGroups` in `argocd/values/common.yaml` (`dfe-admins`, `dfe-infra`) and the Argo CD `policy.csv` that `bootstrap/argocd_login.py` writes |
 | dfe-deploy | nothing | Ships no group files. The engine seeds the default groups at boot |
 | dfe-schemas | orgs | `org_id` column semantics for tenant row policies |
-| Test environments | both | The OIDC test fixture renders these names into dex, Entra and Okta |
-
-## Rules
-
-1. Add roles here first. A role that exists in a consumer but not in
-   `roles.yaml` grants nothing - unknown groups resolve to zero roles, which
-   presents as a broken IdP rather than a config error.
-2. Never rename in a consumer. Renaming propagates from this document and
-   the two engine files outward, in one change.
-3. Group names are external contract. They are created in customers' Entra,
-   Okta and Workspace directories. Renaming one is a customer-facing migration,
-   not a refactor.
-4. Map roles on stable ids where the provider has them, and display names.
-   Entra emits group GUIDs, not names. See the OIDC architecture doc.
+| Test environments | groups | dfe-infra's `dfe-ops idp` fixture renders these group names for its dex test IdP (`bootstrap/fixtures/tester-idp-groups.toml`) |

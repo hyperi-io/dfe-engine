@@ -4,28 +4,37 @@ You already run Vector, Fluentd, Fluent Bit or Logstash, and you don't want to r
 
 There are two places it can plug in, and both are on the bus. A source on the direct (gRPC) transport refuses either one at save with a 422, because there is no topic for your pipeline to meet.
 
-## Two places to plug in
+Your pipeline meets a source at its topics, as the origin writing the landing topic or as the transform between the two.
 
 ```mermaid
-flowchart LR
-    subgraph origin [External origin]
-        P1(Your pipeline) -->|produces to| L1[(acme-logs_land)]
-        L1 -->|read by| LD1[dfe-loader]
-    end
-    subgraph transform [External transform]
-        R[dfe-receiver] -->|produces to| L2[(acme-logs_land)]
-        L2 -->|read in dfe-external-acme-logs by| P2(Your pipeline)
-        P2 -->|produces to| T2[(acme-logs_load)]
-        T2 -->|read by| LD2[dfe-loader]
+flowchart TB
+    accTitle: L4 Detail -- External pipeline plug-in points
+    accDescr: As an origin, your pipeline produces to the source's landing topic and the loader reads it. As a transform, the receiver produces to the landing topic, your pipeline reads it and produces to the transformed topic, and the loader reads that.
+
+    subgraph origin["External origin"]
+        direction LR
+        pipe1["Your pipeline"] --> land1[("acme-logs_land")] --> loader1["dfe-loader"]
     end
 
-    classDef store fill:#2EA4F6,stroke:#2EA4F6,stroke-width:2px,color:#000647
-    classDef ext   fill:#8CCDFA,stroke:#2EA4F6,stroke-width:2px,color:#000647
-    class L1,L2,T2 store
-    class P1,P2 ext
+    subgraph transform["External transform"]
+        direction LR
+        receiver["dfe-receiver"] --> land2[("acme-logs_land")] --> pipe2["Your pipeline"] --> load2[("acme-logs_load")] --> loader2["dfe-loader"]
+    end
+
+    origin ~~~ transform
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef async fill:#F6E6EF,stroke:#A8517F,stroke-width:1px,color:#3D1529
+    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class pipe1,pipe2 ext
+    class land1,land2,load2 async
+    class origin,transform group
 ```
 
-Rounded light-blue nodes are your pipeline. Cylinders are the topics DFE creates.
+*Figure 1. L4 Detail -- External pipeline plug-in points. Dashed boxes are your pipeline.* Up: [Data plane](README.md).
+
+As a transform, your pipeline reads `acme-logs_land` in the consumer group `dfe-external-acme-logs`.
 
 **External origin.** Your pipeline is where the records come from. It produces straight to `<source>_land`, past the receiver, so the source has no match rule and no fetcher. If the source names a DFE transform, that reads `_land` as usual. Otherwise the loader does.
 
@@ -87,7 +96,7 @@ Your pipeline sets `_org_id` and `_source` itself, and the loader holds them on 
 
 Nothing is refused. A replaced record still lands, and the loader counts it in `loader_external_org_id_replaced_total` or `loader_external_source_replaced_total`. A climbing counter is a pipeline stamping labels it shouldn't, and you'll want to go and look.
 
-The allow-lists are for a provider whose pipeline fans in its own customers' records. List each customer's tenant id in `allowed_org_ids` and the pipeline can land each record in its customer's org:
+The allow-lists are for a provider whose pipeline fans in its customers' records. List each customer's tenant id in `allowed_org_ids` and the pipeline can land each record in its customer's org:
 
 ```yaml
 source: msp-firewall
@@ -105,8 +114,8 @@ Nothing makes your records carry the DFE common header. The loader fills in a mi
 
 | Field | Missing, the loader | Set, you get |
 |---|---|---|
-| `_timestamp` | reads `timestamp`, and takes the load time when it is not there | the event's own time, so time-range queries and retention follow when it happened |
-| `_org_id` | reads `_org_id`, and lands the record in the source's org when it is not there | the source's org or one `allowed_org_ids` lists, which is how a provider lands each customer in their own org |
+| `_timestamp` | reads `timestamp`, and takes the load time when it is not there | the event's time, so time-range queries and retention follow when it happened |
+| `_org_id` | reads `_org_id`, and lands the record in the source's org when it is not there | the source's org or one `allowed_org_ids` lists, which is how a provider lands each customer in that customer's org |
 | `_source` | reads `_source`, and takes the topic name, which is this source, when it is not there | this source or one `allowed_sources` lists, which picks the table |
 | `_tags` | reads `_tags`, then `tags`, then `meta`, then `metadata.tags`, and leaves it empty when none is there | tags a query or an alert can filter on without parsing the payload |
 | `_timestamp_received` | reads `_timestamp_received`, then `timestamp_received`, then `received_at`, and takes the load time when none is there | when your pipeline first saw the event, so you can measure the delay before DFE |

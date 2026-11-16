@@ -1,88 +1,54 @@
 <!-- Project: dfe-engine -->
 # Governed Ops and the Hunt Runner
 
-How DFE is operated, and how detection runs. Two subsystems, one idea: the GitOps
-repo is the source of truth and the authority, and dfe-engine is a governed window
-onto it. Companion to [architecture.md](../architecture.md), the
-[commit standard](gitops-commit-standard.md), and the
-[observability standard](../deployment/observability-standard.md).
+How DFE is operated, and how detection runs. Everything you can change in DFE (deployment dials, detection hunts, access control) is YAML in a git repo, and dfe-engine is a governed window onto it. The engine holds no config database and never touches the live cluster: it reads and writes the YAML through one git-native CRUD engine, `GitCrud`, applies RBAC, and commits. Argo CD reconciles the commit. Kill the engine and the UI and DFE keeps running on hand edits to the repo.
 
-## The one idea
+## Every write is one GitCrud commit
 
-Everything you can change in DFE -- deployment dials, detection hunts, access
-control -- is YAML in a git repo. The engine does not hold a config database and
-does not touch the live cluster. It reads and writes those YAML files through one
-generic, git-native CRUD engine called `GitCrud`, applies RBAC, and commits.
-Argo reconciles the commit. Kill the engine and the UI and DFE keeps running --
-you can still drive it by editing the repo by hand. That survivability is the
-whole point, and it is the acceptance test for every piece below.
-
-## Layering
+Every caller writes through GitCrud, which commits under the commit policy for Argo CD to reconcile.
 
 ```mermaid
-graph TD
-    CLI["CLI - dfe local"]
-    HelmRouter["Tier-1 router - api/v1/helm"]
-    GovRouter["Tier-2 router - api/v1/governance"]
-    ConfigRouter["Config router - api/v1/config"]
-    Actions["ActionStore + PolicyStore"]
-    GitCrud["GitCrud engine - generic YAML CRUD"]
-    CommitPolicy["CommitPolicy - message + validators + mode"]
-    Repo["GitopsRepo - dulwich, no git CLI"]
-    Argo["Argo CD reconciles the commit"]
+flowchart LR
+    accTitle: L4 Detail -- Governed write path
+    accDescr: dfe local, the Helm vars router, the backing services router and governance actions all write through GitCrud. GitCrud builds the message under the commit policy and commits through GitopsRepo, and Argo CD reconciles the commit.
 
-    CLI --> GitCrud
-    HelmRouter --> GitCrud
-    GovRouter --> Actions
-    Actions --> GitCrud
-    GitCrud --> CommitPolicy
-    GitCrud --> Repo
-    Repo --> Argo
+    subgraph callers["Callers"]
+        local["dfe local"]
+        helm["Helm vars router"]
+        backing["Backing services<br/>router"]
+        actions["Governance actions"]
+    end
+
+    gitcrud["GitCrud"]
+
+    policy["Commit policy"]
+    repo["GitopsRepo<br/>dulwich"]
+
+    argo["Argo CD"]
+
+    callers -->|writes| gitcrud
+    gitcrud -->|message| policy
+    gitcrud -->|commit| repo
+    repo --> argo
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class gitcrud core
+    class argo ext
+    class callers group
 ```
 
-Two tiers sit on the one engine:
+*Figure 1. L4 Detail -- Governed write path. The dashed box is outside the engine.* Up: [L3 Components -- dfe-engine](../architecture.md).
 
-- **Tier-1** is raw, generic var CRUD over the overlay files. Powerful, so it is
-  admin-grade.
-- **Tier-2** is curated *actions* -- named bundles of changes, each behind its own
-  permission. This is the safe surface an operator gets. They can run
-  "scale-receiver" without holding the keys to edit any var.
+Tier 1 is raw var CRUD over the overlay files (`/api/v1/helm`), admin-grade because it can set anything. Tier 2 is curated actions (`/api/v1/governance`), each behind a permission of its name, so an operator can run `receiver-surge` without the keys to edit any var. RBAC binds to a resource class, an action or an operation, never to a field.
 
-RBAC binds at the high level only -- a resource class, a named action, an operation
--- never per field. One permission check per request. That keeps the security
-surface small and the policy readable.
+A `ResourceClass` names the directory a class lives in, how one resource is laid out, and its RBAC prefix. The default registry (`src/dfe_engine/gitcrud/registry.py`) covers the deploy repo: `helmvars` (app-instance overlays under `values/`), `infravars` (cluster and platform overlays under `infra/`), `sources`, `compat_profiles` and `derived_schemas` (under `config/sources/`, `config/compat-profiles/` and `config/schemas/derived/`), `hunts` and `rules` (`config/hunts/`, `config/rules/`), `library` (`config/library/`), and the governance classes `accounts`, `groups`, `roles`, `actions`, `policies`, `ch_tiers`, `ch_service_roles` and `gov_settings` under `governance/`.
 
-## GitCrud -- the generic engine
+`infravars` shares the `helmvars` RBAC prefix in a separate directory: Argo hands the app generator's `values/*-values.yaml` glob to git as a pathspec, where `*` matches `/`, so anything under `values/` becomes an Argo application. Its surface is `/api/v1/backing-services`, and its reads are declared, never observed, because the engine runs no Kubernetes client.
 
-`src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
-because every resource is git-backed config. A `ResourceClass` says where a class
-lives (a directory), how one resource is laid out, and which RBAC prefix governs
-it. The default registry (`src/dfe_engine/gitcrud/registry.py`) covers the deploy repo:
-`helmvars` (the app-instance overlays under `values/`), `infravars` (the cluster
-and platform overlays under `infra/`), the datamodel classes `sources`,
-`compat_profiles` and `derived_schemas` (under `config/sources/`,
-`config/compat-profiles/` and `config/schemas/derived/`), `hunts` and `rules`
-(`config/hunts/`, `config/rules/`), `library` (the versioned artefact library
-under `config/library/`) and the governance classes (`accounts`, `groups`,
-`roles`, `actions`, `policies`, `ch_tiers`, `ch_service_roles` and
-`gov_settings` under `governance/`).
-
-`infravars` shares the `helmvars` RBAC prefix but needs its own directory: Argo
-hands the app generator's `values/*-values.yaml` glob to git as a pathspec, where
-`*` matches `/`, so anything under `values/` becomes an Argo application. Its
-surface is `api/v1/backing-services`, and its reads are DECLARED, never observed
--- the engine runs no Kubernetes client, by design.
-
-### Layouts -- one document, or a directory
-
-Most classes are `FILE`: one YAML document, one file. The fields ARE the resource,
-so one doc keeps them consistent and gives one conflict domain per write.
-`helmvars` cannot be anything else -- Argo and Helm read the overlay as one values
-file.
-
-A class storing authored CONTENT declares `BUNDLE`: a directory per resource,
-holding a `manifest.yaml` plus payload files. `library` is the first consumer, and
-its layout is the general one:
+Most classes are `FILE`, one YAML document per resource and one conflict domain per write. A class storing authored content is `BUNDLE`, a directory per resource with a `manifest.yaml` and payload files, so a reviewer diffs the language itself:
 
 ```text
 config/library/<name>/manifest.yaml
@@ -90,256 +56,183 @@ config/library/<name>/versions/0001.vrl
 config/library/<name>/current.vrl
 ```
 
-Content in files rather than in the manifest means a reviewer diffs the language
-itself, a validator runs against a real path, reading one version does not parse
-the whole history, and no YAML emitter touches the bytes. `put_bundle` writes the
-manifest and its files in ONE commit, so a manifest never names a version whose
-content has not landed. Payload paths are refused if they escape the bundle or
-collide with the manifest.
-
-Nothing else moves to `BUNDLE` by default: the other versioned classes hold small
-structured payloads that already diff well, so migrating them would cost a data
-migration in every deployed gitops repo for no gain.
-
-## One commit per mutation
-
-The engine is small on purpose. Read, flatten to dot-paths, set or delete a path,
-write a whole doc, delete a resource -- every mutation ends in one commit via
-`GitopsRepo` (which uses dulwich, so there is no shell-out to `git`). Three extras
-earn their keep:
-
-- `put_many` writes several resources in ONE commit, so an action that touches N
-  files is atomic.
-- `put_bundle` does the same for one bundle's manifest plus its content files.
-- The HEAD commit SHA is the optimistic-concurrency token. A read returns it, a
-  write may require it, and a stale one raises `ConcurrencyConflictError` carrying
-  the current doc -- so two editors never silently clobber each other.
-
-`commit_policy.py` enforces the [commit standard](gitops-commit-standard.md) in
-code: it builds every message and its audit trailers (callers cannot hand-write
-them), rejects `latest`/unpinned image refs and controller-owned fields like
-`replicaCount`, and resolves direct-commit vs PR from the environment and class.
+Every mutation ends in one commit through `GitopsRepo`, which uses dulwich rather than the `git` CLI. `put_many` writes several resources in one commit, so an action touching N files is atomic, and `put_bundle` does the same for a manifest and its content files. The HEAD commit SHA is the concurrency token, and a stale one raises `ConcurrencyConflictError` carrying the current doc. `src/dfe_engine/gitcrud/commit_policy.py` enforces the [commit standard](gitops-commit-standard.md): it builds every message and its audit trailers, rejects `latest` and unpinned image refs and a `replicaCount` KEDA owns, and resolves direct commit or PR from the environment and the class.
 
 ## Writing a helm var
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Helm as Tier-1 router
-    participant Policy as PolicyStore
-    participant Crud as GitCrud
-    participant Repo as GitopsRepo
-    participant Argo
-
-    User->>Helm: PUT /helm/files/receiver-default/vars/keda.maxReplicaCount (If-Match SHA)
-    Helm->>Helm: require_action helmvars:write
-    Helm->>Helm: validate_write (no new latest, no new replicaCount)
-    Helm->>Policy: protected? (override held?)
-    Helm->>Crud: set_key (base_revision = If-Match)
-    Crud->>Crud: stale base? -> 409 with current
-    Crud->>Repo: publish (one commit, audited)
-    Repo-->>Argo: commit on the tracked branch
-    Argo-->>User: reconciles to the cluster
-```
-
-The router is thin. The work -- validation, the protected-var check, the commit --
-lives in the engine and the policy store, so the CLI and the API take the identical
-path.
-
-## Defined actions and protected vars
-
-`src/dfe_engine/governance/`. An `ActionDef` is a name, the permission needed to run
-it (`required_action`), and a list of `VarChange`s. `ActionStore.invoke` applies them
-all in one commit, honours the protected-var policy (a single violation aborts the
-whole action -- it is atomic), and `dry_run` returns the diff without writing.
+A Tier 1 var write is checked for the grant and the protected-var policy, then committed, against its `If-Match` base when the caller sends one.
 
 ```mermaid
 sequenceDiagram
-    participant Op as Operator
-    participant Gov as Tier-2 router
-    participant Store as ActionStore
-    participant Pol as PolicyStore
-    participant Crud as GitCrud
-
-    Op->>Gov: POST /governance/actions/scale-receiver/invoke
-    Gov->>Store: load the action
-    Gov->>Gov: require the action's OWN required_action
-    Gov->>Store: invoke (actor, dry_run)
-    loop each change
-        Store->>Pol: enforce - protected var aborts the lot
+    accTitle: L4 Detail -- Writing a helm var
+    accDescr: The Helm vars router checks the caller's grant, validates the write and the protected-var policy, then GitCrud sets the key against the If-Match base and GitopsRepo commits. Argo CD reconciles the commit.
+    autonumber
+    participant user as Caller
+    participant helm as Helm router
+    participant policy as PolicyStore
+    participant crud as GitCrud
+    participant repo as GitopsRepo
+    participant argo as Argo CD
+    user->>helm: PUT var, If-Match
+    helm->>helm: Grant, validate_write
+    helm->>policy: Protected?
+    helm->>crud: set_key
+    alt stale base
+        crud-->>user: 409, current doc
     end
-    Store->>Crud: put_many - ONE atomic commit
-    Crud-->>Op: diff + commit SHA
+    crud->>repo: Commit
+    repo-->>argo: New commit
 ```
 
-## Protected vars and refused writes
+*Figure 2. L4 Detail -- Writing a helm var. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- dfe-engine](../architecture.md).
 
-A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked `cls:name:path` globs that even Tier-1 must respect unless the caller holds the override grant. It is a policy object, not a per-var ACL. A set or revert at a parent, or a set below a locked scalar, is refused like a write to the var itself, because either one changes it. A whole-document write is gated only on the leaves it adds, changes or removes.
+The full path is `PUT /api/v1/helm/files/{name}/vars/{path}`, for example `receiver-default-values` and `keda.maxReplicaCount`. A production `DFE_ENGINE_ENV` in team mode routes the write to a review branch instead of `main`. Validation, the protected-var check and the commit live in the engine, so the CLI and the API take the same path.
 
-Three policies ship and seed into every deploy repo. `baseline` locks image references. `storage-layout` locks the data-layer modes, the storage model, the `objectStore` / `tieredBlock` / `tieredObject` dial blocks, and the disk size and class. `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud. Seeding never rewrites an existing file, so a repo carrying the earlier `storage-model` policy keeps it and gains `storage-layout` beside it -- hence the pre-vocabulary key spellings in the shipped lock.
+## Actions, protected vars and rejected writes
 
-## Refused writes no grant lifts
+An `ActionDef` (`src/dfe_engine/governance/`) is a name, the permission needed to run it (`required_action`) and a list of `VarChange`s. `ActionStore.invoke` applies them all in one commit and honours the protected-var policy, so one violation aborts the whole action, and `dry_run` returns the diff without writing.
 
-Not everything unsafe is a protected var. A lower node or broker count is refused
-by the backing-services router itself, and by an action that leaves one in the infra overlay, with a 400 that names the reason, and the
-override grant does NOT get past it: the hazard is data loss rather than
-governance, and there is no correct way to grant your way through it. The same
-distinction applies to `replicaCount`, which the commit standard refuses unless
-the document being written explicitly disables KEDA -- with a controller owning
-the count, writing one renders nothing.
-
-Ahead of the count guard and the policy locks, the router, and an action writing the infra overlay, refuse a write or revert of a `read_only` value on a backing service DFE does not run (`managed_by` `provider` or `external`, per `src/dfe_engine/backing/providers.yaml`) with 409 `managed_by_provider`. The override grant does not lift it: the chart deploys no store there, so the commit would change nothing.
-
-## Constrained params -- a dial with detents, or a bounded knob
-
-An action may declare `params`, and every param carries a CLOSED constraint:
-an enum carries its full value list, a numeric carries both bounds. There is
-deliberately no free-string param type -- an unconstrained param would reopen
-the hole curation closed. A `VarChange.value` references a param as
-`{"$param": "level"}` (whole-value substitution) or with a `map` that turns an
-enum value into a per-var literal -- the admin still curates what each detent
-means. Substitution never reaches `cls`/`name`/`path`, and there is no string
-interpolation, so params add zero injection surface. Wiring errors (dangling
-reference, map not covering the enum) are rejected at DEFINE time. Only the
-caller's supplied values can fail an invoke (422 `invalid_params`).
-
-A `value` of `{"$unset": true}`, alone or as a map entry, removes the path instead of setting it, which returns the var to the layer beneath the overlay (a chart default or a tier profile). Removing an absent path is a no-op that creates no file, an emptied parent map is removed with it, and the diff shows `new` as `{"$unset": true}`. A marker with any other content is rejected at define time.
-
-`required_action` is optional: left empty it derives `action:invoke:<name>`,
-the convention the shipped roles grant on (`dfe_operator` and `infra_admin`
-carry `action:invoke:*`).
-
-## The contract exposes the closed sets
-
-Every stringly field on an action is a closed set, so the contract enumerates
-it rather than trusting hand-typed values: `GET /gitops/classes` (the registry,
-with `action_writable` exporting the no-governance-class guard),
-`.../classes/{cls}/resources` and `.../resources/{name}/vars` (each gated by
-that class's own `:read` grant), and `POST /governance/admin/actions/validate`
-returns EVERY violation plus the would-be diff without committing. The schema
-fields carry `x-dfe-enum-source` annotations naming these endpoints, so
-generated clients render selects, not text boxes (the full convention:
-[ui-api-guide.md](ui-api-guide.md)).
-
-## The shipped action library
-
-The deploy-repo template (dfe-deploy `governance/`) ships a standard library
-of dials -- `receiver-surge`/`receiver-normal` (KEDA ceiling detents),
-`hunts-pause`/`hunts-resume`, `hunts-throttle` (bounded concurrent-run cap) --
-plus a `baseline` protected-var policy locking `image.*` (images move through
-stack pins, not dials). Every shipped action's structure is CI-validated in
-that repo (`tools/validate_governance.py`). The chart vars they point at are
-owned by dfe-infra's chart validation. An action's `description` is its
-runbook line -- what it does, and which action reverts it.
-
-## ClickHouse data RBAC -- a tier and a tenant per identity
-
-`src/dfe_engine/governance/ch/`. Access control in dfe-hyperdx's app layer cannot
-contain a bad query. Quotas and resource limits can, and those live in ClickHouse.
-So every ClickHouse identity composes two axes:
+An action invoke checks the caller's grant and every change, then writes them all in one commit.
 
 ```mermaid
-graph LR
-    Group["RBAC group"]
-    User["ClickHouse user<br/>bound to the group"]
-    Tier["Tier role - grants,<br/>settings profile, quota"]
-    Tenant["Tenant role - one row policy<br/>per _org_id table"]
-    Setting["SQL_current_tenant_id<br/>pinned read-only"]
-
-    Group --> User
-    User --> Tier
-    User --> Tenant
-    Tenant --> Setting
+sequenceDiagram
+    accTitle: L4 Detail -- Invoking an action
+    accDescr: The governance router loads the action and checks the caller holds that action's required_action. ActionStore checks every change against the protected-var policy and writes them all in one commit through GitCrud.
+    autonumber
+    participant op as Operator
+    participant gov as Governance router
+    participant store as ActionStore
+    participant pol as PolicyStore
+    participant crud as GitCrud
+    op->>gov: POST actions/receiver-surge/invoke
+    gov->>store: Load the action
+    gov->>gov: Require its required_action
+    gov->>store: invoke, actor and dry_run
+    loop each change
+        store->>pol: Enforce the protected policy
+    end
+    store->>crud: put_many, one commit
+    crud-->>op: Diff and commit SHA
 ```
 
-A group binding ties an RBAC group's ClickHouse user to one tier and at most one
-org. A tier is grants, a settings profile and a quota (`dfe_<tier>_role`,
-`_profile`, `_quota`). The tenant axis is one shared role plus a restrictive row
-policy on each `_org_id` table, reading the caller's `SQL_current_tenant_id`, which
-an org-tied user carries pinned read-only, so a `SETTINGS` override in a query is
-refused. The catalogue of tiers and service roles is data in dfe-schemas
-(`roles/clickhouse.yaml`), editable through the `ch_tiers` and `ch_service_roles`
-classes, and `ChRbacReconciler` renders whatever exists into idempotent DDL and
-runs it.
+*Figure 3. L4 Detail -- Invoking an action. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- dfe-engine](../architecture.md).
 
-The hunt runner connects as the `dfe_hunt_runner` service role, which carries
-grants and no quota (`roles/clickhouse.yaml`, `src/dfe_engine/hunts/connect.py`). The catalogue's
-`hunt_tier_*` tiers carry per-query memory and time limits and an hourly quota for a
-group bound to one.
+A `ProtectedPolicy` is a list of locked `cls:name:path` globs that Tier 1 respects too, unless the caller holds the override grant. A set or revert at a parent, or a set below a locked scalar, is rejected like a write to the var itself, and a whole-document write is gated on the leaves it adds, changes or removes. Three policies ship: `baseline` locks image references, `storage-layout` locks the data-layer modes, the storage model, the `objectStore`, `tieredBlock` and `tieredObject` dial blocks and the disk size and class, and `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud.
+
+No grant lifts three rejections. A lower node or broker count is rejected with a 400 naming the reason, by the backing-services router and by any action leaving one in the infra overlay, because the hazard is data loss. A `replicaCount` is rejected while KEDA owns the count (`keda.enabled`, else the chart default), because it would render nothing. A write or revert of a `read_only` value on a backing service DFE does not run (`managed_by` `provider` or `external` in `src/dfe_engine/backing/providers.yaml`) answers 409 `managed_by_provider`, because the chart deploys no store there.
+
+## Action params and the closed sets
+
+An action may declare `params`, each closed: an enum lists its values, a numeric both bounds, and there is no free-string type. A `VarChange.value` references a param as `{"$param": "level"}`, whole-value only, or with a `map` turning an enum value into a per-var literal. Substitution never reaches `cls`, `name` or `path` and there is no string interpolation, so params add no injection surface. A dangling reference or a map that misses an enum value is rejected at define time, and only the caller's values can fail an invoke (422 `invalid_params`). A value of `{"$unset": true}` removes the path, handing the var back to the layer beneath, and an emptied parent map goes with it. `required_action` left empty derives `action:invoke:<name>`, which the shipped `dfe_operator` and `infra_admin` roles grant as `action:invoke:*`.
+
+The contract enumerates every closed set: `GET /gitops/classes` (with `action_writable` exporting the no-governance-class guard), `.../classes/{cls}/resources` and `.../resources/{name}/vars`, each gated by that class's `:read` grant, and `POST /governance/admin/actions/validate` returns every violation and the would-be diff without committing. Schema fields hold `x-dfe-enum-source` annotations naming those endpoints ([ui-api-guide.md](ui-api-guide.md)).
+
+The engine packages a standard library of dials in `src/dfe_engine/governance/resources/` and seeds it into every deploy repo, never rewriting an existing file: `receiver-surge` and `receiver-normal` (KEDA ceiling detents), `hunts-pause`, `hunts-resume` and `hunts-throttle`. dfe-deploy's template holds the same files, and its CI validates them (`tools/validate_governance.py` in dfe-deploy).
+
+## ClickHouse data RBAC: a tier and a tenant per identity
+
+`src/dfe_engine/governance/ch/`. dfe-hyperdx's app layer cannot contain a bad query, but ClickHouse quotas and limits can, so every ClickHouse identity composes two axes.
+
+Each RBAC group binds to one ClickHouse user holding a tier role, the tenant role and, for an org, a pinned tenant setting.
+
+```mermaid
+flowchart LR
+    accTitle: L4 Detail -- ClickHouse identity
+    accDescr: An RBAC group binds to one ClickHouse user. The user holds a tier role, the tenant role and, for an org-tied user, a read-only SQL_current_tenant_id setting that the tenant row policies read.
+
+    group["RBAC group"]
+
+    user["ClickHouse user"]
+
+    tier["Tier role<br/>grants, profile, quota"]
+    tenant["Tenant role<br/>row policies"]
+    setting["SQL_current_tenant_id<br/>read-only"]
+
+    group -->|binds| user
+    user -->|tier| tier
+    user -->|tenant| tenant
+    user -->|pinned| setting
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    class user core
+```
+
+*Figure 4. L4 Detail -- ClickHouse identity.* Up: [L3 Components -- dfe-engine](../architecture.md).
+
+A group binding ties an RBAC group's ClickHouse user to one tier and at most one org. A tier is grants, a settings profile and a quota (`dfe_<tier>_role`, `_profile`, `_quota`). The tenant axis is one shared role plus a restrictive row policy on each `_org_id` table, reading the caller's `SQL_current_tenant_id`, which an org-tied user holds read-only, so a `SETTINGS` override in a query is rejected. The catalogue of tiers and service roles is data in dfe-schemas (`roles/clickhouse.yaml`), editable through the `ch_tiers` and `ch_service_roles` classes, and `ChRbacReconciler` renders it into idempotent DDL and runs it. The hunt runner connects as the `dfe_hunt_runner` service role, with grants and no quota (`src/dfe_engine/hunts/connect.py`), and the catalogue's `hunt_tier_*` tiers set per-query memory and time limits and an hourly quota for a group bound to one.
 
 ## The hunt runner
 
-`src/dfe_engine/hunts/`. A hunt is a rule query on a schedule that writes
-matched rows to a table. The runner is a pool, and hunts are never *assigned* to
-pods. Workers pull due runs from a
-ClickHouse lease table. Add a pod and it just starts pulling. Kill one and its leases
-expire and get reclaimed. There is no shard map to rebalance and nothing to go
-split-brain over.
+`src/dfe_engine/hunts/`. A hunt is a rule query on a schedule that writes matched rows to a table. Hunts are never assigned to pods: workers pull due runs from a ClickHouse lease table, and a dead pod's leases expire and are reclaimed. The ClickHouse the hunts query holds the lease, watermark and state, and with no row locks a claim is optimistic: insert a lease, then resolve the winner.
 
-ClickHouse is the ONLY operational store -- no Postgres. Making hunts (the
-mission-critical path) depend on a second database purely for coordination is not
-worth the operational surface, so the same CH the hunts already query holds the
-lease, watermark, and state. CH has no row locks, so the claim is optimistic:
-insert-a-lease-then-resolve, not `SELECT ... FOR UPDATE`.
+One worker wins each fire's claim, runs the window and advances the watermark.
 
 ```mermaid
-graph TD
-    Scheduler["Scheduler - compute due fires"]
-    Claim["ClickHouse hunt_lease - insert + resolve winner"]
-    W1["Worker"]
-    W2["Worker"]
-    CH["ClickHouse - run query, write results"]
-    WM["Watermark on _timestamp_load"]
+flowchart LR
+    accTitle: L4 Detail -- Hunt claim and run
+    accDescr: When a fire is due, runner workers race to claim it in hunt_lease. The winner runs the window query, writes matched rows to the results table and advances hunt_watermark, which sets the next window.
 
-    W1 -->|claim| Claim
-    W2 -->|claim| Claim
-    W1 --> CH
-    W2 --> CH
-    CH --> WM
-    WM -->|resume incrementally| W1
+    due(["Fire due"])
+
+    subgraph workers["Runner workers"]
+        w1["Worker"]
+        w2["Worker"]
+    end
+
+    lease[("hunt_lease")]
+
+    run["Run the<br/>window query"]
+
+    results[("Results table")]
+    watermark[("hunt_watermark")]
+
+    due --> workers
+    workers -->|claim| lease
+    lease --> run
+    run --> results
+    run --> watermark
+    watermark -.->|next window| workers
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class lease,results,watermark store
+    class workers group
 ```
 
-The smarts are deterministic, not random. `schedule.phase_offset` gives each hunt a
-stable offset inside its interval from a hash of its id, so hunts on the same
-schedule fan out evenly and never stampede ClickHouse at the boundary. `latest_fire`
-names the most recent fire at or before now, and it stays owed until its watermark
-is written. A global cap hard-limits how much hits CH at once.
+*Figure 5. L4 Detail -- Hunt claim and run. The dotted arrow is the next run reading the watermark.* Up: [The DFE control-plane layer](README.md).
 
-## Claims, windows and coordination tables
+`phase_offset` in `src/dfe_engine/hunts/schedule.py` gives each hunt a stable offset inside its interval from a hash of its id, so hunts on one schedule spread out. `latest_fire` names the most recent fire at or before now, and it stays owed until its watermark is written. A global cap limits concurrent runs.
 
-A run never doubles up. To claim, a worker reads the hunt free, INSERTs a lease row
-and a marker of its own, waits a settle, and keeps the claim only if its row landed
-within that settle and is still the latest. Lease writes reach a majority of
-replicas and lease reads go through `FINAL`, so every worker names the same winner
-(`src/dfe_engine/hunts/ch_coordinator.py`). Exclusion has to hold, because a window run twice
-writes its rows twice. Per-hunt state means an overrun defers
-rather than starting a second copy -- and flags `too_aggressive` so the UI can tell
-the user their schedule is too tight.
+To claim, a worker reads the hunt free, inserts a lease row and a marker for itself, waits a settle, and keeps the claim only if its row landed within the settle and is still the latest. Lease writes reach a majority of replicas and lease reads go through `FINAL`, so every worker names the same winner (`src/dfe_engine/hunts/ch_coordinator.py`). An overrun defers rather than starting a second copy, and flags `too_aggressive` so the UI can say the schedule is too tight.
+
+A fire goes from due to running to done, and an expired lease sends it back to due.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> due: phase_offset + latest_fire
-    due --> running: worker claims (insert+resolve, under cap)
-    running --> done: query committed, watermark advanced
-    running --> due: lease expired (worker died) -> reclaimed
-    done --> [*]
-    due --> deferred: previous run still running
-    deferred --> due: previous run finished
+    direction LR
+    accTitle: L4 Detail -- Hunt fire lifecycle
+    accDescr: A fire is due at its offset, deferred while the previous run is still going, running once a worker claims it, and done once its query commits and the watermark advances. A run with an expired lease goes back to due.
+    [*] --> Due: offset reached
+    Due --> Deferred: still running
+    Deferred --> Due: run finished
+    Due --> Running: claimed
+    Running --> Due: lease expired
+    Running --> Done: committed
+    Done --> [*]
 ```
 
-Each run is incremental and crash-safe. The query carries a `{window}` placeholder.
-The worker substitutes the window predicate on the hunt's timestamp field, runs it,
-and advances the watermark ONLY after the query commits. A pod killed mid-run re-runs
-the same window from the last committed watermark -- no gap, no loss. The field
-defaults to `_timestamp_load`, the common-header column that is always present, and a
-hunt's `timestamp_field` overrides it (`src/dfe_engine/hunts/spec_loader.py`).
+*Figure 6. L4 Detail -- Hunt fire lifecycle.* Up: [The DFE control-plane layer](README.md).
 
-The three coordination tables, all ReplacingMergeTree in the effective data database.
-`hunt_run` (one row per fire) and `hunt_runner_heartbeat` (one row per runner) sit
-beside them:
+Each run is incremental and crash-safe. Every statement holds a `{window}` placeholder, which the worker fills with the window predicate on the hunt's timestamp field (`src/dfe_engine/hunts/worker.py`), and the watermark advances only after the query commits, so a pod killed mid-run re-runs the same window. The field is `_timestamp_load` unless a hunt's `timestamp_field` overrides it (`src/dfe_engine/hunts/spec_loader.py`). `HuntRunner.tick(now)` is one cycle: find due hunts that are not already active, then claim up to the cap and run each at its window.
+
+Three ReplacingMergeTree tables in the effective data database, keyed by `hunt_id`, coordinate the runners. `hunt_run` (one row per fire) and `hunt_runner_heartbeat` (one row per runner) sit beside them.
 
 ```mermaid
 erDiagram
+    accTitle: L4 Detail -- Hunt coordination tables
+    accDescr: hunt_lease holds the owner and lease expiry of each hunt's current fire, hunt_watermark how far each hunt has run, and hunt_state its overrun count and too_aggressive flag. All three are keyed by hunt_id.
     hunt_lease {
         string hunt_id
         string owner
@@ -360,37 +253,37 @@ erDiagram
     }
 ```
 
-`HuntRunner.tick(now)` is one cycle -- find due hunts that are not already active,
-then claim up to the cap and execute each at its scheduled window. The daemon is
-`while: tick(); sleep`.
+*Figure 7. L4 Detail -- Hunt coordination tables.* Up: [The DFE control-plane layer](README.md).
 
 ## The smaller pieces
 
-- `GET /api/v1/config/client` (authenticated, any role) hands the UI its API base,
-  Observe URL, auth mode and feature flags at runtime, so one UI image runs in every
-  environment.
-- `src/dfe_engine/alerting/` is a scaffold: a rule model (threshold over a window,
-  severity to a channel) and a dispatcher whose only sender logs. A hunt's own alert
-  destinations are delivered by `src/dfe_engine/hunts/delivery.py`.
-- `dfe local` (`ls`, `get`, `set`, `unset`, `rm`, `revert`, `restore`, `push`) wraps
-  GitCrud on a clone of the deploy repo, for break-glass when the engine is down. It
-  has no action invoke ([dfe-cli-design.md](dfe-cli-design.md)).
+- `GET /api/v1/config/client` (any authenticated caller) hands the UI its API base, the Observe URL, the auth mode and feature flags at runtime, so one UI image runs in every environment.
+- `src/dfe_engine/alerting/` is a scaffold: a rule model and a dispatcher with one sender, which logs. A hunt's alert destinations are delivered by `src/dfe_engine/hunts/delivery.py`.
+- `dfe local` wraps GitCrud on a clone of the deploy repo for break-glass when the engine is down, with no action invoke ([dfe-cli-design.md](dfe-cli-design.md)).
 
-## What holds it together
+The repo as source of truth underpins RBAC, the ClickHouse safety boundary and no double-run.
 
 ```mermaid
-graph TD
-    Surv["GitOps survivability - repo is SoT + authority"]
-    RBAC["RBAC at the abstraction - class / action / operation"]
-    CHsafe["ClickHouse is the safety boundary - quotas + limits"]
-    NoDouble["No double-run, ever - lease + per-hunt state"]
-    Crash["Crash-safe - watermark advances only after commit"]
+flowchart LR
+    accTitle: L4 Detail -- What governed ops rests on
+    accDescr: The repo as source of truth and authority underpins RBAC at the class, action and operation level, ClickHouse as the safety boundary, and no double-run. A worker dying between its writes and the watermark repeats the window, and rule detections dedupe it.
 
-    Surv --> RBAC
-    Surv --> CHsafe
-    Surv --> NoDouble
-    NoDouble --> Crash
+    surv["Repo is the<br/>source of truth"]
+
+    rbac["RBAC per class,<br/>action, operation"]
+    chsafe["ClickHouse quotas<br/>and limits"]
+    nodouble["No double-run"]
+
+    crash["Watermark after<br/>the writes"]
+
+    surv --> rbac
+    surv --> chsafe
+    surv --> nodouble
+    nodouble --> crash
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
 ```
 
-If a change cannot be made by committing YAML to the repo, it does not belong in the
-engine. That rule is what keeps DFE operable without us.
+*Figure 8. L4 Detail -- What governed ops rests on.* Up: [The DFE control-plane layer](README.md).
+
+If a change cannot be made by committing YAML to the repo, it does not belong in the engine.
