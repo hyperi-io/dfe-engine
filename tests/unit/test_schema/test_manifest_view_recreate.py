@@ -88,8 +88,11 @@ def _recorded(checksum: str) -> LedgerRow:
         pytest.param(
             "old",
             "altered",
-            ["DROP VIEW IF EXISTS `dfe`.`query_log_archive_mv` SYNC", _CREATE],
-            id="changed-select-is-dropped-and-created",
+            [
+                "ALTER TABLE `dfe`.`query_log_archive_mv` MODIFY QUERY "
+                "SELECT event_time, query_id FROM system.query_log"
+            ],
+            id="changed-select-is-swapped-in-place",
         ),
         pytest.param("new", "unchanged", [], id="same-select-is-left-alone"),
         pytest.param(None, "unchanged", [], id="unrecorded-live-view-is-left-alone"),

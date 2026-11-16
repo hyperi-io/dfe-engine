@@ -18,6 +18,7 @@ from importlib.metadata import version
 
 from dfe_schemas.clickhouse import PlatformProbe
 
+from dfe_engine.clickhouse.attribution import DfeQueryTags
 from dfe_engine.clickhouse.query_log_archive import ARCHIVE_ID
 from dfe_engine.schema.applier import ManifestApplier
 from dfe_engine.schema.ledger import MigrationLedger
@@ -76,3 +77,13 @@ def test_a_changed_archive_select_is_applied_and_the_rows_stay(ch_client, dfe_db
     ).result_rows[0][0]
     assert "query_duration_ms >= 0" in live
     assert _applier(ch_client, dfe_db, platform).apply(new_view).action == "unchanged"
+
+    # The swapped view still feeds the target: a tagged query finishing after it
+    # lands in the archive through the new SELECT.
+    tag = DfeQueryTags(feature="hunts", kind="hunt", id="after_swap").to_json()
+    ch_client.query("SELECT 1", settings={"log_comment": tag})
+    ch_client.command("SYSTEM FLUSH LOGS")
+    landed = ch_client.query(
+        f"SELECT count() FROM {archive} WHERE dfe_id = 'after_swap'"
+    ).result_rows[0][0]
+    assert int(landed) >= 1
