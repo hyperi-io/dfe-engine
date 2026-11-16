@@ -429,9 +429,10 @@ class TestSourceFetcher:
         with pytest.raises(ValueError, match="Unknown fetcher source_type"):
             SourceFetcher(source_type="http_json")
 
-    def test_engine_owned_keys_are_refused(self):
-        with pytest.raises(ValueError, match="may not set"):
-            SourceFetcher(source_type="okta", config={"enabled": True, "topic": "x"})
+    @pytest.mark.parametrize("key", ["enabled", "topic", "topic_per_dump_unit"])
+    def test_engine_owned_keys_are_refused(self, key):
+        with pytest.raises(ValueError, match=f"may not set {key}"):
+            SourceFetcher(source_type="okta", config={key: True})
 
     @pytest.mark.parametrize(
         "config",

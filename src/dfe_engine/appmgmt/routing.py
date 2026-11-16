@@ -364,6 +364,9 @@ def _fetcher(
         "topic": fetcher.landing_label(source.source),
     }
     stanza.update(fetcher.config)
+    if fetcher.source_type in app.keyed_source_types:
+        # One source is one topic and one table, and the engine creates only the landing topic and table.
+        stanza["topic_per_dump_unit"] = False
     # Checked on the flat stanza, the same shape the save path checks.
     require_one_type(source.source, {fetcher.source_type: stanza}, settings)
     polls: dict[str, Any] = {fetcher.source_type: stanza}
