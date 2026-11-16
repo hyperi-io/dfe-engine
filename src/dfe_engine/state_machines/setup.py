@@ -229,6 +229,7 @@ def _break_glass_git_state(
         admin_name,
         environment=settings.env,
         mode=settings.gitops.mode,
+        forge=getattr(state, "forge", None),
     )
 
 
@@ -327,10 +328,10 @@ class SetupStatus(BaseModel):
         default=None,
         description="Durability of the LOCAL ADMIN account in the deploy repo "
         "(the field name predates the separate breakglass recovery account): "
-        "enabled/auto_merge/committed/merged. pending is always null here: "
-        "the review PR URL or CLI merge command comes only in the "
-        "reset-password response. committed without merged means a change "
-        "is still waiting on that merge.",
+        "enabled/auto_merge/committed/merged. committed without merged means a change "
+        "is still waiting on a merge, and pending then names its review branch and, with "
+        "no forge configured, the command that merges it. pending.pr_url is only in the "
+        "reset-password response.",
     )
     default_credentials: bool = Field(
         default=False,

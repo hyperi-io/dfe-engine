@@ -509,7 +509,11 @@ class GitopsRepo:
             return blob.data.decode("utf-8")
 
     def review_branch_files(
-        self, directory: str, *, bound: Literal["read", "write"] = "write"
+        self,
+        directory: str,
+        *,
+        bound: Literal["read", "write"] = "write",
+        fetch: bool = True,
     ) -> list[ReviewBranchFile]:
         """Each file directly in ``directory`` that a review branch not yet merged changes.
 
@@ -524,6 +528,8 @@ class GitopsRepo:
                 write's timeout and retries, for a check a write is waiting on.
                 ``read`` takes the read timeout and fails once, for a caller that
                 carries on without the answer.
+            fetch: False reads the branches this clone already holds and never
+                reaches the forge, for a caller an anonymous request can drive.
 
         Returns:
             The changed files, by branch and then name.
@@ -534,7 +540,7 @@ class GitopsRepo:
         """
         from dulwich.repo import Repo
 
-        if self._pushes():
+        if fetch and self._pushes():
             with self._write_lock:
                 if bound == "write":
                     result = self._write_op(

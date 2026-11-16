@@ -510,3 +510,17 @@ def test_every_keda_prometheus_trigger_queries_the_deployment_s_prometheus(temp_
     queried = [t["metadata"]["serverAddress"] for t in triggers if t["type"] == "prometheus"]
 
     assert queried == [address, address, address]
+
+
+def test_the_keda_kafka_trigger_counts_lag_from_the_earliest_offset(temp_dir):
+    pipeline = _shipped_template_pipeline(
+        temp_dir, PROMETHEUS_SERVER_ADDRESS="http://prometheus.example.test:9090"
+    )
+
+    rendered = pipeline.render_template_for_pipeline({}, {})
+    triggers = yaml.safe_load(rendered)["extraObjects"][0]["spec"]["triggers"]
+    kafka = [t for t in triggers if t["type"] == "kafka"]
+
+    # A group with no commits has nothing to measure lag against, so "latest" counts
+    # zero and a backlog never scales the pipeline up from zero.
+    assert [t["metadata"]["offsetResetPolicy"] for t in kafka] == ["earliest"]
