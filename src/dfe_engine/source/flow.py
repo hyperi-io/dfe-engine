@@ -41,11 +41,6 @@ ARCHIVER_SERVICE = "dfe-archiver"
 FETCHER_SERVICE = "dfe-fetcher"
 LOADER_SERVICE = "dfe-loader"
 
-PER_SOURCE_DOCS = (
-    "https://github.com/hyperi-io/dfe-docker/blob/main/docs/profiles.md#per-source-apps"
-)
-"""Where a Compose operator reads how a checkout runs one container per source."""
-
 
 class FlowError(ValueError):
     """Raised when a source's stages cannot be run as declared."""
@@ -107,8 +102,8 @@ def hosting_refusal(app: AppDescriptor, source: str, purpose: str, settings: DFE
     return (
         f"source {source!r} needs its own {service} to {purpose}, and this install runs "
         f"{service} only for the sources it was published with ({running}). A new one "
-        f"needs a dfe-docker checkout, where `make apply` starts a {service} per source: "
-        f"{PER_SOURCE_DOCS}"
+        f"needs a dfe-docker checkout, where applying the stack starts a {service} per "
+        "source (see the dfe-docker docs, Profiles page, per-source apps)."
     )
 
 

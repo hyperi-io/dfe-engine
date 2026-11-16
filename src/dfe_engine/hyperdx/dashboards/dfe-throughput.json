@@ -103,6 +103,7 @@
         "name": "Ingest lag p95 (ms)",
         "source": "all_sources",
         "displayType": "number",
+        "numberFormat": { "output": "number", "mantissa": 0 },
         "select": [
           {
             "aggFn": "quantile",

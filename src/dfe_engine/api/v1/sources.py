@@ -662,7 +662,11 @@ def _deployed_loaders(request: Request) -> list[str]:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
         return []
-    return [i.telemetry_name for i in instances.instances_routed_by(gc, LOADER_COMPILER)]
+    settings = request.app.state.settings
+    return [
+        appconfig.reporting_name(i, settings)
+        for i in instances.instances_routed_by(gc, LOADER_COMPILER)
+    ]
 
 
 class SourceEnabledPatchRequest(BaseModel):

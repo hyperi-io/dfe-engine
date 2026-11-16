@@ -650,6 +650,17 @@ def shares_one_container(app: AppDescriptor, settings: Any) -> bool:
     )
 
 
+def reporting_name(app: instances.AppInstance, settings: Any) -> str:
+    """The OTel ``service.name`` *app*'s instance reports under in this deployment.
+
+    One shared container serves every instance of its app and reports under the app's
+    own name. Anywhere else the instance reports under the name it is deployed as.
+    """
+    if shares_one_container(app.descriptor, settings):
+        return app.service
+    return app.telemetry_name
+
+
 def _merge_disjoint(into: dict[str, Any], block: dict[str, Any], prefix: str) -> str:
     """Merge *block* into *into* in place, or name the first key both set differently.
 

@@ -185,6 +185,13 @@ class RuleCreateResult(BaseModel):
         default=None, description="Why the rule matches every event, when it does"
     )
     cost_estimate: CostEstimate | None = None
+    volume_warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the alert-volume preview said about the rule just now. A point-in-time "
+            "reading, so it is answered once and never stored with the rule"
+        ),
+    )
     ai_context: AIAnalysisStub | None = None
 
 
@@ -383,9 +390,10 @@ class RuleCreationService:
         """Full pipeline: sanitize -> validate -> Rule.from_create -> guards -> AI stub.
 
         The volume preview runs only on a rule that would be saved. With the
-        detection guard enabled its warnings join the rule's own, and
-        ``estimate_cost`` decides whether the measurement comes back as
-        ``cost_estimate``.
+        detection guard enabled its warnings come back as ``volume_warnings``,
+        beside the rule and not in it, because a reading of the last hour is stale
+        once the rule is saved. ``estimate_cost`` decides whether the measurement
+        comes back as ``cost_estimate``.
 
         Args:
             request: Rule creation request with SQL and/or CEL filter.
@@ -486,12 +494,13 @@ class RuleCreationService:
         # Phase 5: alert-volume preview
         guard = self._hunts.detection_guard
         cost_estimate: CostEstimate | None = None
+        volume_warnings: list[str] = []
         measurable = not refused and matches_everything is None
         if measurable and rule.source_db and rule.source_table:
             if guard.enabled or request.estimate_cost:
                 cost_estimate = self._preview_volume(rule, request.cost_window_minutes, tenant_ids)
             if guard.enabled and cost_estimate is not None:
-                rule.warnings.extend(cost_estimate.warnings)
+                volume_warnings = list(cost_estimate.warnings)
             if not request.estimate_cost:
                 cost_estimate = None
 
@@ -512,6 +521,7 @@ class RuleCreationService:
             sql_errors=sql_errors,
             matches_everything=matches_everything,
             cost_estimate=cost_estimate,
+            volume_warnings=volume_warnings,
             ai_context=ai_context,
         )
 
