@@ -1,9 +1,5 @@
-# DFE Engine Default Configuration
-# This file provides default values for all configuration options.
-# Values can be overridden via environment variables or config files.
-# Environment variables take precedence: ENV > config file > defaults
+# Defaults under a config file and the environment: settings.py is the reference.
 
-# ClickHouse connection settings
 clickhouse:
   host: "localhost"
   # The HTTP port: the client is clickhouse-connect over HTTP, never native 9000.
@@ -12,40 +8,28 @@ clickhouse:
   password: ""
   database: "default"
   secure: true
-  # null -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
-  # default). Set false (DFE_ENGINE_CLICKHOUSE_VERIFY) only for self-signed dev/test CH.
+  # null follows SCALO_TLS_VERIFY, which verifies by default.
   verify: null
   connections_max: 300
 
-# Artifactory settings for downloading templates
 artifactory:
   url: ""
   username: ""
   password: ""
   templates_version: "latest"
 
-# Kafka connection settings
 kafka:
   bootstrap_servers: "localhost:9092"
   security_protocol: "PLAINTEXT"
 
-# Storage settings for artifacts and templates
-# Supports local filesystem, S3, and HTTP backends
-# Type is auto-detected from path if set to "auto":
-#   - s3://bucket/path -> S3 backend
-#   - http(s)://... -> HTTP backend
-#   - /path or ./path -> Local filesystem
+# auto picks S3, HTTP or the local filesystem from the path's scheme.
 storage:
   type: "auto"
   path: "./artifacts"
   s3_region: ""
 
-# Authorization settings
 auth:
-  # ON, to match env's default "production" posture. With it off, api/deps.py
-  # hands an unauthenticated request the admin role, so a production + auth-off
-  # default would grant anonymous admin out of the box.
-  # Dev and test set DFE_ENGINE_AUTH_ENABLED=false together with a dev DFE_ENGINE_ENV.
+  # Off hands an anonymous request the admin role, so it stays on outside dev.
   enabled: true
   local:
     enabled: true

@@ -16,7 +16,7 @@ Two things trip people up on a fresh clone.
 
 - The schemas come from the `dfe-schemas` package, which `uv sync` installs,
   so there is nothing to check out. `make dev` leaves `DFE_ENGINE_SCHEMAS_DIR` unset.
-  Set it only to point the engine at your own tree. `config/` is
+  Set it to point the engine at a tree of yours, and for nothing else. `config/` is
   a plain directory. `make dev` points `DFE_CONFIG_DIR` at `./config`, the engine
   seeds its auth store and registries into whatever that directory is, and
   tolerates it being empty or a throwaway. It does NOT need to pre-exist with
@@ -103,12 +103,21 @@ make e2e-server E2E_NO_CLICKHOUSE=1                # no docker: ClickHouse pages
 docker compose -f docker-compose.dev.yaml up -d --wait clickhouse && make e2e-server   # with docker
 ```
 
-`.vscode/launch.json` and `tasks.json` carry both, plus the seed. dfe-ui has the
+`make e2e-server` starts clean every time. Config, schema copies, secrets and
+artefacts live under `tmp/e2e`, and it drops every ClickHouse database under the
+`dfe_e2e` prefix before it starts, so a crashed run leaves nothing for the next.
+`E2E_KEEP=1` reuses the last run, `make e2e-clean` wipes on demand, and
+`E2E_ENV_FILE` and `E2E_WORKSPACE` move the env file and workspace out of the
+checkout. ClickHouse users and roles are server-wide and are not swept. It stops
+when something else listens on the API port, because a loopback bind there takes
+the traffic. Playwright polls `DFE_ENGINE_READY_URL=http://127.0.0.1:8003/readyz`.
+
+`.vscode/launch.json` and `tasks.json` hold both, plus the seed. dfe-ui has the
 `Engine + Console` compound. Three things to know on macOS:
 
 - Set `DFE_ENGINE_API_HOST=127.0.0.1` in `.env.e2e` and point clients at
   `127.0.0.1`, not `localhost`. Node resolves `localhost` to `::1` first and the
-  engine listens on IPv4 only. A `0.0.0.0` bind also makes macOS ask to accept
+  engine listens on IPv4 only. A `0.0.0.0` bind makes macOS ask to accept
   incoming connections.
 - Ports 5000 and 7000 belong to AirPlay Receiver. The engine uses 8003 and 9090,
   so nothing here collides.
@@ -140,5 +149,7 @@ as git clones rather than containers, the wiring is:
   `DFE_ENGINE_GITOPS_REPO_URL`/`DFE_ENGINE_GITOPS_LOCAL_PATH`. With it off the live auth store IS
   the durable store, so there is nothing to commit.
 
+To work on dfe-ui with no engine at all, `docker compose -f docker-compose.dev.yaml up prism` serves a mock of `openapi/openapi.json` on port 4010. Point dfe-ui's `NEXT_PUBLIC_API_URL` at `http://localhost:4010`.
+
 Bring the stack up one repo at a time, engine first, and confirm each speaks to the
-engine before adding the next. Each repo's `CONTRIBUTING.md` has its own local setup.
+engine before adding the next. Each repo's `CONTRIBUTING.md` has its local setup.

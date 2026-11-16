@@ -1,35 +1,9 @@
-# Operational query catalogue for the app-management layer. Same conventions as
-# keda_shim/queries.yaml - `database` resolves otel|data to the engine's effective
-# data database, `__DB__` is substituted with the validated identifier, and `params`
-# become ClickHouse-native bind placeholders so nothing is string-interpolated.
-#
-# Column names come from dfe-schemas tables/otel/*.yaml, which is the DDL SSoT.
-# Every query filters ServiceName then MetricName then TimeUnix, matching the
-# metrics tables' ORDER BY prefix so the primary key does the work.
-#
-# Per-query keys:
-#   database         otel | data | <literal db>
-#   table            the otel table to read
-#   sql              ClickHouse SQL; __DB__ is the resolved database.
-#                    __PRESSURE_MATCH__ and __PRESSURE_NAME__ are replaced with the
-#                    one rule that matches the scaling-pressure gauge under any
-#                    namespace prefix (dfe_engine/scaling_pressure.py).
-#   params           request params bound into the SQL (validated identifiers)
-#   binds            fixed CH bind params
-#   timeout_seconds  ClickHouse max_execution_time
+# App-management query catalogue, in keda_shim/queries.yaml's format. Columns follow
+# dfe-schemas tables/otel/, and each query filters in the metrics tables' ORDER BY order.
+
 queries:
-  # One row per gauge carrying its most recent reading, so the whole gauge set
-  # costs one round trip rather than one per metric.
-  # Scaling pressure is matched by rule rather than by name and reported under the
-  # canonical bare name, so an app that prefixes its gauge still reports a reading.
-  # Each series - one metric name, one attribute set, one pod, the KEDA shim's key -
-  # is read at its own latest timestamp and the MAX across series is returned, so the
-  # hottest pod sets each reading.
-  # A pushed row names its pod in the resource (service.instance.id) once the app
-  # runs scalo-rs#331 and none before it, a scraped row in its attributes. Rows that
-  # name no pod share one series.
-  # A scalo-rs pod exports a gauge's stuck first stream in the same second as its live one, so the newer start wins the tie.
-  # A gauge in `summed` is a count spread across series, such as open connections per listener on each pod, so it reads as the sum of the series still reporting: those seen within `fresh_seconds` of the newest, so a replaced pod drops out once it misses an export.
+  # Each gauge's latest reading in one round trip, the MAX across series so the hottest pod sets it.
+  # A gauge in `summed` reads as the sum of the series seen within `fresh_seconds` of the newest.
   latest_gauges:
     database: otel
     sql: >
@@ -58,16 +32,7 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
-  # Counters as a per-second rate for the instance as a whole, summed from each
-  # series' own rate so pods exporting in different seconds are never subtracted from
-  # one another. A series is keyed as latest_gauges keys it, and replicas pushing
-  # without a pod id share one.
-  # Each cumulative stream in a series (one StartTimeUnix) is differenced on its own,
-  # so two streams under one name never read their alternation as restarts. A reading
-  # below the one before it in a stream is a restart and counts from zero, and a
-  # stream's first reading in the window is its baseline.
-  # A series' streams are summed over the series' whole span, so a restart's new
-  # stream does not double the pod, and a series with one reading adds nothing.
+  # Per-second rates, differenced per stream (one StartTimeUnix) and summed, so restarts and replicas never subtract.
   counter_rates:
     database: otel
     sql: >
@@ -102,9 +67,7 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
-  # The request-duration histogram's first and last cumulative state per series in
-  # the window. A series is one attribute set on one process run, so a restart or a
-  # second replica is differenced on its own rather than against another.
+  # The duration histogram's first and last state per series, so each run is differenced on its own.
   http_request_histogram:
     database: otel
     sql: >
@@ -127,10 +90,7 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
-  # Each counter's increase over the window, summed over every run of every pod. A
-  # stream is one start and description per series, as a scalo-rs pod splits a counter
-  # by description. A stream that started in the window counts from zero, an older one
-  # from its first reading in it, and a drop inside a stream is a reset.
+  # Each counter's increase over the window. A stream that starts in the window counts from zero, and a drop is a reset.
   counter_increases:
     database: otel
     sql: >
@@ -155,11 +115,7 @@ queries:
     params: [service]
     timeout_seconds: 30
 
-  # CPU seconds over the window from the gauge scalo reports it as. A stream is one
-  # start and description per series, as for counter_increases, so a stuck stream
-  # beside the live one adds nothing rather than reading as a restart at every
-  # step. A stream that started in the window counts from zero, and a drop inside
-  # a stream is a restart.
+  # CPU seconds per stream as for counter_increases, so a stuck stream beside the live one adds nothing.
   cpu_seconds_increase:
     database: otel
     sql: >
@@ -182,19 +138,8 @@ queries:
     params: [service]
     timeout_seconds: 30
 
-  # Bucketed resource usage for graphing. Each bucket aggregates ACROSS every pod
-  # reporting for this instance, so max_value is the hottest pod's sample in it.
-  # A per-config app deploys each config as its own service name, so querying one
-  # instance already scopes to one config.
-  # p95 rides alongside min/max/avg because a ceiling set from the average
-  # under-provisions anything with a spiky profile.
-  # Scaling pressure buckets under its canonical bare name whatever prefix the app
-  # emitted, so one series is graphed rather than one per namespace.
-  # CPU seconds is cumulative, so each sample is cores used since the series' reading
-  # before it: a series is keyed as latest_gauges keys it, and a drop (a restart) or a
-  # repeated timestamp yields no sample.
-  # A scalo-rs pod's stuck first stream shares each timestamp with the live one, so both branches keep the newer start.
-  # A bucket_seconds of 0 reads the whole window as one bucket starting at its first second.
+  # Bucketed usage across every pod of the instance. p95 rides with min/max/avg because an average under-sizes a spiky app.
+  # CPU seconds is cumulative, so a restart or a repeated timestamp yields no sample. bucket_seconds 0 is one bucket.
   resource_series:
     database: otel
     sql: >
@@ -269,16 +214,8 @@ queries:
     params: [database]
     timeout_seconds: 5
 
-  # The loader's per-table counter, one row per series, for the ONE table a
-  # source's records land in. `loader_messages_by_table_total` carries the table as
-  # an OTel attribute (dfe-loader src/metrics/mod.rs:217), and the loader is the
-  # only stage counting a record against a table.
-  # Each series is differenced as counter_rates does it, stream by stream and summed
-  # over the series' span, with ServiceName in the key because several loader
-  # instances can answer, and the caller sums the series.
-  # last_increase is the epoch second of the series' latest rise, 0 if it never rose.
-  # ServiceName is bound to the deployed loader instances so the query still hits
-  # the metrics tables' ORDER BY prefix (ServiceName, MetricName, ...).
+  # The loader's per-table counter, differenced as counter_rates does. last_increase is the epoch second of its latest rise.
+  # ServiceName is bound to the loader instances so the query keeps the ORDER BY prefix.
   source_landing_counter:
     database: otel
     sql: >
@@ -313,12 +250,8 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
-  # Every scalo app emits `info`, so a recent row means the app is reporting.
-  # `samples` is what decides that, not max(TimeUnix): ClickHouse answers max()
-  # over no matching rows with one row carrying the type's default (the epoch),
-  # never NULL, so a name that has never emitted would otherwise read reporting.
-  # Replica count is absent because a pushed row names no pod until the app runs
-  # scalo-rs#331 (service.instance.id on the resource).
+  # `samples` decides liveness, because max() over no rows answers the epoch, not NULL.
+  # Replica count is absent: a pushed row from an older app names no pod.
   liveness:
     database: otel
     sql: >

@@ -1,10 +1,4 @@
-# Project-specific gitleaks allowlist
-# Extends the CI base configuration (ci/.gitleaks.toml)
-#
-# The CI runs gitleaks to detect secrets in your code. This file lets you
-# exclude false positives specific to your project.
-#
-# Documentation: https://github.com/gitleaks/gitleaks#configuration
+# Project false positives for gitleaks: https://github.com/gitleaks/gitleaks#configuration
 
 [extend]
 useDefault = true
@@ -12,27 +6,21 @@ useDefault = true
 [allowlist]
 description = "Project-specific false positive allowlist"
 
-# Paths to exclude from scanning (regex patterns)
 paths = [
-    # Test files often contain fake tokens/secrets
     '''tests/.*\.py''',
     '''tests/fixtures/.*''',
-    # Example configuration files
     '''.env.example''',
 ]
 
-# Regex patterns for known false positives
 regexes = [
     '''test-token''',
     '''example\.com''',
     '''llamatron''',
-    # DFE API key format used in documentation examples
+    # The API key in the docs' examples.
     '''dfe_ak_live_8a3f''',
-    # Makefile e2e ClickHouse wipe: curl -u takes shell variable references, never a
-    # literal credential. Both forms stay -- gitleaks scans the whole history.
+    # The Makefile's curl -u takes shell variables, not a credential. History holds both forms.
     '''DFE_ENGINE_CLICKHOUSE_USERNAME:-default\}:\$\$\{DFE_ENGINE_CLICKHOUSE_PASSWORD''',
     '''\$\$ch_user:\$\$ch_pass''',
 ]
 
-# Stopwords - findings containing these are likely false positives
 stopwords = ["example", "sample", "test", "mock", "fake", "dummy", "placeholder"]

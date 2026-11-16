@@ -1,238 +1,217 @@
 # OIDC + RBAC architecture and design
 
-The single source of truth for how dfe-engine handles authentication,
-external OIDC, group->role mapping, the two RBAC planes, the management API
-and the infrastructure it needs. The RBAC/multi-tenant ClickHouse detail lives in
-[rbac.md](rbac.md), and this doc references it rather than repeating it.
+How dfe-engine handles authentication, external OIDC, group to role mapping, the
+two RBAC planes, the management API and the infrastructure they need. The RBAC and
+multi-tenant ClickHouse detail is in [rbac.md](rbac.md), and this page links it
+rather than repeating it.
 
-Exhaustive reference (exact request/response bodies, tofu outputs, secret
-keys) lives with its source of truth - `openapi.json`, the code
-(`src/dfe_engine/auth/oidc/`), and the dfe-infra tofu modules - not
-transcribed here where it would drift.
-
-## Contents
-
-1. The auth model - local always, OIDC additive
-2. The layered pipeline
-3. Layer 2 - the provider registry and adapters
-4. The two RBAC planes
-5. The management API and CLI
-6. Infrastructure requirements
-7. Provider-agnostic onboarding recipe
+Request and response bodies, tofu outputs and secret keys stay with their
+sources: `openapi.json`, the code (`src/dfe_engine/auth/oidc/`) and the
+dfe-infra tofu modules.
 
 ## 1. The auth model - local always, OIDC additive
 
-The engine is the RP and the **single token issuer**. An external IdP does the
-interactive login. The engine validates the IdP id_token (signature/nonce/aud/
-exp against the IdP JWKS, via Authlib) and re-mints its own ES384 token.
-Downstream (dfe-ui, dfe-hyperdx) only ever sees the engine token - the IdP's
-token stays on the engine<->IdP leg. Code: `src/dfe_engine/auth/oidc/rp.py`,
-`src/dfe_engine/api/v1/oidc_login.py`.
+The engine is the relying party and the **single token issuer**. An external IdP
+does the interactive login. The engine validates the IdP's id_token (signature,
+nonce, audience and expiry against the IdP's JWKS, through Authlib) and re-mints
+an ES384 token of its making. dfe-ui and dfe-hyperdx see the engine token and
+nothing else: the IdP's token stays on the engine-to-IdP leg. Code:
+`src/dfe_engine/auth/oidc/rp.py`, `src/dfe_engine/api/v1/oidc_login.py`.
 
-By design several auth paths run at once and merge. OIDC never replaces local
-auth, it augments it:
+Several auth paths run at once and merge, so OIDC adds to local auth and never
+replaces it:
 
-- Local accounts (username/password -> JWT), API keys and the
-  disabled/dev path are always available - the fallback that keeps an
-  operator in even if the IdP is down or misconfigured.
-- External OIDC is added when provided (recommended for real deployments).
-  When present it takes precedence, but the local and key paths stay live.
+- Local accounts (username and password to JWT), API keys and the disabled dev
+  path are always available, which keeps an operator in when the IdP is down or
+  misconfigured.
+- External OIDC is added when provided, and is the path for a production
+  deployment. When present it takes precedence, but the local and key paths stay live.
 - Groups from both sources unify. An IdP group takes a DFE group's roles
-  only through that group file's `source_provider` + `source_id` link. A
-  matching name grants nothing (rbac-sign-in.md section 2.1). One role model,
-  two merged identity sources.
+  through that group file's `source_provider` + `source_id` link and no other
+  way. A matching name grants nothing (rbac-sign-in.md section 2.1).
 
-The four auth paths, precedence, and the header-trust security precondition are
-detailed in rbac.md section 1.
+The four auth paths, their precedence and the header-trust precondition are in
+rbac.md section 1.
 
 ## 2. The layered pipeline
 
-The whole design confines provider chaos to Layer 2 and reuses the existing
-engine machinery above it:
+Provider-specific code stops at one layer, the group adapter, and the engine
+machinery above it is the same for every IdP. A sign-in goes from the IdP through
+the engine's relying party and the group files to both RBAC planes.
 
-```text
-  [0] Trust / issuer      external IdP authenticates -> engine validates the
-                          IdP id_token (JWKS) -> engine RE-MINTS its own ES384
-                          token. Downstream sees ONLY the engine token.
-  [1] Identity            NormalizedIdentity { subject(sub), email, raw_groups }
-  [2] Group resolution    <-- ALL provider-specific mess lives HERE, behind an
-      (per-provider            adapter. Raw token refs (names | ids | nothing)
-       adapter)                -> NormalizedGroup { id, name, source }.
-                               token_claim mode: refs in token.
-                               api mode: refs absent/id-only -> call the
-                                         provider directory API.
-                          engine group file (config/auth/groups/*.yaml)
-                          -> roles + org_ids + scope
-                                    |
-          +-------------------------+---------------------------+
-   [3a] CONTROL-PLANE axis                       [3b] DATA-PLANE axis
-        group -> static roles                         group -> org_ids
-        (admin, data_analyst,                         (DYNAMIC: presence of
-         infra_admin, ...)                             org_ids confers scoped
-   [4a] dfe-engine authorization                       access - no named per-org
-        roles -> permissions ->                        role)
-        what you can DO (manage                   [4b] Observe data browsing
-        sources/hunts/config/deploy)                   (Kibana-style)
-                                                       org_ids -> dfe-hyperdx team +
-                                                       the org's pinned CH user
-                                                       -> row-filtered DATA VIEW
-                                                       ONLY (read, no control)
+```mermaid
+flowchart LR
+    accTitle: L4 Detail -- OIDC sign-in layers
+    accDescr: The external IdP authenticates the user and hands the engine an id_token. The engine's relying party validates it and re-mints an engine token. The provider adapter turns the raw group references into group ids, the group files map them to roles and org ids, and those feed the control plane and the data plane.
+
+    idp["External IdP"]
+    rp["Relying party"]
+    adapt["Provider adapter"]
+    files[("Group files")]
+    ctrl["Control plane<br/>roles to actions"]
+    data["Data plane<br/>orgs to rows"]
+
+    idp -->|id_token| rp
+    rp -->|groups| adapt
+    adapt -->|ids| files
+    files --> ctrl
+    files --> data
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
+    class idp ext
+    class adapt core
+    class files store
 ```
 
-Two principles:
+*Figure 1. L4 Detail -- OIDC sign-in layers. The blue box is the one layer that knows the provider.* Up: [rbac.md](rbac.md).
 
-1. **Provider-specific code stops at Layer 2.** Below it is generic OIDC
-   plumbing. Above it, generic machinery that does not care which IdP the user
-   came from. Adding a provider = one adapter at Layer 2, nothing else changes.
-2. **Control-plane and data-plane are orthogonal.** The same group membership
-   feeds both, but control-plane roles decide what you can DO while org_ids
-   decide what data you can SEE. A pure customer gets ONLY the data-plane axis.
+| Layer | What it does |
+|---|---|
+| Relying party | Validates the IdP's id_token against its JWKS and re-mints an ES384 engine token. `NormalizedIdentity` holds the subject, email, name and raw group references |
+| Provider adapter | Turns raw references (names, ids or nothing) into group ids. In `token_claim` mode the references are in the token. In `api` mode the adapter calls the provider's directory API |
+| Group files | `config/auth/groups/*.yaml` map a linked group id to roles, `org_ids` and a scope |
+| Control plane | Static roles (`admin`, `data_analyst`, `infra_admin`, ...) to permissions: what you can DO with sources, hunts, config and deploys |
+| Data plane | `org_ids` to the org's dfe-hyperdx team and pinned ClickHouse user: a row-filtered view of data, read-only, with no control |
 
-## 3. Layer 2 - the provider registry and adapters
+Two principles follow. Adding a provider is one adapter, and nothing else changes.
+The control plane and data plane are orthogonal: the same group membership feeds
+both, roles decide what you can DO and `org_ids` decide what data you can SEE, and
+a pure customer gets the data plane alone.
 
-### Provider config
+## 3. The provider registry
 
 Providers are YAML files (one per provider, filename stem = name) managed by
-`OIDCProviderRegistry`. The model (`src/dfe_engine/auth/oidc/models.py`, the SSoT) carries:
-`type` (generic|google|entra_id|okta), `enabled`, `issuer`, `client_id`,
+`OIDCProviderRegistry`. The model (`src/dfe_engine/auth/oidc/models.py`) holds
+`type` (generic, google, entra_id or okta), `enabled`, `issuer`, `client_id`,
 `client_id_env`, `client_secret_path`, `client_secret_env`, `scopes`, and a
-`groups` block (mode + claim_name + per-provider directory fields).
+`groups` block (mode, claim name and the per-provider directory fields).
 
-A provider file that does not load, whether its YAML is unreadable or its fields fail validation, is left out of the provider list, the relying party and the sync scheduler. The engine logs it once and counts it on `auth_oidc_providers_skipped_total{reason}` (`unreadable`, `invalid`), and every other provider carries on.
+A provider file that does not load, with unreadable YAML or fields that fail validation, is left out of the provider list, the relying party and the sync scheduler. The engine logs it once and counts it on `auth_oidc_providers_skipped_total{reason}` (`unreadable`, `invalid`), and every other provider keeps working.
 
-A secret is never stored in config: the client id is not secret and is held in
-the clear, every other credential is a PATH into the `DfeSecrets` store or the
+A secret is never stored in config. The client id is not secret and is held in
+the clear. Every other credential is a PATH into the `DfeSecrets` store or the
 NAME of an env var. Resolution reads the store before the environment, so a
-secret sent to the API works immediately while an ESO-mounted env var keeps
-serving a provider configured that way.
+secret sent to the API works at once, and an ESO-mounted env var keeps serving a
+provider configured that way.
 
-### Group resolution modes
+Three group resolution modes:
 
-- `token_claim` (the default) - groups arrive as strings in the id_token. Direct lookup.
-- `api` - the token lacks group names (or carries only ids). An adapter calls
-  the provider directory API to resolve names and enumerate membership on a
-  schedule. Each provider syncs every `groups.sync_interval` seconds (60 at least) from a background loop in every engine replica. `DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED=false` leaves only `POST /oidc-providers/{name}/sync`.
-- `manual` - membership mapped by hand in the engine. The token's groups are ignored at login and nothing syncs.
+- `token_claim`, the default: groups arrive as strings in the id_token and are looked up directly.
+- `api`: the token lacks group names or holds ids alone, so an adapter calls the
+  provider's directory API to resolve names and list membership on a
+  schedule. Each provider syncs every `groups.sync_interval` seconds (60 at least) from a background loop in the engine. `DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED=false` leaves `POST /oidc-providers/{name}/sync` as the one way to sync.
+- `manual`: membership is mapped by hand in the engine. The token's groups are ignored at login and nothing syncs.
 
-Which fields each provider type accepts and requires in each mode is enforced by the provider admin API, from the rules in `src/dfe_engine/auth/oidc/field_rules.py`. A `generic` provider has no `api` mode and a `google` provider has only `api` mode, with `enrich_on_login` on.
+The provider admin API enforces which fields each provider type accepts and needs in each mode, from `src/dfe_engine/auth/oidc/field_rules.py`. A `generic` provider has no `api` mode, and a `google` provider has `api` mode alone, with `enrich_on_login` on.
 
-## 3.1 The normalized group
+## 4. Group identifiers, adapters and sync
 
-Every provider's groups normalise to `NormalizedGroup { id, name, source }`.
-`GroupInfo { id, name, email, description }` (models.py) already provides this
-for api-mode. The token_claim/login path (`extract_identity`, rp.py) emits a flat
-`list[str]`, and the matching layer resolves it: each group file is linked by `source_provider` and that provider's
-`source_id`, and a login takes the groups whose `source_id` it asserts, for the
-provider it signed in through (`membership.linked_groups`). A group's name links
-nothing. So an Entra login carrying object GUIDs - which match no group filename -
-resolves against `source_id` and lands the right roles. The sync, SCIM's `externalId` and an admin through the groups API or dfe-ui's group form each set the link, so a `token_claim` login carrying names (Okta, dex, Keycloak) lands its roles once a group's `source_id` is the name the IdP sends.
-The adapter is the ONLY place the remaining quirks live:
+The api-mode adapters return `GroupInfo { id, name, email, description }`
+(models.py), with `id` the identifier the provider's sign-ins assert. The
+token_claim path (`extract_identity`, rp.py) emits a flat `list[str]` of
+identifiers. Either way a group file is linked by `source_provider` and that
+provider's `source_id`, and a login takes the groups with a `source_id` it asserts,
+for the provider it signed in through (`membership.linked_groups`). A group's name
+links nothing, so an Entra login with object GUIDs resolves against `source_id`
+and lands the right roles. The sync, SCIM's `externalId` and an admin through the
+groups API or dfe-ui's group form each set the link.
 
-| Quirk | Real cause | Adapter's job | Status |
-|-------|-----------|---------------|--------|
-| refs are names (dex/okta) vs ids (entra) vs absent (google) | provider design | normalise to {id,name}. Resolve GUIDs by source_id, call the directory API when the token lacks the name | id->name resolution by source_id match |
-| id stable, name mutable | directories rename groups | map roles on `id`, display `name` | source_id is the stable key |
-| overage (entra >200 -> a Graph pointer) | token size limits | detect the marker, fall back to the directory API | `rp.py` detects `_claim_names` and fetches `transitiveMemberOf` with the user's own login token (`/me`: User.Read returns each group's id, which is all role resolution needs. `GroupMember.Read.All` adds names), falling back to app credentials (tenant id + client secret) when Graph refuses that token |
-| nested / transitive groups | AD/entra/google nesting | take the closure the provider already emits, or walk it when it does not | entra emits the full closure in-token. Honour it (per-provider fact, not a global toggle) |
-| name collisions across tenants | bare names aren't unique | namespace the key (source+domain) | a name held by a group not linked to that IdP group is skipped (`name_taken`). Namespacing not yet built |
-| non-role groups (mailing lists) | not all groups grant access | filter by group type | not yet built |
-
-## 3.2 Adapters
-
-`src/dfe_engine/auth/oidc/adapters/`: `generic` (token_claim/manual, no API), `google` (Cloud
-Identity Groups API with the user's own login token. The Admin SDK Directory API
-as an optional service account), `entra` (Microsoft Graph), `okta` (Groups API). Contract:
-`list_all_groups`, `resolve_user_groups`, `test_connection`. The two a login can
-reach never raise: `resolve_user_groups` reports an outage or refusal. An outage
-keeps the token's groups, else the account's. Anything else replaces them.
-`list_all_groups` serves the sync only and raises when a page fails, so the sync
+`src/dfe_engine/auth/oidc/adapters/` holds `generic` (token_claim or manual, no API), `google` (the Cloud
+Identity Groups API with the user's login token, and the Admin SDK Directory API
+for an optional service account), `entra` (Microsoft Graph) and `okta` (Groups API). Each implements
+`list_all_groups`, `resolve_user_groups` and `test_connection`. `resolve_user_groups`, the one a login reaches, never raises: it reports an outage or a refusal. An outage
+keeps the token's groups, else the account's, and anything else replaces them.
+`list_all_groups` serves the sync and raises when a page fails, so the sync
 never reads a short listing as the whole directory.
 
-## 3.3 Sync and control-plane independence
+`src/dfe_engine/auth/oidc/sync.py` lists a provider's groups in api mode. It creates a group file for each unseen group, linked by `source_provider` and `source_id`, and updates the files linked to that IdP group, keeping their roles ([rbac-groups.md](rbac-groups.md#44-group-sync-process) has the skips). Detaching a provider does NOT delete its groups: they orphan with `source_provider` set, and the delete answer lists them. Sign-in needs the engine, the relying party and one token issuer, so with the engine down nobody can sign in and provider CRUD and group sync stop as well. Running pipelines keep running, because the data path does not call the engine.
 
-`src/dfe_engine/auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id and their `source_provider` this provider, or one `auth.source_provider_bindings` joins to it), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac-groups.md section 4.4). A new group whose name is a stored group's `source_id` or whose id is a stored group's name is skipped as `name_taken` too, since an API key resolves an identifier by name, then by `source_id`. A file carrying the id under any other provider, whatever its name, is skipped as `provider_mismatch`, so a sync never moves a group between providers or creates a second group carrying the id. Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
+The adapter is where the provider quirks live:
 
-**Sign-in needs the engine.** It is the relying party and the only token
-issuer, so with the engine down nobody can sign in, and provider CRUD and group
-sync stop too. Running pipelines carry on: the data path does not call the
-engine.
+| Quirk | Cause | Adapter's job | Status |
+|-------|-----------|---------------|--------|
+| refs are names (dex, Okta) vs ids (Entra) vs absent (Google) | provider design | resolve ids by `source_id`, and call the directory API when the token lacks the name | built: id resolution by `source_id` match |
+| id stable, name mutable | directories rename groups | map roles on `id`, display `name` | built: `source_id` is the stable key |
+| overage (Entra over 200 groups gives a Graph pointer) | token size limits | detect the marker, fall back to the directory API | built: `rp.py` detects `_claim_names` and fetches `transitiveMemberOf` with the user's login token (`/me`: User.Read returns each group's id, which is all role resolution needs, and `GroupMember.Read.All` adds names), falling back to app credentials (tenant id + client secret) when Graph turns that token down |
+| nested groups | AD, Entra and Google nesting | take the closure the provider emits, or walk it when it does not | built: Entra emits the full closure in the token, and it is honoured per provider, not by a global toggle |
+| name collisions across tenants | bare names are not unique | namespace the key (source + domain) | partial: a name held by a group not linked to that IdP group is skipped (`name_taken`). Namespacing is not built |
+| non-role groups (mailing lists) | not all groups grant access | filter by group type | not built |
 
-## 4. The two RBAC planes
+## 5. The two RBAC planes
 
-One group resolution (`deps.py _resolve_group_grants` + the `Group` model) feeds
-both. A group file carries `roles`, `org_ids`, and `scope`
-(`system`|`org:<name>`). A user's roles and org_ids are the union across groups.
+One group resolution (`deps.py _resolve_group_grants` and the `Group` model) feeds
+both planes. A group file holds `roles`, `org_ids` and `scope`
+(`system` or `org:<name>`). A user's roles and `org_ids` are the union across groups.
 
-- Control plane (3a/4a): `roles.yaml` + wildcard `permission_matches` gate
-  the dfe-engine API (manage sources/hunts/config/deploy). Static named roles.
-- Data plane (3b/4b): org_ids drive dynamic, data-only access. A caller fenced to one org (an `org_viewer`, or any role bound at that org's scope) browses Observe as the org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to that org (rbac.md section 5). Read-only. No control-plane power.
+- Control plane: `roles.yaml` and the wildcard `permission_matches` gate
+  the dfe-engine API (manage sources, hunts, config and deploys). Static roles.
+- Data plane: `org_ids` drive data-only access. A caller fenced to one org (an `org_viewer`, or any role bound at that org's scope) browses Observe as the org's pinned ClickHouse user. That user's READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to that org (rbac.md section 5). Read-only, with no control-plane power.
 
-Both axes resolve from the group files. The re-minted token carries
+Both planes resolve from the group files. The re-minted token holds
 `{sub, email, groups}` plus the `role` claim dfe-hyperdx reads (see
-auth-envoy-topology.md). Roles AND org_ids still derive engine-side from the
-group files, not the token. Full detail: rbac.md sections 2, 5, 6, 7.
+[auth-envoy-topology.md](../auth-envoy-topology.md)). Roles and `org_ids` derive
+engine-side from the group files, not the token. Full detail: rbac.md sections 2, 5, 6 and 7.
 
-## 5. The management API and CLI
+## 6. The management API and CLI
 
-Admin CRUD lives at `/api/v1/auth/oidc-providers` (`src/dfe_engine/api/v1/oidc_providers.py`):
-create / list / get / update / delete (delete reports orphaned groups) /
-`{name}/sync` / `{name}/test` / `{name}/verify-login`. RBAC scopes
-`oidc_read|write|delete`, audit on every mutation, pagination on list. The `dfe`
-CLI gets these for free - generated from `openapi.json` - so UI and CLI share one
-CRUD surface. Create/update take the credential VALUES (`client_secret`, the
-Okta API token, the Entra client secret, the Google SA JSON), write them to the
-secret store and record only the path, then re-register the provider with the
-relying party - so a provider configured purely through the API completes a
-login without an env edit or a restart. A `*_env` field takes an environment
-variable NAME. A credential pasted there is a 422 naming the field. Detach
-deletes the provider's stored secrets.
+Admin CRUD is at `/api/v1/auth/oidc-providers` (`src/dfe_engine/api/v1/oidc_providers.py`):
+create, list, get, update, delete (which lists orphaned groups), `{name}/sync`,
+`{name}/test` and `{name}/verify-login`, under the RBAC scopes
+`oidc_read`, `oidc_write` and `oidc_delete`, with an audit event on every mutation and pagination on list. The `dfe`
+CLI is generated from `openapi.json`, so UI and CLI share one CRUD surface.
+Create and update take the credential VALUES (`client_secret`, the Okta API
+token, the Entra client secret, the Google service account JSON), write them to
+the secret store and record the path, then re-register the provider with the
+relying party. A provider configured through the API alone completes a login with
+no env edit and no restart. A `*_env` field takes an environment variable NAME,
+and a credential pasted there is a 422 naming the field. Detach deletes the
+provider's stored secrets.
 
-Verification for a thorough onboard/offboard workflow:
+Two checks help an onboard or offboard:
 
 - `GET /{name}/verify-login` reports whether the client_id and client_secret
-  resolve (value never returned) and whether the issuer's discovery document is
-  reachable and well-formed. `{name}/test` checks the group-directory credentials
-  only, and is a no-op for generic providers.
-- No single endpoint returns raw claims, normalized groups, resolved roles and
-  org_ids for a login. Assemble them from the callback JSON
-  (`{subject,email,groups}`) and `GET /auth/me` (roles and org_ids).
+  resolve (the value is never returned) and whether the issuer's discovery
+  document is reachable and well-formed. `{name}/test` checks the group-directory
+  credentials, and does nothing for a generic provider.
+- No single endpoint returns raw claims, groups, resolved roles and
+  `org_ids` for a login. Assemble them from the callback JSON
+  (`{subject,email,groups}`) and `GET /auth/me` (roles and `org_ids`).
 
-## 6. Infrastructure requirements
+## 7. Infrastructure requirements
 
-What a deployment must provide (dfe-infra owns these and the engine consumes them).
+A deployment provides these, dfe-infra owns them and the engine consumes them:
 
 - OIDC client credentials per provider, as env vars from a K8s Secret
-  (materialised by ESO from OpenBao / cloud SM). Env-var NAMES are declared in
-  the provider config. The chart mounts the values. Per-provider secret keys
-  (client-id, client-secret, and provider extras - Google SA JSON, Entra
-  tenant-id, Okta api-token) are defined by the tofu modules, not here.
-- Cloud IAM provisioning (tofu): `tf-oidc-google` (OAuth client is
-  console-only - the module does the group-resolver SA), `tf-oidc-entra` (app
-  registration + admin-consented `GroupMember.Read.All`), `tf-oidc-okta` (OIDC
-  app + groups claim + API token). Modules live in dfe-infra. This engine just
-  reads the resulting creds.
-- DNS + TLS for the callback host. The native RP callback is
-  `https://{dfe_host}/api/v1/auth/oidc/{provider}/callback` (+ localhost for dev).
-- Network egress to IdP directory APIs for api-mode group resolution
-  (`cloudidentity.googleapis.com`, and the Admin SDK at `www.googleapis.com` when a
-  service account is set, `graph.microsoft.com`, `{org}.okta.com`).
-- The edge header path, a fallback only. dfe-infra's gateway can verify an
+  (materialised by ESO from OpenBao or a cloud secrets manager), or sent to the API. The provider config gives the env var NAMES, and the chart mounts the values. The tofu modules define the per-provider secret keys (client-id, client-secret, and extras such as the Google service account JSON, the Entra tenant-id and the Okta api-token).
+- Cloud IAM provisioning in tofu: `tf-oidc-google` (the OAuth client is
+  console-only, so the module creates the group-resolver service account), `tf-oidc-entra` (app
+  registration and admin-consented `GroupMember.Read.All`) and `tf-oidc-okta` (OIDC
+  app, groups claim and API token), under dfe-infra `terraform/modules/`. The engine reads the resulting credentials.
+- DNS and TLS for the callback host. The relying-party callback is
+  `https://{dfe_host}/api/v1/auth/oidc/{provider}/callback` (plus localhost for dev).
+- Network egress to the IdP directory APIs for api-mode group resolution:
+  `cloudidentity.googleapis.com`, the Admin SDK at `www.googleapis.com` when a
+  service account is set, `graph.microsoft.com` and `{org}.okta.com`.
+- The edge header path, a fallback. dfe-infra's gateway can verify an
   IdP token and inject `X-Oidc-Subject` (`jwtAuthn`, off by default), and the
-  engine trusts it only with `auth.trust_proxy_auth_headers`. Envoy Gateway cannot
+  engine trusts it with `auth.trust_proxy_auth_headers` on and not otherwise. Envoy Gateway cannot
   map an array claim to a header, so `X-Oidc-Groups` never arrives and such a login
-  holds no roles (dfe-infra `helm/edge/gateway/values.yaml`, dfe-infra#222). The
-  native RP is the login path. When the header path is used, the engine MUST be
-  reachable only via Envoy (NetworkPolicy), or the headers are forgeable.
+  holds no roles (dfe-infra `helm/edge/gateway/values.yaml`). The
+  relying party is the login path. When the header path is used, Envoy must be
+  the one way to reach the engine (NetworkPolicy), or the headers can be forged.
 
-## 7. Provider-agnostic onboarding recipe
+## 8. Provider-agnostic onboarding recipe
 
-Because the mess is quarantined at Layer 2, onboarding any real external OIDC is
-fixed:
+Because the provider code stays in the adapter, onboarding an external OIDC IdP
+takes four steps:
 
-1. Register a provider config (type + issuer + client env-var names + groups mode/claim).
-2. The IdP emits whatever it emits, and the Layer-2 adapter normalises it.
-3. Author group files mapping the normalised group id -> roles + org_ids.
-4. Layers 3-4 do the rest unchanged.
+1. Register a provider config: type, issuer, client credentials and the groups mode.
+2. The IdP emits whatever it emits, and the adapter turns it into group ids.
+3. Link group files to those ids, with their roles and `org_ids`.
+4. The group files, the control plane and the data plane do the rest unchanged.
 
-Canonical role + group names are in [rbac-vocabulary.md](rbac-vocabulary.md) -
-the SSoT every consumer (engine, ui, infra, deploy, schemas, test envs) aligns to.
+The role and group names are in [rbac-vocabulary.md](rbac-vocabulary.md), which
+every consumer (engine, ui, infra, deploy, schemas, test environments) aligns to.

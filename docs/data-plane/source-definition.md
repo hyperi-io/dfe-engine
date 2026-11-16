@@ -133,11 +133,11 @@ views:
 # --- Schema (mandatory) ---
 # The source owns its ClickHouse table schema: one source = one table = one schema.
 schema:
-  meta_schema: logs_beats_filebeat      # Base field definitions (YAML)
+  meta_schema: meta/beats/filebeat      # Base field definitions, a dfe-schemas path
   meta_schema_version: 1.0.0
-  derived_schema: derived/beats/filebeat_auth   # Column SELECTION from the meta schema (optional)
-  derived_schema_version: 1.0.0                 # Unset follows the derived schema's own current
-  additional_fields: filebeat/add       # Extra fields, indexes (optional)
+  # derived_schema: derived/<group>/<name>   # Column SELECTION from the meta schema (optional)
+  # derived_schema_version: 1.0.0            # Unset follows the derived schema's own current
+  # additional_fields: additional/<group>/<name>   # Extra fields, indexes (optional)
   ttl_days: 90                          # Data retention
   engine: MergeTree                     # Base variant only (MergeTree, ReplacingMergeTree(...), ...)
                                         # The Replicated prefix is added at DDL time
@@ -167,7 +167,7 @@ table, both on by default. Turning them off tells dfe-loader to stop populating
 A write carrying the 2.1 keys `sigma`, `mapping_standards` or `field_mappings` is
 rejected with a "removed in 2.2" error. Declare naming-standard views under `views`.
 
-## The smallest source that works
+The smallest source that works:
 
 ```yaml
 source: syslog
@@ -188,15 +188,32 @@ header schema. Fields are added incrementally later.
 
 ## Schema ownership
 
-Each source owns exactly one ClickHouse table schema, 1:1:
+Each source owns exactly one ClickHouse table. Its columns come from the common header, then the meta or derived schema, then the additional fields.
 
-```text
-Source: filebeat
-  └── Schema: logs_beats_filebeat
-        ├── meta_schema.yaml       (base columns, types, use cases)
-        ├── derived_schema.yaml    (which of those columns this table keeps)
-        └── additional_fields.yaml (enrichment fields)
+```mermaid
+flowchart LR
+    accTitle: L4 Detail -- Source table columns
+    accDescr: The source table takes the common header profile's columns first. Then it takes the meta schema's columns, narrowed by the derived schema when there is one. Then it takes the additional fields.
+
+    subgraph cols["Columns, in order"]
+        direction LR
+        header["Common header"] ~~~ meta["Meta schema, or its<br/>derived selection"] ~~~ additional["Additional fields"]
+    end
+
+    table[("Source table")]
+
+    cols --> table
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class table store
+    class cols group
 ```
+
+*Figure 1. L4 Detail -- Source table columns. Read the columns left to right.* Up: [Data plane](README.md).
+
+With no derived schema the table takes every meta schema column.
 
 The type registry (dfe-schemas `registries/types.yaml`) maps primitives to ClickHouse types
 and is global, not per-source. The schema section feeds `SchemaBuilderV2`
@@ -210,7 +227,8 @@ columns:
   - name: user_name
     type: string
     use_case: dimension
-    comment: "@source: first(user_id/uid/id)"
+    expr: "@source: first(user_id/uid/id)"
+    comment: "User identifier"
   - name: source_ip
     type: ip
     use_case: range
@@ -219,7 +237,8 @@ columns:
     use_case: word_search
 ```
 
-Loader directives in `comment` survive into the ClickHouse column comment. The
+The loader directive in `expr` and the prose in `comment` land together in the
+ClickHouse column COMMENT. The
 full type system, the primitive-to-ClickHouse mapping and the use cases are in
 [schema.md](schema.md).
 

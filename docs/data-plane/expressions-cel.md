@@ -2,8 +2,6 @@
 
 DFE uses **CEL (Common Expression Language)** for conditions across the Python engine, the Rust services and the CLI. CEL is not Turing-complete: no loops, no recursion, no side effects, so every expression terminates. An expression is compiled once and evaluated against every row.
 
-**Packages:**
-
 | Language | Package | Notes |
 |----------|---------|-------|
 | Rust | `cel` | Native implementation, through `scalo::expression` |
@@ -11,7 +9,7 @@ DFE uses **CEL (Common Expression Language)** for conditions across the Python e
 
 scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
 
-**References:**
+References:
 
 - [CEL Specification](https://github.com/google/cel-spec)
 - [CEL Overview](https://cel.dev/overview/cel-overview)
@@ -20,7 +18,7 @@ scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
 
 ---
 
-## What CEL Does NOT Replace
+CEL does not replace these:
 
 | System | Reason |
 |--------|--------|
@@ -31,11 +29,11 @@ scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
 
 ---
 
-## DFE Expression Profile
+## The DFE expression profile
 
 DFE uses a **subset** of CEL. Expressions outside this profile are rejected at validation time.
 
-### Allowed Operations
+Allowed operations:
 
 | Category | Operations | Examples |
 |----------|-----------|---------|
@@ -45,7 +43,7 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 | Arithmetic | `+`, `-`, `*`, `/`, `%` | `price * quantity` |
 | Ternary | `? :` | `is_admin ? 95 : 50` |
 
-### Allowed Functions
+Allowed functions:
 
 | Function | Purpose | Example |
 |----------|---------|---------|
@@ -60,7 +58,7 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 | `string()` | Cast to string | `string(code) == "200"` |
 | `bool()` | Cast to boolean | `bool(enabled)` |
 
-### Excluded (Rejected at Validation)
+Rejected at validation:
 
 | Feature | Reason |
 |---------|--------|
@@ -68,9 +66,7 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 | `timestamp()`, `duration()` | ClickHouse handles time natively -- no need to duplicate |
 | Macros | Complexity with no benefit for DFE use cases |
 
----
-
-## Supported Types
+Supported types:
 
 | CEL Type | Python | Rust | ClickHouse |
 |----------|--------|------|------------|
@@ -84,9 +80,9 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 
 ---
 
-## Usage Examples
+## Where DFE uses it
 
-### Alert Triggers
+An alert trigger:
 
 ```yaml
 alerts:
@@ -94,9 +90,7 @@ alerts:
     - when: "result_count >= 10"
 ```
 
-A trigger sees only `result_count`, the rows the fire wrote. A trigger on a row field never fires.
-
-### Source Routing
+A trigger sees `result_count`, the rows the fire wrote, and nothing else. A trigger on a row field never fires.
 
 A source selects its records with `when`, a CEL condition, in place of `match`. The receiver evaluates it against every inbound record under its CEL Fast profile, so regex, iteration and time functions are refused at save. See [source-definition.md](source-definition.md).
 
@@ -104,17 +98,13 @@ A source selects its records with `when`, a CEL condition, in place of `match`. 
 when: "data_stream.dataset == 'cisco_ios.log' && agent.type == 'filebeat'"
 ```
 
-### Computed Values (Transforms)
+A computed column in the loader:
 
 ```yaml
 columns:
   risk_label:
     expr: '@computed: risk_score > 80 ? "high" : risk_score > 40 ? "medium" : "low"'
 ```
-
----
-
-## CEL-to-ClickHouse SQL Transpilation
 
 CEL expressions can be mechanically converted to ClickHouse WHERE clauses for query pushdown:
 
@@ -133,23 +123,38 @@ This enables expressions written once in YAML to work both as in-memory evaluati
 
 ---
 
-## Implementation Architecture
+## Where it is implemented
+
+Two scalo wrappers enforce the DFE profile: scalo-py's for the engine and scalo-rs's for the loader and receiver.
 
 ```mermaid
-flowchart TB
-    PROF["DFE expression profile<br/>a subset of CEL"]
-    PY["scalo-py scalo.expression<br/>wraps common-expression-language"]
-    RS["scalo-rs scalo::expression<br/>wraps the cel crate"]
-    ENG["dfe-engine<br/>hunts/alert.py, rule filters"]
-    LDR["dfe-loader<br/>src/transform/computed.rs"]
-    PROF --> PY & RS
-    PY --> ENG
-    RS --> LDR
+flowchart LR
+    accTitle: L4 Detail -- CEL implementations
+    accDescr: The DFE expression profile is enforced by two wrappers. scalo-py's scalo.expression serves dfe-engine. scalo-rs's scalo::expression serves dfe-loader and dfe-receiver.
+
+    profile["DFE expression<br/>profile"]
+
+    py["scalo-py<br/>scalo.expression"]
+    rs["scalo-rs<br/>scalo::expression"]
+
+    engine["dfe-engine"]
+    loader["dfe-loader"]
+    receiver["dfe-receiver"]
+
+    profile --> py
+    profile --> rs
+    py --> engine
+    rs --> loader
+    rs --> receiver
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    class profile core
 ```
 
-Both wrappers enforce the same DFE profile: the same allowed operators, functions and types.
+*Figure 1. L4 Detail -- CEL implementations.* Up: [Data plane](README.md).
 
-### API surface
+scalo-py wraps `common-expression-language` and scalo-rs the `cel` crate. Both enforce the same allowed operators, functions and types. In the engine the callers are `hunts/alert.py`, the rule filters and source routing. In dfe-loader it is `src/transform/computed.rs`, and in dfe-receiver the filter validation in `src/config/mod.rs`.
 
 scalo-py's names (`scalo.expression`):
 
@@ -157,5 +162,5 @@ scalo-py's names (`scalo.expression`):
 compile_expression(expr) -> Program    # Parse + validate + compile
 evaluate(expr, data) -> Any            # One-shot convenience (compile + execute)
 validate(expr) -> list[str]            # Syntax + profile check, returns errors for UI
-transpile_to_clickhouse(expr) -> str   # The SQL pushdown below
+transpile_to_clickhouse(expr) -> str   # The SQL pushdown above
 ```

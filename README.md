@@ -7,14 +7,15 @@ The DFE control plane: an API and CLI that turn operator changes into git commit
 
 ## What it does
 
-- Sources are defined once. The receiver's and loader's routing is compiled from them, so no app carries hand-written routing.
-- Every change is a commit in the deployment's own git repo, and Argo CD applies it. The audit log is the git history.
+- Sources are defined once. The receiver's and loader's routing is compiled from them, so no app has hand-written routing.
+- Every config change is a commit in the deployment's git repo, and Argo CD applies it, so the audit log is the git history. The engine applies ClickHouse DDL and keeps its auth state and secrets itself.
 - The dfe-schemas manifest is applied at boot: the core ClickHouse objects, the Kafka bootstrap topics, and each source's table when that source is deployed.
+- Sampling of a source's ClickHouse table or Kafka topic, where the default `smart` mode and the `anomaly` mode run logreducer for a representative view.
 - A hunt runner spreads scheduled hunts across their interval and coordinates through ClickHouse alone.
 - OIDC login, SCIM 2.0 provisioning for accounts and groups, and scoped RBAC.
-- The `dfe` CLI, generated from the API's own OpenAPI spec.
+- The `dfe` CLI, generated from the API's OpenAPI spec.
 
-Records never flow through the engine. They go receiver, then Kafka or gRPC, then loader, then ClickHouse, and the engine decides what those apps are configured to do. DFE lands data first and lets you add columns later, one field at a time, with no reindex. [docs/data-evolution.md](docs/data-evolution.md) explains the three stages and the `promote` workflow.
+Records never flow through the engine. They go receiver, then Kafka or gRPC, then loader, then ClickHouse, and the engine decides what those apps are configured to do. DFE lands data first and lets you add columns later, one field at a time, with no reindex. [docs/data-evolution.md](docs/data-evolution.md) explains the stages and the `promote` workflow.
 
 DFE is a product that other organisations deploy. Nothing in this repo is specific to any one deployment, and configuration is injected at deploy time.
 
@@ -23,10 +24,10 @@ DFE is a product that other organisations deploy. Nothing in this repo is specif
 ```bash
 git clone https://github.com/hyperi-io/dfe-engine.git
 cd dfe-engine
-uv sync   # pulls dfe-schemas, which carries the schema and DDL trees
+uv sync   # pulls dfe-schemas, which holds the schema and DDL trees
 ```
 
-Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`, without which the engine refuses to start on the placeholder JWT secret, and `DFE_CONFIG_DIR=./config`, without which it tries to create `/app/config`. The API answers on port 8000 and `/livez` and `/readyz` on the observability listener, port 9090:
+Run the API server. A clone has no `.env`, so set `DFE_ENGINE_ENV=dev`, without which the engine won't start on the placeholder JWT secret, and `DFE_CONFIG_DIR=./config`, without which it tries to create `/app/config`. The API answers on port 8000 and `/livez` and `/readyz` on the observability listener, port 9090:
 
 ```bash
 env DFE_ENGINE_ENV=dev DFE_CONFIG_DIR=./config uv run dfe-engine run
@@ -44,14 +45,14 @@ The entry points are `dfe-engine` (the API server), `dfe` (the CLI), `dfe-hunt-r
 
 ## Configuration
 
-Every setting is an environment variable with the `DFE_ENGINE_` prefix, apart from `DFE_CONFIG_DIR`, which other suite apps read too. `src/dfe_engine/settings.py` is the reference. The two directory roots:
+Every setting is an environment variable with the `DFE_ENGINE_` prefix, apart from `DFE_CONFIG_DIR`, which the other suite apps share. `src/dfe_engine/settings.py` is the reference. The two directory roots:
 
 | Variable | Image default | Local-dev default | What it holds |
 |----------|---------------|-------------------|---------------|
 | `DFE_CONFIG_DIR` | `/app/config` | `./config` with `make dev`, else `/app/config` | The deployment's config: a mounted volume or ConfigMap on Kubernetes, a checkout of the deployment's config repo for local dev. The engine finds `sources/`, `source-builds/`, `source-plans/`, `source-deploys/`, `fieldmaps/`, `services/`, `hunts/`, `rules/` and `alert-destinations/` under it. |
 | `DFE_ENGINE_SCHEMAS_DIR` | `/app/schemas` | unset | The schema tree root. Unset, the engine reads the trees from the installed `dfe-schemas` package. |
 
-The image ships the dfe-schemas trees at `/app/schemas-seed`, copies them into `/app/schemas` on the first run of each engine version, and has an empty `/app/config`, so neither directory variable needs setting in a container. The deployment supplies the config by mount and the secrets and connection settings by env, and a container with none of those refuses to start on the placeholder JWT secret. A per-registry variable such as `DFE_ENGINE_SOURCES_DIR` wins over the subdirectory derived from `DFE_CONFIG_DIR`. The names are exact: a bare `CONFIG_DIR` is not read. ClickHouse and Kafka connection settings follow the same prefix.
+The image ships the dfe-schemas trees at `/app/schemas-seed`, copies them into `/app/schemas` on the first run of each engine version, and has an empty `/app/config`, so neither directory variable needs setting in a container. The deployment supplies the config by mount and the secrets and connection settings by env, and a container with none of those won't start on the placeholder JWT secret. A per-registry variable such as `DFE_ENGINE_SOURCES_DIR` wins over the subdirectory derived from `DFE_CONFIG_DIR`. The names are exact: a bare `CONFIG_DIR` is not read. ClickHouse and Kafka connection settings follow the same prefix.
 
 ## Documentation
 
@@ -65,7 +66,7 @@ The suite's published docs are at <https://dfe.docs.hyperi.io>, this repository'
 
 ## Help and contributing
 
-How to work in this repo, the commands that prove a change and what tends to bite are in [CONTRIBUTING.md](CONTRIBUTING.md). A question that is not a bug goes in a new issue.
+How to work in this repo, the commands that check a change and what tends to bite are in [CONTRIBUTING.md](CONTRIBUTING.md). A question that is not a bug goes in an issue.
 
 Open bugs: [this repo](https://github.com/hyperi-io/dfe-engine/issues?q=is%3Aopen+is%3Aissue+type%3ABug+-label%3Abacklog+-label%3Anext-minor) | [whole DFE suite](https://github.com/search?type=issues&q=is%3Aopen+is%3Aissue+type%3ABug+-label%3Abacklog+-label%3Anext-minor+repo%3Ahyperi-io%2Fdfe-infra+repo%3Ahyperi-io%2Fdfe-docker+repo%3Ahyperi-io%2Fdfe-deploy+repo%3Ahyperi-io%2Fdfe-engine+repo%3Ahyperi-io%2Fdfe-loader+repo%3Ahyperi-io%2Fdfe-receiver+repo%3Ahyperi-io%2Fdfe-fetcher+repo%3Ahyperi-io%2Fdfe-archiver+repo%3Ahyperi-io%2Fdfe-transform-vrl+repo%3Ahyperi-io%2Fdfe-transform-vector+repo%3Ahyperi-io%2Fdfe-transform-elastic+repo%3Ahyperi-io%2Fdfe-ui+repo%3Ahyperi-io%2Fdfe-hyperdx+repo%3Ahyperi-io%2Fscalo-rs+repo%3Ahyperi-io%2Fscalo-py+repo%3Ahyperi-io%2Flogreducer+repo%3Ahyperi-io%2Fdfe-schemas+repo%3Ahyperi-io%2Fvector-vrl+repo%3Ahyperi-io%2Fculvert+repo%3Ahyperi-io%2Fdfe-clickhouse-rs+repo%3Ahyperi-io%2Ffactbook-rs)
 

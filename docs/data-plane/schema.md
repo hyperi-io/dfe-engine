@@ -5,17 +5,14 @@ wheel), registries included, and the engine keeps no copies.
 
 ---
 
-## Audience
-
-This document is written for **data subject matter experts** -- people who
+This document is written for data subject matter experts -- people who
 understand their data, their queries, and their retention requirements. You
 do NOT need to be a ClickHouse expert. The schema system picks the codecs,
 indexes, Nullable wrapping and type widths. You pick meaningful types and describe how your data will be queried.
 The engine does the rest.
 
 If you need a specific ClickHouse type that the primitives don't cover,
-there's an escape hatch (`ch_override`). But you shouldn't need it for 95%
-of columns.
+there's an escape hatch (`ch_override`). Most columns never need it.
 
 ---
 
@@ -35,14 +32,7 @@ The engine reads the Source YAML, generates DDL, and applies it to
 ClickHouse. The loader reads the deployed table's columns and comments
 from `system.columns` at runtime. There is nothing in between.
 
-Schema changes flow in one direction:
-
-```text
-Source YAML (intent) -> engine generates DDL -> ClickHouse (deployed truth)
-                                                     ^
-                                        dfe-loader reads it at runtime
-```
-
+Schema changes flow one way, drawn in [schema-sync.md](schema-sync.md).
 dfe-loader reads column types, comments and table metadata from
 `system.columns` at runtime, never from the YAML. It caches them for
 `schema.cache_ttl_secs`, so an applied change reaches it on the next refresh
@@ -54,7 +44,7 @@ Schema definitions are **YAML**. YAML supports structured data
 (lists of attributes, nested overrides) and is consistent with the rest
 of the Source definition format.
 
-**CSVs remain only for enrichment files** used by transform stages
+CSV is left for the enrichment files transform stages use
 (e.g. GeoIP lookups, threat intelligence feeds, asset inventories).
 These are data files, not schema definitions.
 
@@ -349,7 +339,7 @@ YAML -- multiple attributes can be combined:
 | Attribute | What It Does |
 |-----------|-------------|
 | `lowcardinality` | Retired -- the old spelling of `cardinality: low` |
-| `nullable` | Allows NULL values (2x performance cost -- use only when NULL != empty) |
+| `nullable` | Allows NULL values, at a storage and query cost -- use it when NULL means something other than empty |
 | `not_null` | Explicitly prevents NULL (overrides the primitive's default) |
 | `materialized` | Column computed on insert, not stored in source data |
 | `alias` | Virtual column computed at query time |
@@ -361,7 +351,7 @@ enforces valid combinations:
 
 | Attribute | Valid Primitives | Why |
 |-----------|-----------------|-----|
-| `lowcardinality` | `string`, `text`, `integer`, `float`, `date`, `ip` | Dictionary encoding only works on types with a finite value space. `json`, `geo_point` are not supported. |
+| `lowcardinality` | `string`, `text` | The two the registry allows it on (dfe-schemas `registries/types.yaml`, `attributes`) |
 | `nullable` | all | Any type can be nullable |
 | `not_null` | all | Any type can be forced non-null |
 | `materialized` | all | Computed on insert -- any type |
@@ -385,7 +375,7 @@ ClickHouse stores `Nullable(T)` as two columns -- the data column plus a
 UInt8 bitmap tracking which rows are null -- so it costs storage and query
 speed. Booleans and `timestamp` are non-null by default for this reason.
 
-**Design decision: ORDER BY keys must not be Nullable.** ClickHouse
+ORDER BY keys must not be Nullable. ClickHouse
 refuses a Nullable column in a sorting key unless the merge-tree setting
 `allow_nullable_key = 1` is enabled, and even with it on a null in the
 sort key cripples index effectiveness. Rather than silently flip
@@ -429,9 +419,8 @@ keep it off your ORDER BY and high-filter columns.
 
 Use cases describe **how you query the column** -- not how it's stored.
 The engine translates use cases into ClickHouse indexes and codecs in the
-generated DDL. You don't need to know what a `set(0)` or
-`tokenbf_v1(8192, 4, 0)` index is -- just pick the use case that matches
-your query pattern.
+generated DDL. You don't need to know what a `set(0)` or a `text` index is --
+pick the use case that matches your query pattern.
 
 ### Use Cases
 
@@ -496,7 +485,7 @@ vocabulary.
 | `similarity_search(<dims>)` | `vector_similarity('hnsw', 'cosineDistance', <dims>)` | 100000000 | One index per part. `hnsw` is the only method the pinned ClickHouse implements |
 | *(empty)* | No index | -- | |
 
-**Note on text indexes:** `word_search` and `substring_search` generate the GA
+`word_search` and `substring_search` generate the GA
 text index instead of the older bloom-filter based `tokenbf_v1` and
 `ngrambf_v1`. The text index is deterministic (no false positives) and filters
 at row level rather than granule level. Every table gets the text index.
@@ -507,7 +496,7 @@ a `TableSpec` from the source and calls it.
 
 An index whose answer changes is dropped and added again on the next apply. The new index covers parts written or merged after that, and existing parts gain it on merge: there is no `MATERIALIZE INDEX`.
 
-**Note on word_search vs substring_search:** Both use the text index but with
+`word_search` and `substring_search` both use the text index but with
 different tokenizers. `word_search` uses word-level tokenization
 (`splitByNonAlpha`) -- good for searching whole words in log messages.
 `substring_search` uses character n-grams -- good for fragments inside longer
@@ -646,7 +635,7 @@ The engine rebuilds it after every source deploy or delete. At startup it rebuil
 
 Each rebuild applies the tenant row policy ([rbac.md](../control-plane/rbac.md)) to `all_sources` itself. Member tables keep their own policies, which also fence a read through it.
 
-The engine registers it on every team as the Observe source `all_sources`, timed on `_timestamp_load` because `_timestamp` reads as epoch 0 for a passthrough member. Registration retries with backoff from 60 s to 15 min until dfe-hyperdx accepts it.
+The engine registers it on every team as the Observe source `all_sources`, timed on `_timestamp_load` because `_timestamp` reads as epoch 0 for a passthrough member. Registration retries with a growing backoff until dfe-hyperdx accepts it (`src/dfe_engine/hyperdx/engine_sources.py`).
 
 ## The `dlq` Table
 
@@ -654,54 +643,14 @@ The engine registers it on every team as the Observe source `all_sources`, timed
 
 ---
 
-## Sigma Column Mappings
+## Sigma views
 
-Sigma rules reference fields by standardised names (e.g. `SourceIP`,
-`CommandLine`, `EventID`). These must map to actual ClickHouse column names.
-
-### Approach: ClickHouse View per Sigma Taxonomy
-
-Rather than embedding Sigma field names in the base schema, create
-**ClickHouse views** that expose Sigma-compatible column aliases:
-
-```sql
--- Auto-generated from Source schema + Sigma field mapping
-CREATE VIEW {db}.{source}_sigma AS
-SELECT
-    source_ip AS SourceIP,
-    dest_ip AS DestinationIP,
-    user_name AS User,
-    process_name AS Image,
-    command_line AS CommandLine,
-    event_id AS EventID,
-    *
-FROM {db}.{source}
-```
-
-**Benefits:**
-
-- Base schema stays clean (ClickHouse-native names)
-- Sigma rules query the view (standard Sigma field names)
-- Field mapping is per-source (different sources map differently)
-- Zero storage overhead (view, not materialised table)
-- Mappings resolved by `src/dfe_engine/sigma/source_mapper.py` from the source's field map and sigma view
-
-### Sigma Mapping as Source Metadata
-
-The Source definition declares its naming-standard views in the generic
-`views` list. The sigma entry carries the logsource binding and overrides:
-
-```yaml
-# sources/windows_audit.yaml
-views:
-  - standard: sigma
-    taxonomy: windows                   # Sigma logsource product binding
-    custom_mappings:                    # Per-source overrides (win over field_map)
-      CommandLine: command_line
-      ParentCommandLine: parent_cmd
-```
-
-The engine generates the Sigma view from source schema + the sigma view entry.
+Sigma rules use standard field names (`SourceIP`, `CommandLine`, `EventID`). A
+source declares a `sigma` entry in its `views`, and the engine generates a view
+that aliases its columns to those names, resolved by
+`src/dfe_engine/sigma/source_mapper.py` from the source's field map. The view and
+its YAML are in [source-detections.md](source-detections.md), and the mapping
+layer in [field-mapping.md](field-mapping.md).
 
 ---
 
@@ -712,22 +661,31 @@ The Elastic/OpenSearch index template converter
 meta schema from a supplied Elastic template JSON, as YAML in the Source schema
 format:
 
-```text
-Elastic Template JSON
-  │
-  ▼
-Template Converter (dfe-engine)
-  │  Maps Elastic types -> primitives
-  │  Maps Elastic analyzers -> use_cases
-  │  Preserves field hierarchy as flat columns
-  │
-  ▼
-Source schema YAML (new format)
-  │  name, type, attribute, use_case, comment
-  │
-  ▼
-Attached to a Source definition
+The template converter turns an Elastic index template into a source meta schema in YAML.
+
+```mermaid
+flowchart LR
+    accTitle: L4 Detail -- Elastic template conversion
+    accDescr: An Elastic index template goes to the template converter, which maps Elastic types to primitives and analyzers to use cases. It writes a source meta schema in YAML, which a source definition then names.
+
+    template["Elastic index<br/>template"]
+    converter["Template<br/>converter"]
+    schema["Source meta<br/>schema YAML"]
+    source["Source<br/>definition"]
+
+    template --> converter
+    converter --> schema
+    schema --> source
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
+    class template ext
 ```
+
+*Figure 1. L4 Detail -- Elastic template conversion. The dashed box comes from outside DFE.* Up: [Data plane](README.md).
+
+The converter flattens the field hierarchy into columns and writes `name`,
+`type`, `attribute`, `use_case` and a `comment` naming the Elastic type.
 
 ### Elastic -> Primitive Type Mapping
 
@@ -757,11 +715,8 @@ See [source-definition.md](source-definition.md) for the full Source definition.
 
 ### Rules and hunts
 
-A **Rule** is a detection condition (a SQL WHERE fragment or a CEL filter) on a
-source's table, so it sees exactly the columns the source's schema defines. A
-**Hunt** groups rules, names the customers whose rows they read, and carries the
-interval schedule. Matches land in `<data database>.detection` unless the hunt or
-rule names another table. Current rule and hunt files:
+A rule is a detection condition on a source's table, and a hunt groups rules and
+holds the schedule. Their files and fields are in
 [source-detections.md](source-detections.md).
 
 ### Sigma Rules (converted)

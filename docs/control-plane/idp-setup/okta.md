@@ -12,16 +12,16 @@ You need an Okta administrator who can create app integrations and edit authoriz
 
 ## How DFE reads groups
 
-Okta puts no groups in its tokens until you add a `groups` claim. Once you do, the ID token carries the names of the user's groups that match your filter, and DFE reads them at sign-in. DFE does not call the Okta API for this. DFE reads groups only from the ID token, never from the userinfo endpoint, so the claim must always be in the ID token.
+Okta puts no groups in its tokens until you add a `groups` claim. Once you do, the ID token holds the names of the user's groups that match your filter, and DFE reads them at sign-in. DFE does not call the Okta API for this. DFE reads groups from the ID token and never from the userinfo endpoint, so the claim must always be in the ID token.
 
-Put the claim on Okta's default custom authorization server, named `default`, with the issuer `https://<your Okta domain>/oauth2/default`. The org authorization server (issuer `https://<your Okta domain>`, no `/oauth2/...`) sends no groups claim in the ID token, so DFE sees no groups through it.
+Put the claim on Okta's default custom authorization server, `default`, with the issuer `https://<your Okta domain>/oauth2/default`. The org authorization server (issuer `https://<your Okta domain>`, no `/oauth2/...`) sends no groups claim in the ID token, so DFE sees no groups through it.
 
-A production Okta org has custom authorization servers only with API Access Management. Integrator Free Plan orgs have it. Without it, DFE's only other route is reading groups from the Okta API with an API token (see "Find the group names"), which this page does not set up.
+A production Okta org gets custom authorization servers with API Access Management, and Integrator Free Plan orgs have it. Without it, DFE's one other route is reading groups from the Okta API with an API token (see "Find the group names"), which this page does not set up.
 
 ## Set it up
 
 1. In the Admin Console go to **Applications and Resources > Applications** (**Applications > Applications** in older consoles) and select **Create App Integration**. If asked, choose the classic experience. Pick **OIDC - OpenID Connect** as the sign-in method and **Web Application** as the type. Select **Next**.
-2. Name the integration (for example `DFE`). Keep the **Authorization Code** grant type. Under **Sign-in redirect URIs**, put only the redirect URI from the operator. Under **Assignments**, pick **Limit access to selected groups** and choose the groups that use DFE, or **Allow everyone in your organization to access**. Select **Save**.
+2. Name the integration (for example `DFE`). Keep the **Authorization Code** grant type. Under **Sign-in redirect URIs**, put the redirect URI from the operator and nothing else. Under **Assignments**, pick **Limit access to selected groups** and choose the groups that use DFE, or **Allow everyone in your organization to access**. Select **Save**.
 3. Copy the **Client ID** from the app's settings, and the **Client secret** from its **Client Credentials** section.
 4. Add the groups claim to the `default` authorization server, as below.
 
@@ -29,7 +29,7 @@ A production Okta org has custom authorization servers only with API Access Mana
 
 Go to **Security > API**, open the **Authorization Servers** tab and select `default`.
 
-1. On the **Scopes** tab, look for a scope named `groups`. If there is none, select **Add Scope**, name it `groups`, leave user consent off and create it. DFE asks for this scope, and Okta fails a sign-in that asks for a scope the server does not define.
+1. On the **Scopes** tab, look for the `groups` scope. If there is none, select **Add Scope**, name it `groups`, leave user consent off and create it. DFE asks for this scope, and Okta fails a sign-in that asks for a scope the server does not define.
 2. On the **Claims** tab, select **Add Claim**. Set **Name** to `groups`. Set **Include in token type** to **ID Token** and **Always**. Set **Value type** to **Groups**, and **Filter** to **Matches regex** with a pattern for the groups DFE should see, such as `dfe-.*`. `.*` sends every group the user is in. Set **Include in** to **Any scope** and create the claim. With no scope condition the claim arrives whether or not the sign-in asks for `groups`.
 3. On the **Access Policies** tab, check that an active policy applies to the DFE app, with an active rule that allows the **Authorization Code** grant for any scopes. If there is none, select **Add Policy**, assign it to the DFE app (or all clients), then **Add Rule** with that grant. The Integrator Free Plan's `default` server ships with no policy.
 
@@ -44,9 +44,9 @@ Go to **Security > API**, open the **Authorization Servers** tab and select `def
 
 ## Find the group names
 
-DFE links an Okta group on its name, exactly as the claim carries it. **Directory > Groups** lists them. Because the link is the name, renaming a group in Okta breaks its link, and a new group given a linked name picks up its DFE roles. Keep the claim filter narrow and limit who can create or rename groups. Once one of the user's groups is linked, the check below also lists the names the claim sends for them.
+DFE links an Okta group on its name, exactly as the claim sends it. **Directory > Groups** lists them. Because the link is the name, renaming a group in Okta breaks its link, and a group created later under a linked name picks up its DFE roles. Keep the claim filter narrow and limit who can create or rename groups. Once one of the user's groups is linked, the check below lists the names the claim sends for them as well.
 
-DFE can instead read groups from the Okta API with an API token. Groups link on their names that way too. The claim above is the normal setup: use the API only if the operator asks for it.
+DFE can instead read groups from the Okta API with an API token, and groups link on their names that way as well. The claim above is the normal setup: use the API when the operator asks for it.
 
 ## Check it worked
 
@@ -56,7 +56,7 @@ Once the operator confirms the provider is in place, open this URL in a private 
 https://<your DFE console host>/api/v1/auth/oidc/<provider-name>/login
 ```
 
-The page answers with JSON. `email` is the user, and `groups` lists the group names the claim sent. The JSON also holds an `access_token`: it is a live DFE session, so do not paste it anywhere. A user in no linked group is refused, and DFE keeps no account for them.
+The page answers with JSON. `email` is the user, and `groups` lists the group names the claim sent. The JSON holds an `access_token` as well: it is a live DFE session, so do not paste it anywhere. A user in no linked group is turned away, and DFE keeps no account for them.
 
 ## Common failures
 
@@ -83,7 +83,7 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 }
 ```
 
-The default `token_claim` mode reads the `groups` claim, and the default scopes are `openid email profile groups`. To drop the `groups` scope, send `"scopes": ["openid", "email", "profile"]`: a claim set to **Always** and **Any scope** still arrives. The API alternative is `groups.mode: api` with `groups.okta_domain` and `groups.api_token`. The sync and `groups.enrich_on_login: true` both read group names, the same identifiers the claim carries. The client secret goes to the secret store and the provider keeps only its path.
+The default `token_claim` mode reads the `groups` claim, and the default scopes are `openid email profile groups`. To drop the `groups` scope, send `"scopes": ["openid", "email", "profile"]`: a claim set to **Always** and **Any scope** still arrives. The API alternative is `groups.mode: api` with `groups.okta_domain` and `groups.api_token`. The sync and `groups.enrich_on_login: true` both read group names, the same identifiers the claim sends. The client secret goes to the secret store and the provider keeps its path, never the value.
 
 Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to a group name the admin sent. The provider is what stops another provider's sign-in asserting the same name, and a group file with a `source_id` and no `source_provider` loads unlinked, with a warning naming it in the engine log, so no sign-in reaches it through that id: see [rbac-groups.md, section 4.4](../rbac-groups.md#44-group-sync-process).
 
@@ -94,7 +94,7 @@ source_provider: "<provider-name>"
 source_id: "<Okta group name>"
 ```
 
-A linked group admits its members only once it carries a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta refuses it.
+A linked group admits its members once it holds a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta turns it down.
 
 ## Okta references
 

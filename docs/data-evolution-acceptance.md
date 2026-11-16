@@ -5,11 +5,9 @@ stage.
 
 A claim in that document with no step here is marketing.
 
-## The steps
-
 A step marked `live` is one test in
-[tests/e2e/test_data_evolution.py](../tests/e2e/test_data_evolution.py), named
-for its number.
+[tests/e2e/test_data_evolution.py](../tests/e2e/test_data_evolution.py), with
+its number in the test name.
 
 | # | Stage | Prove | Test |
 |---|---|---|---|
@@ -17,7 +15,7 @@ for its number.
 | 0.2 | 0 | A nested sub-field in `_json` answers a query (`fred.nerk.frog`) | live |
 | 1.1 | 1 | A pre-supplied read-only meta schema imports from dfe-schemas | live |
 | 1.2 | 1 | A meta schema exports, then re-imports into a clean deployment | live, part |
-| 1.3 | 1 | A field seen in `_json` promotes to a real column | live |
+| 1.3 | 1 | A field seen in `_json` promotes to a column | live |
 | 2.1 | 2 | A source declares a `key=value` routing condition | live |
 | 2.2 | 2 | Deploy renders the routing, the receiver reloads it in place, and records route by it | live, part |
 | 2.3 | 2 | Records land in the source's OWN table, typed columns filled by dfe-loader rather than left in `_json` | live |
@@ -30,8 +28,6 @@ for its number.
 | 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | live |
 | 3.3 | 3 | Turning population back on refills `_json` for new records -- the decision is reversible | live |
 
-## What the marks mean
-
 `xfail` names the open issue the step fails on. The marker is strict, so the
 suite goes red the day that issue is fixed, which is how it gets removed.
 
@@ -40,27 +36,26 @@ rendered and the table created. That the receiver reloads in place is the flow
 suite's routing check, and that records route by it is 2.3. 2.6 applies the ALTER
 directly rather than through a derived-schema edit, which is what 2.4 and 2.5
 cover. 1.2 re-imports into the SAME deployment under a second path, which proves
-the bundle carries what the import needs but not that it lands in a deployment
+the bundle holds what the import needs but not that it lands in a deployment
 that has never seen the schema -- that needs a second stack.
 
-2.8 drives the source that already has a transform instance, because Compose declares one service per transform app and binds it at deploy. So it proves a different engine on the same corpus, never a second binding. It reads that source's match rule off the API, since the source belongs to the deployment.
+2.8 drives the source that has a transform instance, because Compose declares one service per transform app and binds it at deploy. So it proves a different engine on the same corpus, never a second binding. It reads that source's match rule off the API, since the source belongs to the deployment.
 
 A derived schema stops population with `capture_json: false` and `capture_raw: false`, which the engine compiles to dfe-loader's `extracted_only`.
 
-## Three carry the weight
+Three steps matter most.
 
 **0.2 proves the pitch.** Without it we have tested insertion, not usefulness.
 
 **1.3 is `promote`.** It answers "must I model this up front", so it is never
 optional coverage.
 
-**2.3 is the sharp one.** A source can get its own table and schema and still
-have every field reachable only through `_json`. Count rows and it passes. Read
-the typed columns and it does not.
+**2.3 checks the typed columns.** A source can get a table and schema to itself and
+still have every field reachable only through `_json`, which a row count alone would pass.
 
 ## The fixture
 
-The beats MODULE level, three concurrent sources -- which also proves the
+The beats MODULE level, three concurrent sources -- which proves the
 receiver routing between several at once rather than one in isolation.
 
 The three are what our pre-supplied filebeat VRL actually handles: **Cisco IOS,
@@ -77,11 +72,11 @@ Two constraints on that corpus:
   (`{message, tags, timestamp}`) with a raw syslog line in `message`.
   transform-elastic works on Elastic's ingest-pipeline format. If those differ,
   one corpus cannot feed all three unchanged.
-- **Known divergence.** `scripts/filebeat/extract.py` strips geoip from the
+- **Known divergence.** dfe-transform-vrl's `scripts/filebeat/extract.py` strips geoip from the
   ported VRL, so transform-elastic emits geo fields the other two never will.
   Assert around it rather than trip over it.
 
-The VRL also needs the `timezones.csv` enrichment table, and optionally
+The VRL needs the `timezones.csv` enrichment table, and optionally
 `._conf.tz_offset` and `._conf.tz_map`.
 
 2.7 posts the Cisco IOS module alone, through whichever transform app

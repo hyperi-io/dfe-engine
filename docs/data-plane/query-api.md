@@ -9,7 +9,7 @@ A label-based query interface over ClickHouse parameterised views, with multi-te
 - No raw SQL from clients - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
 - Mandatory tenant isolation - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
 - Scope-based access control - `query:read` browses the views and `query:execute` runs them
-- Declared parameters only - the executor passes on only the parameters the view declares, unvalidated, and ClickHouse checks their types
+- Declared parameters - the executor passes on the parameters the view declares and drops the rest, unvalidated, and ClickHouse checks their types
 - Native JSON responses - dict rows via clickhouse-connect, no intermediate wire format
 
 ### Supported Datasources
@@ -17,35 +17,39 @@ A label-based query interface over ClickHouse parameterised views, with multi-te
 | Datasource | Description | Wire Format |
 |------------|-------------|-------------|
 | `clickhouse` | ClickHouse: parameterised views, and raw read-only queries | JSON |
-| `s3` | S3 bucket directory listing, raw route only | JSON |
-| `minio` | MinIO (S3-compatible) listing, raw route only | JSON |
-| `file` | Local filesystem directory listing, raw route only | JSON |
+| `s3` | S3 bucket directory listing, on the raw route | JSON |
+| `minio` | MinIO (S3-compatible) listing, on the raw route | JSON |
+| `file` | Local filesystem directory listing, on the raw route | JSON |
 
 ---
 
 ## Security Model
 
-### Example Security Flow
+A view execution checks scope, keeps the declared parameters, injects `org_id` and runs the view on ClickHouse.
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant API as dfe-engine API
-    participant CAT as ViewCatalog
-    participant EX as ViewExecutor
-    participant DB as ClickHouse
-
-    C->>API: POST /api/v1/queries/views/hunts/active_threats/execute<br/>params: {severities: ["critical"]}
-    API->>API: AuthN + RBAC scope query:execute
-    API->>CAT: Lookup view definition (TTL-cached, discovered from CH)
-    CAT-->>EX: View + parameter schema
-    EX->>EX: Keep only the view's declared parameters
-    EX->>EX: Inject org_id from the auth context (never client-settable)
-    EX->>DB: Execute the parameterized view
-    DB-->>C: JSON response (rows + columns + metadata)
+    accTitle: L4 Detail -- View execution
+    accDescr: The client posts to a view's execute route. The API checks the caller's scope. The executor looks the view up in the catalog, keeps the parameters the view declares, injects org_id from the auth context and runs the view on ClickHouse, and the rows return to the client as JSON.
+    participant client as Client
+    participant api as Engine API
+    participant catalog as ViewCatalog
+    participant executor as ViewExecutor
+    participant ch as ClickHouse
+    client->>api: Execute view
+    api->>api: Check query:execute
+    api->>catalog: Look up view
+    catalog-->>executor: View and parameters
+    executor->>executor: Keep declared parameters
+    executor->>executor: Inject org_id
+    executor->>ch: Run view
+    ch-->>api: Rows
+    api-->>client: JSON
 ```
 
-**Client Request** (the view label lives in the URL path):
+*Figure 1. L4 Detail -- View execution. Solid arrows are requests, dashed arrows are answers.* Up: [Data plane](README.md).
+
+The client request names the view in the URL path:
 
 ```json
 {
@@ -54,68 +58,62 @@ sequenceDiagram
 }
 ```
 
-**Server-side definition:** a ClickHouse parameterized VIEW, deployed
+The server side is a ClickHouse parameterised VIEW, deployed
 through the governed DDL path (gitops) and discovered by the engine's
 `ViewCatalog` at runtime - there is no separate YAML query registry in the
-engine. The executor passes on only the parameters the view's placeholders
+engine. The executor passes on the parameters the view's placeholders
 declare, and `org_id` is injected from the auth context. It does not check
 that a required parameter is present or that a value fits its type, so
 ClickHouse refuses those and the request fails 500 `query_error`.
 
 ### Access control on the raw path
 
-`POST /api/v1/queries/raw` executes against a registered datasource adapter (`clickhouse:...`, `s3:...`, `minio:...` or `file:...`). The SQL runs as the engine's own ClickHouse user, not a tenant's, so the route needs `raw_query:execute`. That action sits outside `query:*`, and no built-in role but `admin` holds it.
+`POST /api/v1/queries/raw` executes against a registered datasource adapter (`clickhouse:...`, `s3:...`, `minio:...` or `file:...`). The SQL runs as the engine's ClickHouse user, not a tenant's, so the route needs `raw_query:execute`. That action sits outside `query:*`, and no built-in role but `admin` holds it.
 
-ClickHouse runs the query with `readonly=1`. That refuses every write and DDL statement, every `INSERT INTO FUNCTION` (`url()`, `file()`, `s3()`), a read through `url()`, and any `SETTINGS` clause in the query. The request's timeout still applies. The `s3`, `minio` and `file` adapters only list objects and never write, so `readonly` does not apply to them.
+ClickHouse runs the query with `readonly=1`. That refuses every write and DDL statement, every `INSERT INTO FUNCTION` (`url()`, `file()`, `s3()`), a read through `url()`, and any `SETTINGS` clause in the query. The request's timeout still applies. The `s3`, `minio` and `file` adapters list objects and never write, so `readonly` does not apply to them.
 
 ### The identity a view runs as
 
-A view runs as `dfe_query_reader` (`query_views.restricted_user`), which holds `SELECT` on the data database and ClickHouse's introspection tables and no `SOURCES` grant, so `url()`, `s3()` and `remote()` are refused. Its password is `DFE_ENGINE_QUERY_VIEWS_RESTRICTED_PASSWORD` when set, else the minted user's own: `DFE_ENGINE_CLICKHOUSE_QUERY_READER_PASSWORD` when the deployment provides one, else `ch/service/query_reader` in the engine's secrets store. Its profile pins `readonly=2`, so the executor sends no `readonly` setting. Until the reader has a password, the view routes answer 503 `reader_unprovisioned`.
+A view runs as `dfe_query_reader` (`query_views.restricted_user`), which holds `SELECT` on the data database and ClickHouse's introspection tables and no `SOURCES` grant, so `url()`, `s3()` and `remote()` are refused. Its password is `DFE_ENGINE_QUERY_VIEWS_RESTRICTED_PASSWORD` when set, else the minted user's password: `DFE_ENGINE_CLICKHOUSE_QUERY_READER_PASSWORD` when the deployment provides one, else `ch/service/query_reader` in the engine's secrets store. Its profile pins `readonly=2`, so the executor sends no `readonly` setting. Until the reader has a password, the view routes answer 503 `reader_unprovisioned`.
 
 ---
 
 ## Architecture
 
+A view execution runs on ClickHouse, and a raw query goes through a datasource adapter to ClickHouse or object storage.
+
 ```mermaid
-flowchart TB
-    subgraph Clients["Client Layer"]
-        HTTP["Any HTTP client"]
-    end
+flowchart LR
+    accTitle: L4 Detail -- Query routes
+    accDescr: A client calls the query routes. A view execution goes to the ViewExecutor, which runs the view on ClickHouse. A raw query goes to a datasource adapter, which reads ClickHouse or lists S3, MinIO or a local directory.
 
-    subgraph ControlPlane["dfe-engine API layer"]
-        Auth["AuthN (JWT / OIDC headers / API key)"]
-        API["POST /api/v1/queries/views/{label}/execute<br/>POST /api/v1/queries/raw"]
-    end
+    client["HTTP client"]
 
-    subgraph QueryEngine["dfe-engine query module"]
-        Registry["ViewCatalog<br/>discovered from ClickHouse<br/>TTL-cached"]
-        Validator["ViewExecutor<br/>declared parameters<br/>auth context injection"]
+    api["Query routes"]
 
-        subgraph Adapters["Datasource Adapters"]
-            CH["ClickHouse<br/>+ EXPLAIN"]
-            Storage["Storage<br/>S3/MinIO/FS"]
-        end
+    executor["ViewExecutor"]
+    adapters["Datasource<br/>adapters"]
 
-        JSONResp["JSON Response<br/>rows + columns + metadata"]
-    end
+    ch[("ClickHouse")]
+    storage[("S3, MinIO<br/>or files")]
 
-    subgraph Backends["Data Backends"]
-        CHServer[("ClickHouse")]
-        S3[("S3/MinIO")]
-        FS[("Filesystem")]
-    end
+    client --> api
+    api -->|view| executor
+    api -->|raw| adapters
+    executor --> ch
+    adapters --> ch
+    adapters --> storage
 
-    Clients -->|"view label + params"| ControlPlane
-    Auth --> API
-    API -->|"execute"| Registry
-    Registry --> Validator
-    Validator --> Adapters
-    CH --> CHServer
-    Storage --> S3
-    Storage --> FS
-    Adapters --> JSONResp
-    JSONResp -->|"JSON body"| Clients
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
+    class client ext
+    class ch,storage store
 ```
+
+*Figure 2. L4 Detail -- Query routes. The dashed box is the caller.* Up: [L3 Components -- dfe-engine](../architecture.md).
+
+The executor looks each view up in the `ViewCatalog`, which discovers the views from ClickHouse and caches them for 60 seconds. Every route authenticates by JWT, OIDC headers or API key first.
 
 ---
 
@@ -129,7 +127,7 @@ All routes live under `/api/v1/queries`:
 | `GET /api/v1/queries/views/namespaces` | `query:read` | list view namespaces |
 | `GET /api/v1/queries/views/{label}` | `query:read` | one view definition with parameters |
 | `POST /api/v1/queries/views/{label}/execute` | `query:execute` | execute a parameterized view |
-| `POST /api/v1/queries/raw` | `raw_query:execute` | ad-hoc read-only query against a datasource adapter, as the engine's own ClickHouse user |
+| `POST /api/v1/queries/raw` | `raw_query:execute` | ad-hoc read-only query against a datasource adapter, as the engine's ClickHouse user |
 
 ### Execute a view
 
@@ -170,7 +168,7 @@ Response: JSON body (metadata embedded alongside rows, no custom headers)
 
 ```typescript
 interface ViewExecuteRequest {
-  // View parameters (only those the view declares are passed on)
+  // View parameters (those the view declares are passed on)
   params?: Record<string, unknown>;
 
   // Execution options
@@ -238,24 +236,31 @@ interface QueryMetadata {
 
 ## Pagination
 
-The API supports two pagination modes:
+The API pages two ways. Offset paging sends a growing offset, and keyset paging sends the last `order_by` value as the next `after_key`.
 
 ```mermaid
-flowchart LR
-    subgraph Offset["Offset-Based"]
-        O1["Page 1<br/>offset=0"]
-        O2["Page 2<br/>offset=100"]
-        O3["Page 3<br/>offset=200"]
-        O1 --> O2 --> O3
+flowchart TB
+    accTitle: L4 Detail -- Offset and keyset paging
+    accDescr: Offset paging sends offset 0, then 100, then 200. Keyset paging sends no after_key for the first page, then the last order_by value of each page as the next page's after_key.
+
+    subgraph offset["Offset"]
+        direction LR
+        o1["Page 1<br/>offset 0"] --> o2["Page 2<br/>offset 100"] --> o3["Page 3<br/>offset 200"]
     end
 
-    subgraph Keyset["Keyset-Based"]
-        K1["Page 1<br/>after_key=null"]
-        K2["Page 2<br/>after_key=ts1"]
-        K3["Page 3<br/>after_key=ts2"]
-        K1 -->|"last value"| K2 -->|"last value"| K3
+    subgraph keyset["Keyset"]
+        direction LR
+        k1["Page 1<br/>no after_key"] --> k2["Page 2<br/>after_key ts1"] --> k3["Page 3<br/>after_key ts2"]
     end
+
+    offset ~~~ keyset
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class offset,keyset group
 ```
+
+*Figure 3. L4 Detail -- Offset and keyset paging. ts1 and ts2 are the last `order_by` values of pages 1 and 2.* Up: [Data plane](README.md).
 
 ### 1. Offset-Based Pagination
 
@@ -270,7 +275,7 @@ Simple pagination using `limit` and `offset`. Best for small datasets.
 }
 ```
 
-**Response includes:**
+The response has:
 
 - `has_more: true` if more rows available
 - `next_offset: 100` for next page
@@ -296,13 +301,13 @@ The rules a keyset page follows:
 - The key must be non-NULL: a row whose key is NULL is never returned.
 - Without a tiebreak the key must be unique: a row tying with the cursor is skipped. For a key that is not unique, add `tiebreak_by` (a unique, non-NULL second column) and send `after_tiebreak` with `after_key`.
 - `after_key` and `offset` cannot be combined.
-- A view that declares its own `limit` parameter caps its rows before any outer paging, so `order_by`, `after_key` and `offset` on it are refused with 400. Page it with `limit` only.
+- A view that declares a `limit` parameter caps its rows before any outer paging, so `order_by`, `after_key` and `offset` on it are refused with 400. Page it with `limit` alone.
 
 ---
 
 ## Query Labels
 
-A view is referenced by a label in `namespace/name` form, the label goes in the URL path, and the body carries only `params` and `options`. `GET /api/v1/queries/views` lists the labels a deployment has, and `GET /api/v1/queries/views/namespaces` its namespaces.
+A view is referenced by a label in `namespace/name` form, the label goes in the URL path, and the body holds `params` and `options`. `GET /api/v1/queries/views` lists the labels a deployment has, and `GET /api/v1/queries/views/namespaces` its namespaces.
 
 ```text
 POST /api/v1/queries/views/analytics/user_activity/execute
@@ -433,14 +438,32 @@ there is no per-query role list:
 | `query:execute` | execute views |
 | `raw_query:execute` | run raw datasource queries. Only `admin` holds it |
 
+Every query route answers 403 without the route's scope, and otherwise injects `org_id` and runs the query.
+
 ```mermaid
-flowchart TD
-    Start["Incoming request"] --> AuthN["AuthN (JWT / OIDC headers / API key)"]
-    AuthN --> Scope{"has the route's<br/>RBAC scope?"}
-    Scope -->|"No"| Deny403["403 Forbidden"]
-    Scope -->|"Yes"| Inject["Executor injects org_id<br/>from the auth context"]
-    Inject --> Allow["Execute against ClickHouse"]
+flowchart LR
+    accTitle: L4 Detail -- Query route authorisation
+    accDescr: An authenticated request is checked for the route's scope. Without it the answer is 403. With it the executor injects org_id from the auth context and runs the query on ClickHouse.
+
+    request(["Authenticated<br/>request"])
+    scope{"Route<br/>scope?"}
+    inject["Inject org_id"]
+    deny(["403"])
+    run(["Run on ClickHouse"])
+
+    request --> scope
+    scope -->|yes| inject
+    scope -.->|no| deny
+    inject --> run
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef decision fill:#FCF1D6,stroke:#9A6700,stroke-width:1px,color:#3D2A00
+    classDef error fill:#FBE3D6,stroke:#C2410C,stroke-width:1px,color:#4A1A05
+    class scope decision
+    class deny error
 ```
+
+*Figure 4. L4 Detail -- Query route authorisation. The dotted arrow is the refusal.* Up: [Data plane](README.md).
 
 Tenant isolation is structural, not per-query config: the executor injects
 `org_id` from the authenticated context (never client-settable), and the
@@ -450,22 +473,7 @@ ClickHouse user's GRANTs + row policies bound what any deployment exposes.
 
 ## Wire Format
 
-### Native JSON
-
-All responses are a single native JSON body:
-
-```text
-Content-Type: application/json
-```
-
-**Benefits:**
-
-- No client-side deserialization library required
-- Human-readable, easy to debug (curl, browser devtools)
-- Universal cross-language support
-- Rows arrive as plain dicts/objects, ready to consume
-
-### Metadata Embedding
+Every response is one JSON body (`Content-Type: application/json`), with each row a plain object.
 
 Query metadata is returned as top-level fields alongside `rows` and `columns` in
 the JSON response body - not in headers or a separate schema:

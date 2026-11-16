@@ -3,12 +3,10 @@
 DFE is a data evolution platform by design. Data lands by default and it just
 works. You improve and evolve from there.
 
-## Why it is built this way
-
 There are two ways the industry handles incoming data, and both make you pay up
 front.
 
-At one end, Elastic and Splunk. Decide the schema before the data arrives, index
+At one end, the search and index engines. Decide the schema before the data arrives, index
 it all, query it fast. Change the schema later and you are reindexing. Send a
 field you did not plan for and it is either dropped, mapped wrong, or it breaks
 the mapping for everyone.
@@ -22,36 +20,38 @@ reindex, no reingest. That is the best of both without the limitation of either.
 
 ## The path
 
+A source moves from the main table to a meta schema to its own topic and table, one choice at a time.
+
 ```mermaid
 flowchart LR
-    IN["dfe-receiver<br/>or dfe-fetcher"]
+    accTitle: L4 Detail -- Data evolution stages
+    accDescr: In stage 0 dfe-receiver or dfe-fetcher lands data in the main table as _json. Promoting fields gives the source a meta schema in stage 1. In stage 2 the source gets a routing condition and its own topic and table, with an optional transform.
 
-    subgraph S0["Stage 0 -- it just works"]
-        MAIN[("main table")]
-        JSON["_json<br/>sub-field queryable"]
-        MAIN --> JSON
+    subgraph s0["0 It lands"]
+        main[("main table<br/>_json")]
+    end
+    subgraph s1["1 Meta schema"]
+        meta["Meta schema"]
+    end
+    subgraph s2["2 DFE source"]
+        route["Routing<br/>condition"]
+        own[("Own topic<br/>and table")]
     end
 
-    subgraph S1["Stage 1 -- meta schema"]
-        META["names the fields you USE"]
-        COLS["real columns<br/>_json still the fallback"]
-        META --> COLS
-    end
+    main -.->|promote| meta
+    meta -.->|own source| route
+    route --> own
 
-    subgraph S2["Stage 2 -- DFE source"]
-        ROUTE["routing condition<br/>key exists / key=value"]
-        TOPIC["own topic"]
-        XFORM["transform<br/>(optional)"]
-        OWN[("own table")]
-        ROUTE --> TOPIC --> XFORM --> OWN
-    end
-
-    IN --> MAIN
-    JSON -."promote a field".-> META
-    COLS --> ROUTE
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class main,own store
+    class s0,s1,s2 group
 ```
 
-Nothing forces you rightwards. A source can sit in stage 0 forever.
+*Figure 1. L4 Detail -- Data evolution stages. Dotted arrows are optional steps, and dfe-receiver or dfe-fetcher fills the main table.* Up: [DFE architecture](architecture.md). Down: [L4 Detail -- How a table gets built](#how-a-table-gets-built), [L4 Detail -- What a transform does](#what-a-transform-is-actually-for).
+
+Nothing forces you down the stages. A source can sit in stage 0 forever, and stage 3 below drops `_json` from a source you know fully.
 
 ## Stage 0 -- ground zero
 
@@ -68,68 +68,72 @@ That is the whole of stage 0. Many sources never leave it. Fine.
 
 A meta schema names the fields you want out of `_json` and into real columns.
 
-You write one, or you import one. DFE ships fully expansive meta schemas for
-common sources, starting with Elastic in 2.2.0.
+You write one, or you import one. dfe-schemas ships meta schemas for common
+sources under `meta/`: Elastic, Beats, OTel, syslog, the clouds, M365 and more.
 
-What makes it different from traditional ETL and from a data lake's schema
-work:
+What sets it apart from ETL and from a lake's schema work:
 
 - Cover what you USE, not everything you receive. You are never forced to
   model the full breadth, because `_json` is still there as the slower fallback
   for anything off the hot path. Partial is a valid answer.
-- Written at the primitive level, in the types the engine can actually
-  store.
+- Written in the primitive types the engine stores.
 - Written at the use-case level. A column declares the question it answers
   -- `dimension`, `range`, `word_search` -- and DFE picks the ClickHouse index.
   The label never names the engine primitive.
-- Readable by the SME who owns the data. Whoever understands the source and
-  the workflow can write one. It does not require a data engineer, a ClickHouse
-  expert or a Kafka expert.
+- Readable by the SME who owns the data, with no data engineer, ClickHouse
+  expert or Kafka expert needed.
 - Narrowable to ClickHouse specifics where you do want that control.
 
 A large meta schema is normally NOT deployed as it stands. It is the base a
 derived schema selects from.
 
-A meta schema may carry its own opinionated indexes beyond the common header,
+A meta schema may hold its own opinionated indexes beyond the common header,
 but that is unusual and worth a second look when you see it.
 
 ### How a table gets built
 
-```mermaid
-flowchart TB
-    HEADER["common header<br/>_json, _timestamp, _timestamp_load, _tags<br/>partitioning, TTL"]
-    META["meta schema<br/>full breadth, rarely deployed as-is"]
-    DERIVED["derived schema<br/>selection + one index type per field"]
-    TABLE[("deployed table")]
+A deployed table is the common header plus the fields a derived schema selects from a meta schema.
 
-    META -->|"select the fields you deploy"| DERIVED
-    HEADER --> TABLE
-    DERIVED --> TABLE
-    META -.->|"small schema, deploy direct"| TABLE
+```mermaid
+flowchart LR
+    accTitle: L4 Detail -- How a table gets built
+    accDescr: A derived schema selects the deployed fields from a meta schema. The deployed table is the common header plus the derived schema.
+
+    meta["Meta schema<br/>full breadth"]
+    derived["Derived schema<br/>fields and indexes"]
+    header["Common header<br/>_json, _timestamp"]
+    table[("Deployed table")]
+
+    meta -->|select fields| derived
+    derived --> table
+    header --> table
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
+    class table core
 ```
 
-### Two kinds of table, and every table has a common header
+*Figure 2. L4 Detail -- How a table gets built.* Up: [L4 Detail -- Data evolution stages](#the-path).
 
-Every schema is built for one of two kinds of data:
+A small meta schema deploys as it stands, with no derived schema. Every schema is built for one of two kinds of data:
 
 - **Time-series** -- logs, a large fact table, observability data.
 - **Time-stamped** -- a database or REST dump from dfe-fetcher, which is a
   point-in-time context or dimension table.
 
-And every table is built on a **common header**. It is not boilerplate. It
-carries the mandatory fields, indexes, partitioning and TTL that the rest of the
-DFE machinery depends on:
+Every table is built on a **common header**, which holds the mandatory fields,
+indexes, partitioning and TTL the rest of DFE depends on:
 
 - `_json` is the fallback that makes stage 0 work and keeps partial meta schemas
   honest.
 - `_timestamp_load` drives partitioning and retention, and `_timestamp`, the
   event time read from the record's `timestamp`, every time-bounded query.
-- `_tags` carries contextual divisions and data routing.
+- `_tags` holds contextual divisions and data routing.
 
 Remove a header field and something concrete breaks: no `_timestamp_load` and the
 table cannot partition or expire, no `_json` and a partial meta schema silently
-loses every field it did not model. That is why the header is enforced rather
-than suggested.
+loses every field it did not model. So the header is enforced.
 
 ## Stage 2 -- make it a DFE source
 
@@ -149,10 +153,10 @@ because that is what defines its table.
 
 Derived schemas: this is where a large meta schema usually gets one. A
 derived schema is a sub-selection of fields from its parent meta schema, plus
-which of those fields carry which index type -- one index type per field, added
+which of those fields take which index type -- one index type per field, added
 and removed as a CRUD operation on both the definition and the deployed table.
 
-Transforms, optional: a source carries at most one transform. DFE ships
+Transforms, optional: a source has at most one transform. DFE ships
 transform-elastic, transform-vrl and transform-vector.
 
 ### What a transform is actually for
@@ -162,7 +166,7 @@ meta schema:
 
 1. **Parse.** Take a line of text encoded in `message`, `msg`, `description` or
    similar, and pull it out into dedicated performant columns.
-2. **Enrich.** Add what the line itself does not carry -- geoip, IP reputation,
+2. **Enrich.** Add what the line itself does not hold -- geoip, IP reputation,
    asset and identity lookups, a timezone resolved from an abbreviation, and so
    on.
 
@@ -171,13 +175,30 @@ one opaque blob is queryable only by scanning it. The same line after a
 transform has `source_ip`, `action` and `rule_name` as real indexed columns,
 plus the fields the enrichment added.
 
+A transform turns one blob in `_json` into typed, indexed columns.
+
 ```mermaid
 flowchart LR
-    RAW["_json.message<br/>'%ASA-6-302013: Built outbound TCP...'<br/>one blob, scan to search"]
-    XF["transform<br/>parse + enrich"]
-    COLS["source_ip | dest_ip | action | rule_name | source_country<br/>typed, indexed, matches the schema"]
-    RAW --> XF --> COLS
+    accTitle: L4 Detail -- What a transform does
+    accDescr: A message held as one blob in _json goes through a transform that parses and enriches it into typed, indexed columns that match the schema.
+
+    raw[("_json.message<br/>one blob")]
+    xform["Transform<br/>parse and enrich"]
+    cols[("Typed columns<br/>source_ip, action")]
+
+    raw -->|record| xform
+    xform -->|columns| cols
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    class xform core
+    class raw,cols store
 ```
+
+*Figure 3. L4 Detail -- What a transform does.* Up: [L4 Detail -- Data evolution stages](#the-path).
+
+The blob in figure 3 is a line such as `%ASA-6-302013: Built outbound TCP...`, and the typed columns are `source_ip`, `dest_ip`, `action`, `rule_name` and `source_country`.
 
 The schema says which columns exist. The transform is what fills them.
 
@@ -195,24 +216,21 @@ header is what the rest of DFE depends on. What changes is one instruction to
 the loader, so the blob is never written.
 
 That matters: the schema is unchanged, so the decision is reversible. Turn
-population back on and new records carry `_json` again. What you do not get back
+population back on and new records get `_json` again. What you do not get back
 is the period it was off -- a field you did not model, for rows loaded while the
 net was down, is gone rather than slow.
 
 It is a maturity statement. Never a default. Nothing pushes you here and most
 tables should never arrive.
 
-The data plane already does this. dfe-loader's `metadata.capture_mode`
+dfe-loader's `metadata.capture_mode`
 (`full`, `json_only`, `raw_only`, `extracted_only`) decides what it writes, with
 `metadata.table_capture_modes` for per-table control, and the column directive
 framework reaches the same end with `@skip` on `_json`. The control plane says it
 through a derived schema's `capture_json` and `capture_raw`, which the engine
 compiles into the loader's per-table `table_capture_modes`.
 
-### Column comments carry loader instructions
-
-Worth knowing before writing a schema, because it explains what a column's
-`expr` is really doing. dfe-loader reads directives out of ClickHouse column
+A column's `expr` is a loader instruction. dfe-loader reads directives out of ClickHouse column
 COMMENTs, and every one has an exact config-cascade equivalent. Config wins over
 the DDL comment.
 
@@ -226,7 +244,7 @@ the DDL comment.
 
 `@source` is the vocabulary dfe-schemas emits -- so a meta schema's
 `expr: "@source: host.name"` becomes a column comment, which is what tells the
-loader where to read that field from. This is why a derived schema carries its
+loader where to read that field from. So a derived schema keeps its
 base's `expr` unchanged and only overrides the index.
 
 CEL also appears at `@computed` on a column. Routing CEL is held to the Fast
@@ -234,15 +252,12 @@ profile because it runs against every record.
 
 ## Promote: see it, then give it a column
 
-Meta schema development does not have to start from a blank page.
-
 Select real data in the UI, find a field inside `_json`, and promote it to a
 dedicated column. The field you just looked at becomes part of the schema.
 
-Traditional schema management asks you to be theoretical and exhaustive about
-data you have not seen yet, which is slow and usually wrong. Promotion inverts
-it: you work on what is arriving, one field at a time, and the schema grows to
-match reality.
+Traditional schema work asks you to be exhaustive about data you have not seen,
+which is slow and usually wrong. Promotion works on what is arriving, one field
+at a time.
 
 Why promote at all? `_json` takes whatever arrives. Each value keeps the type it came with, row by
 row, so `port` can be `8080` in one record and `"http"` in the next. Inserts
@@ -262,7 +277,7 @@ So a rule, a hunt or a saved search can pass the day it is written and fail the
 day a source sends one odd value. And no path inside `_json` has an index, so
 even the query that works reads every row.
 
-That is the first reason to promote a field, and usually the most important. A
+That is the main reason to promote a field. A
 promoted column has ONE type, so the query is the plain comparison you meant. Then give it a `use_case` so
 it gets the index that answers how you query it (`exact_match` for an id or an
 IP, `range` for a number, `word_search` for text).
@@ -276,9 +291,7 @@ there for those rows -- it is in `_json`, where it always was, at `_json` speed.
 Promote a field you want a year of history on and you get the column plus a year
 of nulls, so the query that spans the change has to read both.
 
-## Proving it
-
-Every claim above has a step that proves it:
+Every claim on this page has a step that proves it:
 [data-evolution-acceptance.md](data-evolution-acceptance.md).
 
 A claim with no step is marketing.

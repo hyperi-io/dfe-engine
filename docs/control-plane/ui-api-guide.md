@@ -1,12 +1,11 @@
 # DFE Engine API -- UI Integration Guide
 
-This document covers everything a frontend developer needs to integrate
-with the DFE Engine REST API.
+How a frontend calls the DFE Engine REST API: auth, errors, paging, the routes a UI uses most, and the contract tooling.
 
 ## Quick Start
 
 ```bash
-# Generate TypeScript types from OpenAPI spec
+# Types for a client outside dfe-ui (dfe-ui imports @repo/dfe-engine-types)
 npx openapi-typescript openapi/openapi.json -o src/types/api.d.ts
 
 # Start Prism mock server for development
@@ -26,7 +25,7 @@ Every `/api/v1/*` endpoint but login and the OIDC sign-in routes needs a credent
 |--------|--------|----------|
 | JWT Bearer | `Authorization: Bearer <token>` | UI login flow |
 | API Key | `X-API-Key: dfe_xxxx...` | Machine-to-machine |
-| OIDC | The engine's own sign-in (`/api/v1/auth/oidc/{provider}/login`) mints the JWT above | Production SSO |
+| OIDC | The engine's sign-in (`/api/v1/auth/oidc/{provider}/login`) mints the JWT above | Production SSO |
 | Proxy headers | `X-Oidc-Subject`, read only with `auth.trust_proxy_auth_headers` | An engine reachable only through an OIDC proxy |
 
 ### Login Flow
@@ -75,8 +74,8 @@ interface FieldError {
 | 403 | `forbidden` | Insufficient permissions |
 | 404 | `not_found` | Resource doesn't exist |
 | 409 | `conflict` | Duplicate name or match conflict |
-| 412 | `etag_mismatch` | `If-Match` is stale. `etag` carries the current one |
-| 413 | `payload_too_large` | Request body over `api.max_request_body_bytes` (4 MiB, `DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES`), or over a file upload's own limit |
+| 412 | `etag_mismatch` | `If-Match` is stale. `etag` holds the current one |
+| 413 | `payload_too_large` | Request body over `api.max_request_body_bytes` (4 MiB, `DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES`), or over a file upload's limit |
 | 422 | `validation_error` | Request body validation failed |
 | 500 | `internal_error` | Unexpected server error |
 | 503 | `not_configured` | Required backend not available |
@@ -122,7 +121,7 @@ The tables below cover the routes a UI uses most. `openapi/openapi.json` lists e
 | GET | `/auth/permissions` | Available permissions for current user |
 | CRUD | `/auth/accounts` | Account management |
 | CRUD | `/auth/groups` | Group + role management |
-| CRUD | `/auth/roles` | Role definitions (`config/rbac/roles.yaml`) |
+| CRUD | `/auth/roles` | Role definitions (`rbac/roles.yaml` under `DFE_CONFIG_DIR`) |
 | GET | `/auth/roles/scopes` | RBAC permission scopes for role editors |
 | CRUD | `/auth/api-keys` | API key management |
 | CRUD | `/auth/oidc-providers` | OIDC provider configuration |
@@ -148,7 +147,7 @@ A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `
 | PUT | `/sources/{name}` | Update source |
 | PATCH | `/sources/{name}` | Set lifecycle state (`state: active\|dormant\|disabled`, or compat `enabled`). No new version. `409 match_conflict` if activating duplicates another non-disabled source's match |
 | DELETE | `/sources/{name}` | Delete source |
-| POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete` / `deploy`) on named sources |
+| POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete` / `deploy`) on listed sources |
 | POST | `/sources/seed` | Seed defaults |
 
 A PUT that omits `header`, `schema`, `views`, `transform`, `transport` or `archive` keeps the stored value. Send `null`, `[]` or `false` to clear one.
@@ -249,7 +248,7 @@ There is no progress stream: poll the operation, and read `metadata` for progres
 ## Governed Ops (curated actions - the operator dials)
 
 The Governance screen is INVOKE-FIRST: operators see the shipped dials and
-pull them. Defining new dials is rare admin work (`governance:write`), done
+pull them. Defining dials is rare admin work (`governance:write`), done
 through the guided flow below - never through free-text fields.
 
 ### Operator surface (list + invoke)
@@ -262,8 +261,8 @@ through the guided flow below - never through free-text fields.
 | POST | `/governance/actions/{name}/invoke` | Apply (per-action `action:invoke:<name>` grant) |
 
 Invoke body (only when the action declares params):
-`{"params": {"level": "2x"}}`. Each param is CONSTRAINED - enum params carry
-their full `values` list, numerics carry `min`/`max` - so render enum params
+`{"params": {"level": "2x"}}`. Each param is CONSTRAINED - enum params list
+their `values`, numerics set `min`/`max` - so render enum params
 as a select and numerics as a bounded input. Never a free text box. A
 violation returns 422 `invalid_params`.
 
@@ -295,9 +294,9 @@ behind an advanced toggle.
 House rule: if the server will reject values outside a set, the contract
 exposes the set. Three mechanisms, in order of preference:
 
-1. **Static set** - a schema enum (e.g. repository `scope`). Generated types
-   already give a union. Render a select.
-2. **Dynamic set** - the schema field carries an `x-dfe-enum-source`
+1. Static set: a schema enum (e.g. repository `scope`). Generated types
+   give a union. Render a select.
+2. Dynamic set: the schema field holds an `x-dfe-enum-source`
    annotation naming the endpoint that enumerates its legal values:
 
    ```json
@@ -310,7 +309,7 @@ exposes the set. Three mechanisms, in order of preference:
    endpoint returns objects. Absent means the items are plain strings. Build
    ONE generic hook that resolves an annotated field to a select fed by a
    TanStack query - every annotated field then renders correctly for free.
-3. **Derived value** - the field is optional and the server fills a documented
+3. Derived value: the field is optional and the server fills a documented
    default (e.g. `required_action`). Show the derived value, do not ask for it.
 
 A free-text input for any of these is a contract bug - report it against the
@@ -346,7 +345,7 @@ What each metric counts:
 | `ingested_bytes` | bytes | The decoded payload bytes of records accepted at the first hop, summed over the day |
 | `events_per_second` | events/s | The busiest minute of the day |
 
-Only `ingested_bytes` and `events_per_second` are kept per org. The two core counts are measured for the deployment.
+Only `ingested_bytes` and `events_per_second` are kept per org. The two core counts are counted for the deployment as a whole.
 
 ### Response
 
@@ -380,7 +379,7 @@ The series holds one entry per UTC day that has a row, oldest first, so a gap is
 }
 ```
 
-The real response lists all four metrics in the order `cores_deployed`, `node_cores`, `ingested_bytes`, `events_per_second`, and the series is cut to two entries here. `/usage` returns one metric's fields at the top level (`metric`, `label`, `unit`, `status`, `granularity`, `orgs`, `from`, `to`, `highest`, `latest`, `series`), where `highest` is the highest day in the whole range.
+The full response lists all four metrics in the order `cores_deployed`, `node_cores`, `ingested_bytes`, `events_per_second`, and the series is cut to two entries here. `/usage` returns one metric's fields at the top level (`metric`, `label`, `unit`, `status`, `granularity`, `orgs`, `from`, `to`, `highest`, `latest`, `series`), where `highest` is the highest day in the whole range.
 
 ### Who sees what
 
@@ -425,7 +424,7 @@ key) - plus the user-layer etag:
 ```
 
 PATCH takes an RFC 7396 merge patch, writes ONLY the user layer, and
-returns the same fields with the new effective doc. `null` deletes a
+returns the same fields with the updated effective doc. `null` deletes a
 user-layer key so the value falls back to the inherited layer. The theme
 toggle is one call: `PATCH {"theme": "dark"}`.
 
@@ -443,7 +442,7 @@ const patchPrefs = useMutation({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     }).then(r => r.json()),
-  // Response IS the new effective doc - no refetch needed
+  // Response IS the updated effective doc - no refetch needed
   onSuccess: (data) => queryClient.setQueryData(['preferences'], data),
 });
 
@@ -468,14 +467,14 @@ For `system` the `scope_id` MUST be `-`. `namespace` and `key` match
 `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$` (422 otherwise).
 
 Access: any authenticated user reads the system layer. Members read their
-own org/group layers and their own user layer. Everything else needs the
+org and group layers and their user layer. Everything else needs the
 `repository:read` / `repository:write` RBAC actions at the matching scope
 (admins system-wide, org-wildcard admins within their org). Reads you
 cannot see return 404 (existence stays hidden). Forbidden writes return 403.
 
 ### ETag semantics
 
-Every stored object carries an opaque etag (returned in the `ETag`
+Every stored object has an opaque etag (returned in the `ETag`
 header and in metadata). Send `If-Match: <etag>` on PUT/PATCH for
 optimistic concurrency - a mismatch returns
 `412 {"code": "precondition_failed"}` with the current etag in the
@@ -491,26 +490,15 @@ optimistic concurrency - a mismatch returns
 | Dry run `limit` | 100 events (`DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_EVENTS`) | `422 {"code": "validation_error"}` |
 | Scaling `replica_count`, `max_replicas` | 1000 (`DFE_ENGINE_DEPLOYMENT_MAX_REPLICAS_CEILING`) | `400 {"code": "invalid_dial"}` |
 
-## TypeScript Type Generation
+## Types, the mock and drift
 
-```bash
-# Install openapi-typescript
-pnpm add -D openapi-typescript
-
-# Generate types (run after any API change)
-npx openapi-typescript ../dfe-engine/openapi/openapi.json \
-  -o src/types/dfe-engine-api.d.ts
-```
-
-Then use with fetch or a typed client:
+dfe-ui imports the generated types from `@repo/dfe-engine-types`, which the [sync workflow](type-safety-sync.md) keeps in step with `openapi.json`. A type reads off `paths`:
 
 ```typescript
-import type { paths } from './types/dfe-engine-api';
+import type { paths } from '@repo/dfe-engine-types';
 
 type Source = paths['/api/v1/sources/{name}']['get']['responses']['200']['content']['application/json'];
 ```
-
-## Mock Server (Prism)
 
 `docker-compose.dev.yaml` runs Prism, digest-pinned, over `./openapi`:
 
@@ -520,8 +508,6 @@ docker compose -f docker-compose.dev.yaml up prism
 
 Prism generates mock responses from the OpenAPI spec. Point the UI at
 `http://localhost:4010` during development.
-
-## Contract Drift Detection
 
 `tests/unit/test_openapi_spec_committed.py` fails CI when the committed spec, or
 the route map built from it, differs from what the app generates. Regenerate and
