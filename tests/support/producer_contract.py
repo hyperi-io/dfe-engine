@@ -103,13 +103,13 @@ class ProducerFile:
 # release, never to a branch: a branch compares against whatever merged last.
 DFE_LOADER = Producer(
     repo="dfe-loader",
-    ref="v1.18.70",
+    ref="v1.18.73",
     dir_env="DFE_LOADER_DIR",
     files=("src/config/pipeline.rs", "docs/config-schema.json"),
 )
 DFE_RECEIVER = Producer(
     repo="dfe-receiver",
-    ref="v1.15.67",
+    ref="v1.15.69",
     dir_env="DFE_RECEIVER_DIR",
     files=("docs/config-schema.json",),
 )
@@ -121,13 +121,13 @@ SCALO_RS = Producer(
 )
 DFE_TRANSFORM_VRL = Producer(
     repo="dfe-transform-vrl",
-    ref="v1.1.47",
+    ref="v1.1.48",
     dir_env="DFE_TRANSFORM_VRL_DIR",
     files=("docs/config-schema.json",),
 )
 DFE_TRANSFORM_VECTOR = Producer(
     repo="dfe-transform-vector",
-    ref="v1.0.64",
+    ref="v1.0.65",
     dir_env="DFE_TRANSFORM_VECTOR_DIR",
     files=("docs/config-schema.json",),
 )

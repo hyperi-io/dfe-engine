@@ -115,6 +115,16 @@ def test_no_loader_config_the_engine_writes_carries_coercion():
     assert loader == []
 
 
+def test_no_loader_config_the_engine_writes_sets_capture_json():
+    """dfe-loader ignores ``metadata.capture_json``: ``capture_mode`` decides what ``_json`` holds."""
+    loader = [
+        name
+        for app, name, doc in _SEEDS
+        if app == "dfe-loader" and "capture_json" in doc.get("metadata", {})
+    ]
+    assert loader == []
+
+
 @pytest.mark.parametrize(
     "producer",
     [DFE_LOADER, DFE_RECEIVER, DFE_TRANSFORM_VRL, DFE_TRANSFORM_VECTOR],
