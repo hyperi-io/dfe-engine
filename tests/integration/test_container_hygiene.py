@@ -32,6 +32,12 @@ from tests.integration.conftest import (
 )
 from tests.support.dockerhub import dockerhub_image
 
+# The probe image, tag and digest apart so one Renovate regex covers them.
+# renovate: datasource=docker depName=busybox
+_BUSYBOX_TAG = "stable"
+_BUSYBOX_DIGEST = "sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+_BUSYBOX_IMAGE = f"busybox:{_BUSYBOX_TAG}@{_BUSYBOX_DIGEST}"
+
 
 def test_per_test_container_name_includes_the_test():
     """A throwaway carries the owning test between the suite and the service."""
@@ -198,7 +204,7 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
                 *_container_labels("busybox"),
                 "--volume",
                 "/probe",
-                dockerhub_image("busybox:stable"),
+                dockerhub_image(_BUSYBOX_IMAGE),
                 "sleep",
                 "120",
             ],
