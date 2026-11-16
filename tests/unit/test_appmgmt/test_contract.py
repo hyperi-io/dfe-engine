@@ -61,7 +61,7 @@ HOLDING_BLOCKS = [
 # app changes its own config or the flattener changes what it counts as an option.
 LEAF_COUNTS = {
     "dfe-receiver": 336,
-    "dfe-loader": 189,
+    "dfe-loader": 187,
     "dfe-archiver": 82,
     "dfe-fetcher": 343,
     "dfe-transform-vrl": 56,
