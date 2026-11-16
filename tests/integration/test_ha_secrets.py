@@ -175,16 +175,16 @@ def engines(openbao, tmp_path_factory) -> Iterator[_Pair]:
     env = {
         "PATH": os.environ["PATH"],
         "LANG": "C.UTF-8",
-        "DFE_ENV": "test",
-        "DFE_AUTH_ENABLED": "true",
+        "DFE_ENGINE_ENV": "test",
+        "DFE_ENGINE_AUTH_ENABLED": "true",
         # One account store, as replicas share theirs. The secrets are what this module is about.
-        "DFE_AUTH_DIR": str(root / "auth"),
-        "DFE_AUTH_LOCAL_ADMIN_PASSWORD": password,
-        "DFE_CLICKHOUSE_BOOTSTRAP_TABLES": "false",
-        "DFE_SECRETS_PROVIDER": "openbao",
-        "DFE_SECRETS_ADDR": openbao.address,
-        "DFE_SECRETS_MOUNT": mount,
-        "DFE_SECRETS_ROLE": role_id,
+        "DFE_ENGINE_AUTH_DIR": str(root / "auth"),
+        "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD": password,
+        "DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES": "false",
+        "DFE_ENGINE_SECRETS_PROVIDER": "openbao",
+        "DFE_ENGINE_SECRETS_ADDR": openbao.address,
+        "DFE_ENGINE_SECRETS_MOUNT": mount,
+        "DFE_ENGINE_SECRETS_ROLE": role_id,
         "VAULT_SECRET_ID": secret_id,
     }
     settings = SecretsSettings(provider="openbao", addr=openbao.address, mount=mount, role=role_id)
@@ -242,7 +242,6 @@ def test_the_receiver_s_secret_source_names_the_bearer_secret_an_engine_wrote(op
     assert created.status_code == 201, created.text
     # vault:<mount>/<path>:<key>, as dfe-receiver resolves it.
     source = bearer_secret_source("http", engines.settings)
-    assert source is not None
     named, key = source.removeprefix("vault:").rsplit(":", 1)
     mount, path = named.split("/", 1)
     stored = openbao.call("GET", f"{mount}/data/{path}")["data"]["data"][key]

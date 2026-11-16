@@ -92,8 +92,8 @@ _DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}@{_CH_DIGEST}"
 # The shared secrets backend replicas use, in dev mode. The digest is ghcr's multi-arch
 # index for the tag.
 # renovate: datasource=docker depName=ghcr.io/openbao/openbao
-_OPENBAO_TAG = "2.7.1"
-_OPENBAO_DIGEST = "sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf"
+_OPENBAO_TAG = "2.7.2"
+_OPENBAO_DIGEST = "sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f"
 _OPENBAO_IMAGE = f"ghcr.io/openbao/openbao:{_OPENBAO_TAG}@{_OPENBAO_DIGEST}"
 _OPENBAO_PORT = 8200
 
