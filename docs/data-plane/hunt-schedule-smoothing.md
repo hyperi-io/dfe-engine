@@ -14,7 +14,7 @@ Without the flag the schedule is the fixed offset: each rate hunt fires at an of
 
 Rate hunts (`schedule.mode: rate`, the default) fire on fixed intervals. Left alone, the heavy ones stack into ClickHouse CPU and memory peaks. Smoothing learns what each hunt costs and drifts WHEN it fires, never how often, so the sum flattens over time. Anchored hunts and one-off monsters are meant to spike, so the loop leaves them alone.
 
-Still design only, not in the 2.2.3 beta: the ClickHouse `WORKLOAD 'hunts'` backstop, promoting a settled schedule into git, and auto-disable.
+Still design only, not in the 2.2.3 beta: the ClickHouse `WORKLOAD 'hunts'` backstop and promoting a settled schedule into git. Auto-disable ships in 2.2.3, outside this flag, and is described below.
 
 ## The picture
 
@@ -43,7 +43,7 @@ A move writes one row in `hunt_schedule` and touches nothing a running hunt hold
 
 With the flag off, nothing reads the archive, nothing leads, and every offset is the hash. Turning the flag off after a run rewrites `hunt_schedule` back to the hash offsets on the runner's next start.
 
-Rescheduling fixes contention and nothing else. A query that busts the memory limit on its own busts it at 3am too, and moving it changes nothing. The ladder for that is still design only: smooth, then back off the interval of a hunt that runs into itself, then auto-disable a hunt that trips code 241 K times in a window, written as a governed-ops `enabled: false` with the reason, alerted, and never re-enabled without a human.
+Rescheduling fixes contention and nothing else. A query that busts the memory limit on its own busts it at 3am too, and moving it changes nothing. So the runner stops that hunt itself, smoothing flag or not: `hunts.autodisable.failures` resource-limit failures (codes 241, 158, 201) inside `hunts.autodisable.window_seconds` stop it, 3 in an hour by default. When and why land in `hunt_state` and on the hunt list, `hunt_autodisabled_total{hunt_id,reason}` counts it, and the hunt's alert destinations get the reason. Only a human brings it back, with `PUT /api/v1/hunts/{id}` naming `enabled: true` or Re-enable in the console, and an edit that leaves `enabled` alone leaves the stop alone. Backing off the interval of a hunt that runs into itself is still design only.
 
 ## What a hunt costs
 
@@ -81,7 +81,10 @@ On ClickHouse Cloud `system.query_log` is per node, and a server upgrade can ren
 | `hunts.smoothing.weight_memory` | 0.5 | w_m, with w_c = 1 - w_m |
 | `hunts.smoothing.memory_cap_bytes` | 0 | M_cap for the hard constraint, 0 reads `max_server_memory_usage` |
 | `hunts.smoothing.horizon_max_seconds` | 86400 | cap on the hyperperiod H, the least common multiple of the intervals |
-| `smoothing.settling_period`, `autodisable.*` | - | design only, see the top of this page |
+| `hunts.autodisable.enabled` | true | the runner stops a hunt that keeps tripping a resource limit (outside the smoothing flag) |
+| `hunts.autodisable.failures` | 3 | resource-limit failures inside the window that stop it |
+| `hunts.autodisable.window_seconds` | 3600 | the window those failures are counted over |
+| `smoothing.settling_period` | - | design only, see the top of this page |
 
 Environment form: `DFE_ENGINE_HUNTS_SMOOTHING_<SETTING>`. Fixed in code, not settings: the tie-break blurs the curve 3, 7 and 15 buckets wide, and the two observed gauges look back one hour.
 

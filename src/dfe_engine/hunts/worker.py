@@ -453,6 +453,11 @@ class HuntWorker:
             self._notifier.notify(spec, written)
         return end
 
+    def alert_auto_disabled(self, spec: HuntSpec, reason: str) -> None:
+        """Send the hunt's auto-disable alert through its notifier, if one is wired."""
+        if self._notifier is not None:
+            self._notifier.notify_auto_disabled(spec, reason)
+
     def _summarise_cap(
         self,
         spec: HuntSpec,

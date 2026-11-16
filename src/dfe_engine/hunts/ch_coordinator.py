@@ -63,6 +63,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from scalo.logger import logger
@@ -111,11 +112,30 @@ class Lease:
 
 @dataclass(frozen=True, slots=True)
 class HuntStateRow:
-    """Persisted UI signal for a hunt (overrun / too-aggressive)."""
+    """Persisted UI signal for a hunt: overrun count and too-aggressive.
+
+    Attributes:
+        hunt_id: The hunt.
+        overrun_count: Fires deferred because the previous one still ran.
+        too_aggressive: Whether the schedule is tighter than the hunt keeps up with.
+    """
 
     hunt_id: str
     overrun_count: int
     too_aggressive: bool
+
+
+_STATE_COLUMNS = [
+    "hunt_id",
+    "overrun_count",
+    "too_aggressive",
+    "auto_disabled_at",
+    "auto_disabled_reason",
+]
+
+# The runner's stop on a hunt is its own hunt_state row, keyed ``<hunt_id>#stopped``, so
+# the counter row's read-then-write never carries it and no overrun can overwrite it.
+STOP_MARK = "#stopped"
 
 
 class ChCoordinator:
@@ -514,9 +534,41 @@ class ChCoordinator:
         if not rows:
             return None
         return HuntStateRow(
-            hunt_id=hunt_id,
-            overrun_count=int(rows[0][0]),
-            too_aggressive=bool(rows[0][1]),
+            hunt_id=hunt_id, overrun_count=int(rows[0][0]), too_aggressive=bool(rows[0][1])
+        )
+
+    def auto_disabled_hunts(self) -> dict[str, str]:
+        """Every hunt the runner has stopped, as ``hunt_id -> reason``, read fresh each tick.
+
+        The API clears a stop by writing its marker row with a NULL time, so a
+        re-enabled hunt leaves this map on the next read and fires again. argMax skips
+        a NULL argument, so the latest row is taken as a tuple, which is never NULL.
+        """
+        rows = self._ch.query(
+            "SELECT k, tupleElement(s, 2) FROM (SELECT hunt_id AS k, "  # noqa: S608 - quoted configured database, values bound
+            "argMax((auto_disabled_at, auto_disabled_reason), updated) AS s "
+            f"FROM {self._qdb}.hunt_state WHERE endsWith(hunt_id, {{mark:String}}) "
+            "GROUP BY hunt_id) WHERE tupleElement(s, 1) IS NOT NULL",
+            parameters={"mark": STOP_MARK},
+        ).result_rows
+        return {str(r[0])[: -len(STOP_MARK)]: str(r[1]) for r in rows}
+
+    def _write_state(self, row: HuntStateRow) -> None:
+        """Write the hunt's counter row. The stop lives in its own row, so this never carries it."""
+        self._ch.insert(
+            "hunt_state",
+            [[row.hunt_id, row.overrun_count, 1 if row.too_aggressive else 0, None, ""]],
+            column_names=_STATE_COLUMNS,
+            database=self._db,
+        )
+
+    def record_auto_disable(self, hunt_id: str, reason: str, now: int) -> None:
+        """Stop the hunt: write its marker row with when and why. No read, so nothing to race."""
+        self._ch.insert(
+            "hunt_state",
+            [[f"{hunt_id}{STOP_MARK}", 0, 0, datetime.fromtimestamp(now, tz=UTC), reason]],
+            column_names=_STATE_COLUMNS,
+            database=self._db,
         )
 
     # ---- runs (row count + operator run-now) --------------------------
@@ -582,9 +634,4 @@ class ChCoordinator:
         """
         current = self.get_state(hunt_id)
         count = (current.overrun_count if current else 0) + 1
-        self._ch.insert(
-            "hunt_state",
-            [[hunt_id, count, 1]],
-            column_names=["hunt_id", "overrun_count", "too_aggressive"],
-            database=self._db,
-        )
+        self._write_state(HuntStateRow(hunt_id=hunt_id, overrun_count=count, too_aggressive=True))

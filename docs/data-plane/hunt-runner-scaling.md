@@ -25,7 +25,7 @@ hunt_schedule(hunt_id, interval_seconds, phase_offset, enabled, updated)
   ReplacingMergeTree(updated) ORDER BY hunt_id
 ```
 
-`enabled` is a soft tombstone: a deleted hunt is written `enabled=0` so it stops counting as due, without a DELETE. The other coordination tables (`src/dfe_engine/hunts/ch_coordinator.py`) are `hunt_lease`, `hunt_watermark`, `hunt_state`, `hunt_run` and `hunt_runner_heartbeat`. `hunt_schedule` is the only one written outside the worker loop.
+`enabled` is a soft tombstone: a deleted hunt is written `enabled=0` so it stops counting as due, without a DELETE. A hunt whose YAML says `enabled: false` is tombstoned the same way, since the loader keeps it out of the specs the materialiser publishes. The other coordination tables (`src/dfe_engine/hunts/ch_coordinator.py`) are `hunt_lease`, `hunt_watermark`, `hunt_state`, `hunt_run` and `hunt_runner_heartbeat`. `hunt_schedule` is the only one written outside the worker loop.
 
 The shim's `/keda/hunt-backlog` endpoint runs `schedule.due_query(db)`, which counts hunts that are due and unclaimed. It uses the same arithmetic the worker uses (`schedule.latest_fire`):
 

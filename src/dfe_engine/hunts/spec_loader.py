@@ -122,6 +122,11 @@ def _build_spec(
     Skips a direct ``query`` that calls a function reading outside the row, or
     that is not one SELECT or one INSERT INTO a table from a SELECT.
     """
+    enabled = definition.get("enabled", True)
+    if not isinstance(enabled, bool):
+        # bool("false") is True, so a string here would fire a hunt its author stopped.
+        raise ValueError(f"'enabled' must be true or false, got {enabled!r}")
+
     value = _resolve_schedule_value(definition, stem)
     if value is None:
         return None  # anchored (already logged) or no schedule at all
@@ -167,6 +172,7 @@ def _build_spec(
         target_table=str(definition.get("global_target_table_name", definition.get("target", ""))),
         timestamp_field=_timestamp_field(definition),
         alerts=alerts_block(definition),
+        enabled=enabled,
     )
 
 
@@ -230,6 +236,10 @@ def load_specs(
                 max_detections,
                 lookup_databases,
             )
+            if spec is not None and not spec.enabled:
+                # Out of the runner's specs: it fires nothing and KEDA stops counting it.
+                logger.info("skipping hunt: disabled", hunt_id=stem)
+                continue
             if spec is not None:
                 specs[stem] = spec
         except Exception as exc:  # one bad file must never break the whole load

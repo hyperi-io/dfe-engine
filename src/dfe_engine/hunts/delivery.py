@@ -87,6 +87,43 @@ class MatchNotifier:
             logger.error("hunt alert delivery failed", hunt_id=spec.hunt_id, error=str(exc))
             return False
 
+    def notify_auto_disabled(self, spec: HuntSpec, reason: str) -> bool:
+        """Tell the hunt's destinations the runner stopped it, and how to bring it back.
+
+        Unconditional, unlike a match notification: a detection that no longer runs
+        is the thing alerting exists to surface. The hunt's own destinations and the
+        global channels receive it.
+
+        Args:
+            spec: The hunt the runner stopped.
+            reason: The error category and code that tripped it.
+
+        Returns:
+            True when the alert was sent.
+        """
+        if not (spec.alerts or self._global_channels):
+            logger.warning("hunt auto-disabled with no alert destination", hunt_id=spec.hunt_id)
+            return False
+        try:
+            config = build_alert_config(
+                {"alerts": spec.alerts},
+                global_channels=self._global_channels,
+                destination_registry=self._registry,
+            )
+            if config is None:
+                logger.warning("hunt alerts resolve to no destination", hunt_id=spec.hunt_id)
+                return False
+            title = f"DFE hunt {spec.hunt_id} auto-disabled"
+            body = (
+                f"The hunt runner stopped {spec.hunt_id} after repeated ClickHouse resource-limit "
+                f"failures ({reason}). It fires nothing until re-enabled: "
+                f"PUT /api/v1/hunts/{spec.hunt_id} with enabled true."
+            )
+            return self._dispatcher_factory(config).send(title, body)
+        except Exception as exc:
+            logger.error("auto-disable alert delivery failed", hunt_id=spec.hunt_id, error=str(exc))
+            return False
+
 
 def _rule_ids(spec: HuntSpec) -> list[str]:
     """The distinct rules the hunt's statements were compiled from, in order."""
