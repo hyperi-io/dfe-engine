@@ -212,10 +212,10 @@ TENANT_ROWS_EXPECTED = {
     ],
 }
 
-# Times are milliseconds after the insert anchor, `syslog` is the landing rows' own `_source` and the bytes are 3 nine-byte `_raw` values plus 18 two-byte `{}` payloads.
+# Times are milliseconds after the insert anchor, `syslog` is the landing rows' own `_source` and the bytes are 3 nine-byte `_raw` values plus 18 `{}` payloads at the 8 bytes byteSize gives a stored empty JSON.
 DASHBOARD_EXPECTED = {
     "active-sources": [(3,)],
-    "bytes-total": [(63,)],
+    "bytes-total": [(171,)],
     "event-skew": [(5, 3)],
     "events-by-source": [(MINIMAL, 7), (PASSTHROUGH, 11), ("syslog", 3)],
     "lag-max": [(2000,)],
