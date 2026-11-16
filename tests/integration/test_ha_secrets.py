@@ -20,7 +20,7 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,7 +113,7 @@ def _wait_live(url: str, process: subprocess.Popen, log: Path) -> None:
 
 
 @contextmanager
-def _engines(root: Path, env: dict[str, str], count: int) -> Iterator[list[str]]:
+def _engines(root: Path, env: dict[str, str], count: int) -> Generator[list[str]]:
     """*count* engine processes, each up before the next starts, with its own config directory and port."""
     launched: list[tuple[str, subprocess.Popen, Path]] = []
     try:
