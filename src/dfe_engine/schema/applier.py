@@ -1127,7 +1127,12 @@ class ManifestApplier(SchemaApplier):
             # source row that lands between the two statements. The target table's
             # own apply added any column the new SELECT fills, because the manifest
             # orders it first.
-            select = rendered.statements[0].partition(" AS\n")[2]
+            _, separator, select = rendered.statements[0].partition(" AS\n")
+            if not separator or not select.strip():
+                raise SchemaApplyError(
+                    f"{rendered.id}: the CREATE for view {rendered.name} carries no "
+                    "' AS' before its SELECT, so there is nothing to swap in"
+                )
             self._run(f"ALTER TABLE {table_target(database, rendered.name)} MODIFY QUERY {select}")
             return self._record(rendered, "altered")
         if kind == "view" and not current:

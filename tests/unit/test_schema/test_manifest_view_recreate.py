@@ -108,3 +108,18 @@ def test_a_live_view_follows_its_select(recorded, action, statements):
 
     assert outcome.action == action
     assert client.statements == statements
+
+
+def test_a_create_with_no_select_separator_is_refused_by_name():
+    from dataclasses import replace
+
+    from dfe_engine.schema.applier import SchemaApplyError
+
+    client = _LiveView()
+    applier = ManifestApplier(client, Platform.SELF_HOSTED, schemas_version="0.2.30")
+    applier.attach_ledger(_Ledger({("dfe", "query_log_archive_mv"): _recorded("old")}))  # ty: ignore[invalid-argument-type]  # a stand-in carrying only checksums()
+    odd = replace(_rendered("new"), statements=(_CREATE.replace(" AS\n", " AS "),))
+
+    with pytest.raises(SchemaApplyError, match="query_log_archive_mv"):
+        applier.apply(odd)
+    assert client.statements == []
