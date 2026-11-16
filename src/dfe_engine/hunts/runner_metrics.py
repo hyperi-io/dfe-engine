@@ -61,6 +61,7 @@ PHASE_OFFSET = "hunt_phase_offset"
 PHASE_SHIFTS = "hunt_phase_shift_total"
 OBSERVED_OVERLAP_PEAK = "hunt_observed_overlap_peak"
 OBSERVED_MEM_PEAK = "hunt_observed_mem_peak_bytes"
+OBSERVED_CPU_WAIT = "hunt_observed_cpu_wait_seconds"
 AUTODISABLED = "hunt_autodisabled_total"
 
 
@@ -199,6 +200,12 @@ class HuntRunnerMetrics:
             OBSERVED_MEM_PEAK,
             "Largest summed peak memory of hunt queries finishing in one bucket of the "
             "trailing hour, read from query_log_archive",
+        )
+        self._observed_cpu_wait = manager.gauge(
+            OBSERVED_CPU_WAIT,
+            "Largest summed CPU wait of hunt queries finishing in one bucket of the "
+            "trailing hour, seconds the threads were runnable with no CPU, read from "
+            "query_log_archive, 0 where the archive has no cpu_wait_us column",
         )
         self._autodisabled = manager.counter(
             AUTODISABLED,
@@ -385,12 +392,15 @@ class HuntRunnerMetrics:
         self._phase_shifts.labels(hunt_id=hunt_id).inc()
         self._phase_offset.labels(hunt_id=hunt_id).set(offset)
 
-    def observed(self, *, overlap_peak: int, mem_peak_bytes: float) -> None:
+    def observed(
+        self, *, overlap_peak: int, mem_peak_bytes: float, cpu_wait_seconds: float = 0.0
+    ) -> None:
         """Record the trailing hour's load as the archive saw it, the evidence beside the model."""
         if self._manager is None:
             return
         self._observed_overlap.set(overlap_peak)
         self._observed_mem.set(mem_peak_bytes)
+        self._observed_cpu_wait.set(cpu_wait_seconds)
 
     def auto_disabled(self, hunt_id: str, *, reason: str) -> None:
         """Record a hunt the runner stopped after repeated resource-limit failures."""
@@ -449,6 +459,7 @@ __all__ = [
     "DUPLICATES_SKIPPED",
     "FIRES_HELD",
     "FIRE_FAILURES",
+    "OBSERVED_CPU_WAIT",
     "OBSERVED_MEM_PEAK",
     "OBSERVED_OVERLAP_PEAK",
     "OVERLAP_ROWS_REREAD",

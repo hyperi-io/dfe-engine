@@ -113,17 +113,22 @@ def read_costs(
     return costs
 
 
-def read_observed(ch: Any, database: str, *, bucket_seconds: int) -> tuple[int, float]:
-    """The trailing hour as the archive saw it: peak queries and peak summed memory per bucket.
+def read_observed(
+    ch: Any, database: str, *, bucket_seconds: int, with_cpu: bool = False
+) -> tuple[int, float, float]:
+    """The trailing hour as the archive saw it: peak queries, peak summed memory, peak CPU wait.
 
     A query lands in the bucket it finished in, so this is the load the server
-    carried rather than the load the model predicts.
+    carried rather than the load the model predicts. CPU wait is seconds the hunts'
+    threads were runnable with no CPU to run on, the contention the smoother exists
+    to remove, and 0 where the archive has no ``cpu_wait_us`` column.
     """
     target = f"{quote_identifier(database)}.{quote_identifier(archive_table(database))}"
+    wait_inner = ", sum(cpu_wait_us) / 1e6 AS wait" if with_cpu else ", 0 AS wait"
     sql = (
-        "SELECT max(n), max(mem) FROM ("  # noqa: S608 - quoted database and manifest table, values bound
+        "SELECT max(n), max(mem), max(wait) FROM ("  # noqa: S608 - quoted database and manifest table, values bound
         "SELECT toStartOfInterval(event_time, toIntervalSecond({bucket:UInt32})) AS b, "
-        "count() AS n, sum(memory_usage) AS mem "
+        f"count() AS n, sum(memory_usage) AS mem{wait_inner} "
         f"FROM {target} WHERE feature = 'hunts' AND kind = 'hunt' "
         "AND event_time >= now() - toIntervalHour(1) GROUP BY b)"
     )
@@ -131,8 +136,8 @@ def read_observed(ch: Any, database: str, *, bucket_seconds: int) -> tuple[int, 
         sql, parameters={"bucket": bucket_seconds}, settings=_CONTROLLER_SETTINGS
     ).result_rows
     if not rows or rows[0][0] is None:
-        return 0, 0.0
-    return int(rows[0][0]), float(rows[0][1])
+        return 0, 0.0, 0.0
+    return int(rows[0][0]), float(rows[0][1]), float(rows[0][2])
 
 
 def archive_has_cpu(ch: Any, database: str) -> bool:
@@ -405,11 +410,14 @@ class PhaseSmoother:
     def _report_observed(self) -> dict[str, float] | None:
         """Read and record the trailing hour as the archive saw it, or None when it cannot be read."""
         try:
-            overlap, mem = read_observed(
-                self._ch, self._db, bucket_seconds=self._settings.bucket_seconds
+            overlap, mem, wait = read_observed(
+                self._ch,
+                self._db,
+                bucket_seconds=self._settings.bucket_seconds,
+                with_cpu=bool(self._with_cpu),
             )
         except Exception as exc:
             self._warn_once("observed", "observed load unreadable from the archive", error=str(exc))
             return None
-        self._metrics.observed(overlap_peak=overlap, mem_peak_bytes=mem)
-        return {"overlap_peak": overlap, "mem_peak_bytes": mem}
+        self._metrics.observed(overlap_peak=overlap, mem_peak_bytes=mem, cpu_wait_seconds=wait)
+        return {"overlap_peak": overlap, "mem_peak_bytes": mem, "cpu_wait_seconds": wait}

@@ -57,6 +57,7 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("counter", "hunt_phase_shift_total"),
         ("gauge", "hunt_observed_overlap_peak"),
         ("gauge", "hunt_observed_mem_peak_bytes"),
+        ("gauge", "hunt_observed_cpu_wait_seconds"),
         ("counter", "hunt_autodisabled_total"),
     ]
 
