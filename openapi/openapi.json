@@ -52406,7 +52406,7 @@
           "source_type"
         ],
         "title": "SourceFetcher",
-        "description": "Fetcher-based origin: one dfe-fetcher deployment, named for the source.\n\n``config`` is the fetcher's own per-type stanza, carried verbatim into the\ndeployed instance under ``config.sources.<source_type>``, one level deeper\nunder the source's name for a family the app manifest declares keyed. The\nengine owns ``enabled`` and ``topic`` on that stanza: ``topic`` selects\nwhether records land on the source's own topic (and table) or on the shared\n``main`` landing."
+        "description": "Fetcher-based origin: one dfe-fetcher deployment, named for the source.\n\n``config`` is the fetcher's own per-type stanza, carried verbatim into the\ndeployed instance under ``config.sources.<source_type>``, one level deeper\nunder the source's name for a family the app manifest declares keyed. The\nengine owns ``enabled`` and ``topic`` on that stanza: ``topic`` selects\nwhether records land on the source's own topic (and table) or on the shared\n``main`` landing. It also sets ``topic_per_dump_unit`` false on a keyed family's\nstanza, so a dump unit lands on that topic rather than on ``<topic>-<unit>``."
       },
       "SourceFlowResponse": {
         "properties": {
