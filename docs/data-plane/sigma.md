@@ -9,7 +9,7 @@
 
 # Sigma detection pipeline
 
-Sigma is a beta, held back until it is tested from feed to detection. It is off by default behind `sigma.enabled` (`DFE_ENGINE_SIGMA_ENABLED=true`), and while it is off every path under `/api/v1/sigma` answers 404. The work to finish it is tracked in https://github.com/hyperi-io/dfe-engine/issues/887.
+Sigma is a beta, held back until it is tested from feed to detection. It is off by default behind `sigma.enabled` (`DFE_ENGINE_SIGMA_ENABLED=true`), and while it is off every path under `/api/v1/sigma` answers 404. The work to finish it is tracked in <https://github.com/hyperi-io/dfe-engine/issues/887>.
 
 What works today is the source mapping. A `sigma` entry in a source's `views` is a field-map view, and it deploys whether the flag is on or off. The console does not offer Sigma for a new view, and an existing view keeps it. The rest of the pipeline sits behind the flag, works through the API only with no console flow, and has not yet run from feed to detection.
 

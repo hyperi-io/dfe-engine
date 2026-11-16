@@ -308,3 +308,15 @@ def test_the_detail_carries_the_runners_stop_so_a_direct_link_shows_it(
     assert detail["enabled"] is True
     assert detail["auto_disabled_at"] == 1700000000
     assert detail["auto_disabled_reason"] == "resource_limit:241"
+
+
+def test_a_direct_query_hunt_with_no_rules_is_a_detail_not_a_500():
+    from dfe_engine.api.v1.hunts import HuntDetailResponse
+
+    detail = HuntDetailResponse.from_stored_config(
+        "stop_limit",
+        {"cron": "* * * * *", "display_name": "Stop Limit", "query": "SELECT 1 WHERE {window}"},
+    )
+    assert detail.rules == []
+    assert detail.query == "SELECT 1 WHERE {window}"
+    assert detail.enabled is True
