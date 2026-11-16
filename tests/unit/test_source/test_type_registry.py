@@ -150,9 +150,11 @@ class TestResolveAttributes:
         r = registry.resolve("string", attributes=["not_null"])
         assert r.ch_type == "String"
 
-    def test_lowcardinality_integer(self, registry: TypeRegistry):
-        r = registry.resolve("integer", attributes=["lowcardinality"])
-        assert r.ch_type == "LowCardinality(Nullable(Int64))"
+    def test_lowcardinality_integer_is_refused(self, registry: TypeRegistry):
+        # ClickHouse refuses LowCardinality over a number without
+        # allow_suspicious_low_cardinality_types (code 455), which DFE never sets.
+        with pytest.raises(InvalidAttributeError):
+            registry.resolve("integer", attributes=["lowcardinality"])
 
 
 # ---------------------------------------------------------------------------
@@ -167,8 +169,8 @@ class TestResolveChOverride:
         assert r.codec is None
 
     def test_override_with_lowcardinality(self, registry: TypeRegistry):
-        r = registry.resolve("integer", attributes=["lowcardinality"], ch_override="UInt16")
-        assert r.ch_type == "LowCardinality(UInt16)"
+        r = registry.resolve("string", attributes=["lowcardinality"], ch_override="FixedString(16)")
+        assert r.ch_type == "LowCardinality(FixedString(16))"
         assert r.codec is None
 
     def test_override_parameterised(self, registry: TypeRegistry):
@@ -277,11 +279,14 @@ class TestValidateUseCase:
 
 
 class TestValidateAttribute:
-    @pytest.mark.parametrize("primitive", ["string", "text", "integer", "float", "date", "ip"])
+    @pytest.mark.parametrize("primitive", ["string", "text"])
     def test_lowcardinality_valid(self, registry: TypeRegistry, primitive: str):
         registry.validate_attribute(primitive, "lowcardinality")
 
-    @pytest.mark.parametrize("primitive", ["json", "geo_point", "boolean", "uuid", "enum"])
+    @pytest.mark.parametrize(
+        "primitive",
+        ["json", "geo_point", "boolean", "uuid", "enum", "integer", "float", "date", "ip"],
+    )
     def test_lowcardinality_invalid(self, registry: TypeRegistry, primitive: str):
         with pytest.raises(InvalidAttributeError):
             registry.validate_attribute(primitive, "lowcardinality")

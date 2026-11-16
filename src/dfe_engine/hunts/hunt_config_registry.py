@@ -394,6 +394,7 @@ class HuntConfigRegistry:
                     "rules": rule_names,
                     "source_table": config.get("global_source_table_name", ""),
                     "target_table": config.get("global_target_table_name", ""),
+                    "enabled": config.get("enabled", True),
                 }
             )
         return results

@@ -15020,7 +15020,7 @@
           "hunts"
         ],
         "summary": "Get Hunt",
-        "description": "Get full hunt configuration by file name.",
+        "description": "Get full hunt configuration by file name, with the runner's stop on it if any.",
         "operationId": "hunts.get",
         "parameters": [
           {
@@ -41369,6 +41369,18 @@
             ],
             "title": "Explain Queries"
           },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "Whether the runner fires this hunt. Omitted on an update keeps the stored value. True also clears a stop the runner put on the hunt."
+          },
           "rules": {
             "items": {
               "type": "string"
@@ -41504,6 +41516,12 @@
             "title": "Name",
             "description": "Hunt file name (YAML stem)"
           },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the runner fires this hunt. False keeps its YAML, state and watermark and fires nothing.",
+            "default": true
+          },
           "rules": {
             "items": {
               "$ref": "#/components/schemas/HuntRuleEntry"
@@ -41522,6 +41540,24 @@
             "type": "object",
             "title": "Customer Tenant Ids",
             "description": "Each customer's tenant ids, resolved when the hunt was saved: the _org_id values the runner reads. A customer missing here stops every run."
+          },
+          "auto_disabled_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Disabled At",
+            "description": "When the runner stopped the hunt after repeated resource-limit failures, epoch seconds"
+          },
+          "auto_disabled_reason": {
+            "type": "string",
+            "title": "Auto Disabled Reason",
+            "description": "The ClickHouse error category and code that tripped the stop",
+            "default": ""
           }
         },
         "type": "object",
@@ -41758,6 +41794,30 @@
             ],
             "title": "Next Due",
             "description": "Epoch seconds of the next scheduled fire; null = no rate schedule"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the runner fires this hunt. False keeps its YAML, state and watermark and fires nothing.",
+            "default": true
+          },
+          "auto_disabled_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Disabled At",
+            "description": "When the runner stopped the hunt after repeated resource-limit failures, epoch seconds"
+          },
+          "auto_disabled_reason": {
+            "type": "string",
+            "title": "Auto Disabled Reason",
+            "description": "The ClickHouse error category and code that tripped the auto-disable",
+            "default": ""
           }
         },
         "type": "object",
@@ -41878,6 +41938,18 @@
               }
             ],
             "title": "Explain Queries"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "Whether the runner fires this hunt. Omitted on an update keeps the stored value. True also clears a stop the runner put on the hunt."
           },
           "rules": {
             "items": {

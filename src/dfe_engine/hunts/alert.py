@@ -495,6 +495,10 @@ class AlertDispatcher:
 
         return False
 
+    def send(self, title: str, body: str) -> bool:
+        """Send one notification to every destination, with no trigger evaluated."""
+        return self._send(title, body)
+
     def _send(self, title: str, body: str) -> bool:
         """Send notification via Apprise. Returns True on success."""
         try:
