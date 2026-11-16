@@ -109,7 +109,7 @@ extraObjects:
           scaleToZeroOnInvalidOffset: "false"
           lagThreshold: "{{KAFKA_LAG_THRESHOLD | default(1000000, true)}}"
           activationThreshold: "0"
-          offsetResetPolicy: earliest
+          offsetResetPolicy: latest
         authenticationRef:
           name: keda-trigger-auth-kafka-credential
       # PROMETHEUS_SERVER_ADDRESS is the deployment's own Prometheus. Rendering stops without it.
