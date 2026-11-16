@@ -889,6 +889,7 @@ class TestFetcherInstance:
                 "runzero-assets": {
                     "enabled": True,
                     "topic": "runzero-assets",
+                    "topic_per_dump_unit": False,
                     "profile": "runzero",
                 }
             }
@@ -904,7 +905,9 @@ class TestFetcherInstance:
             catalogue.descriptor(FETCHER), registry, settings, instance="exports"
         )
 
-        assert compiled["sources"] == {family: {"exports": {"enabled": True, "topic": "exports"}}}
+        assert compiled["sources"] == {
+            family: {"exports": {"enabled": True, "topic": "exports", "topic_per_dump_unit": False}}
+        }
 
     @pytest.mark.parametrize("family", FLAT_FETCHER_FAMILIES)
     def test_every_flat_family_composes_onto_the_family_itself(self, settings, family):
