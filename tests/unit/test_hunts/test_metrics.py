@@ -57,6 +57,7 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("counter", "hunt_phase_shift_total"),
         ("gauge", "hunt_observed_overlap_peak"),
         ("gauge", "hunt_observed_mem_peak_bytes"),
+        ("counter", "hunt_autodisabled_total"),
     ]
 
 
@@ -95,6 +96,7 @@ def test_no_backend_registers_nothing_and_records_nothing():
     metrics.hunt_cost("h", mem_bytes=1.0, duration_ms=1.0)
     metrics.phase_offset("h", 1)
     metrics.phase_shift("h", 1)
+    metrics.auto_disabled("h", reason="resource_limit:241")
 
 
 def test_a_completed_fire_counts_once_and_records_its_duration(manager):
@@ -217,8 +219,19 @@ def test_a_capped_rule_counts_once_and_adds_what_it_dropped(manager):
                 Observation("hunt_phase_offset", {"hunt_id": "h"}, "set", 120),
             ],
         ),
+        (
+            lambda m: m.auto_disabled("h", reason="resource_limit:241"),
+            [
+                Observation(
+                    "hunt_autodisabled_total",
+                    {"hunt_id": "h", "reason": "resource_limit:241"},
+                    "inc",
+                    1,
+                )
+            ],
+        ),
     ],
-    ids=["enabled-on", "enabled-off", "cycle", "cost", "offset", "shift"],
+    ids=["enabled-on", "enabled-off", "cycle", "cost", "offset", "shift", "auto-disabled"],
 )
 def test_the_smoothing_record_calls_produce_their_observations(manager, call, expected):
     call(HuntRunnerMetrics(manager))

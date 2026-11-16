@@ -50,7 +50,12 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
-from dfe_engine.hunts.run_status import RunStatus, live_runner_count, read_run_status
+from dfe_engine.hunts.run_status import (
+    RunStatus,
+    clear_auto_disable,
+    live_runner_count,
+    read_run_status,
+)
 from dfe_engine.hunts.schedule import next_due, read_schedule
 from dfe_engine.hunts.spec_loader import interval_seconds_for
 from dfe_engine.hunts.validator import HuntValidator
@@ -185,6 +190,23 @@ class HuntSummary(BaseModel):
         default=None,
         description="Epoch seconds of the next scheduled fire; null = no rate schedule",
     )
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether the runner fires this hunt. False keeps its YAML, state and watermark "
+            "and fires nothing."
+        ),
+    )
+    auto_disabled_at: int | None = Field(
+        default=None,
+        description=(
+            "When the runner stopped the hunt after repeated resource-limit failures, epoch seconds"
+        ),
+    )
+    auto_disabled_reason: str = Field(
+        default="",
+        description="The ClickHouse error category and code that tripped the auto-disable",
+    )
 
 
 class HuntRuleEntry(BaseModel):
@@ -221,6 +243,13 @@ class _HuntConfigFields(BaseModel):
     scheduling_mode: str | None = None
     min_interval_seconds: int | None = None
     explain_queries: bool | None = None
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether the runner fires this hunt. False keeps its YAML, state and watermark "
+            "and fires nothing."
+        ),
+    )
 
 
 class HuntWriteRequest(_HuntConfigFields):
@@ -383,6 +412,24 @@ def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
         return {}
 
 
+def _clear_auto_disable_if_enabled(name: str, *, enabled: bool) -> None:
+    """Re-enable a hunt the runner auto-disabled when the save turns it on.
+
+    Best-effort like the run state: the YAML is already saved, so an unreachable
+    ClickHouse leaves the stop in place for the next save rather than failing this one.
+    """
+    if not enabled:
+        return
+    try:
+        run = _run_status_for([name], int(time.time())).get(name)
+        if run is None or run.auto_disabled_at is None:
+            return
+        client, db = _data_database_client()
+        clear_auto_disable(client, db, name)
+    except Exception as exc:
+        logger.warning(f"could not clear the auto-disable on hunt '{name}': {exc}")
+
+
 def _learned_offsets(enabled: bool) -> dict[str, tuple[int, int]]:
     """The offsets ``hunt_schedule`` holds, read once per listing when smoothing is on.
 
@@ -441,6 +488,9 @@ def _hunt_row_to_summary(
         too_aggressive=run.too_aggressive,
         run_requested=run.run_requested,
         next_due=_next_due(row, now, fraction, learned),
+        enabled=bool(row.get("enabled", True)),
+        auto_disabled_at=run.auto_disabled_at,
+        auto_disabled_reason=run.auto_disabled_reason,
     )
 
 
@@ -611,6 +661,7 @@ def update_hunt(
     _validate_hunt_config(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
+    _clear_auto_disable_if_enabled(name, enabled=body.enabled)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(name, config)

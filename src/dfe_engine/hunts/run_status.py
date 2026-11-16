@@ -48,6 +48,10 @@ class RunStatus:
     overrun_count: int = 0
     run_requested: bool = False
     """An operator asked for a run the runner has not served yet."""
+    auto_disabled_at: int | None = None
+    """Epoch seconds the runner stopped the hunt after repeated resource-limit failures."""
+    auto_disabled_reason: str = ""
+    """The ClickHouse error category and code that tripped the auto-disable."""
 
 
 def _query(database: str) -> str:
@@ -56,14 +60,17 @@ def _query(database: str) -> str:
     return (
         "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database, ids bound
         "coalesce(s.overruns, 0), coalesce(s.aggressive, 0), "
-        "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0) "
+        "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0), "
+        "toUnixTimestamp(s.disabled_at), coalesce(s.disabled_reason, '') "
         "FROM (SELECT arrayJoin({ids:Array(String)}) AS hunt_id) h "
         "LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
         f"FROM {db}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(lease_until, claimed) AS lu "
         f"FROM {db}.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(overrun_count, updated) AS overruns, "
-        "argMax(too_aggressive, updated) AS aggressive "
+        "argMax(too_aggressive, updated) AS aggressive, "
+        "argMax(auto_disabled_at, updated) AS disabled_at, "
+        "argMax(auto_disabled_reason, updated) AS disabled_reason "
         f"FROM {db}.hunt_state GROUP BY hunt_id) s USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, max(fire) AS last_fire, "
         "argMax(rows_written, fire) AS rows_written FROM ("
@@ -124,5 +131,39 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
             too_aggressive=bool(row[4]),
             overrun_count=int(row[3]),
             run_requested=bool(row[7]),
+            auto_disabled_at=int(row[8]) if row[8] else None,
+            auto_disabled_reason=str(row[9] or ""),
         )
     return status
+
+
+def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
+    """Insert the hunt_state row that replaces a disabled one. Only the API calls it.
+
+    The overrun count and too-aggressive flag are read back and carried over, so
+    clearing the auto-disable leaves the UI's overrun signal as it was.
+
+    Args:
+        ch: a ClickHouse client exposing ``query`` and ``insert``.
+        database: the data database the coordination tables live in.
+        hunt_id: the hunt to re-enable.
+    """
+    rows = ch.query(
+        "SELECT argMax(overrun_count, updated), argMax(too_aggressive, updated) "  # noqa: S608 - quoted configured database, id bound
+        f"FROM {quote_identifier(database)}.hunt_state WHERE hunt_id = {{h:String}}",
+        parameters={"h": hunt_id},
+    ).result_rows
+    overrun_count = int(rows[0][0]) if rows else 0
+    too_aggressive = int(rows[0][1]) if rows else 0
+    ch.insert(
+        "hunt_state",
+        [[hunt_id, overrun_count, too_aggressive, None, ""]],
+        column_names=[
+            "hunt_id",
+            "overrun_count",
+            "too_aggressive",
+            "auto_disabled_at",
+            "auto_disabled_reason",
+        ],
+        database=database,
+    )

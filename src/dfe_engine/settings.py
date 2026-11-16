@@ -275,6 +275,36 @@ LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
 _CLICKHOUSE_CATALOGUES = frozenset({"system", "information_schema"})
 
 
+class HuntAutodisableSettings(BaseModel):
+    """A hunt that keeps tripping a ClickHouse resource limit is stopped by the runner.
+
+    On by default, because a query that busts the memory limit fails its neighbours too.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Stop a hunt after repeated resource-limit failures. "
+            "DFE_ENGINE_HUNTS_AUTODISABLE_ENABLED."
+        ),
+    )
+    failures: int = Field(
+        default=3,
+        gt=0,
+        description=(
+            "Resource-limit failures within the window that disable the hunt. "
+            "DFE_ENGINE_HUNTS_AUTODISABLE_FAILURES."
+        ),
+    )
+    window_seconds: int = Field(
+        default=3600,
+        gt=0,
+        description=(
+            "The window the failures are counted over. DFE_ENGINE_HUNTS_AUTODISABLE_WINDOW_SECONDS."
+        ),
+    )
+
+
 class HuntSmoothingSettings(BaseModel):
     """The adaptive phase-drift loop that flattens ClickHouse load from rate hunts.
 
@@ -602,6 +632,10 @@ class HuntsSettings(BaseModel):
     smoothing: HuntSmoothingSettings = Field(
         default_factory=HuntSmoothingSettings,
         description="Adaptive phase drift for rate hunts",
+    )
+    autodisable: HuntAutodisableSettings = Field(
+        default_factory=HuntAutodisableSettings,
+        description="Stop a hunt that keeps tripping a ClickHouse resource limit",
     )
     failure_backoff_initial_seconds: float = Field(
         default=FAILURE_BACKOFF_INITIAL_SECONDS,
@@ -2544,6 +2578,8 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_SMOOTHING_COOLDOWN_CYCLES": "hunts.smoothing.cooldown_cycles",
             "DFE_ENGINE_HUNTS_SMOOTHING_MEMORY_CAP_BYTES": "hunts.smoothing.memory_cap_bytes",
             "DFE_ENGINE_HUNTS_SMOOTHING_HORIZON_MAX_SECONDS": "hunts.smoothing.horizon_max_seconds",
+            "DFE_ENGINE_HUNTS_AUTODISABLE_FAILURES": "hunts.autodisable.failures",
+            "DFE_ENGINE_HUNTS_AUTODISABLE_WINDOW_SECONDS": "hunts.autodisable.window_seconds",
             "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_EVENTS": "transform_validation.dry_run_max_events",
             "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_OUTPUT_BYTES": "transform_validation.dry_run_max_output_bytes",
             "DFE_ENGINE_DEPLOYMENT_MAX_REPLICAS_CEILING": "deployment.max_replicas_ceiling",
@@ -2636,6 +2672,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_SAFE_HORIZON": "hunts.safe_horizon",
             "DFE_ENGINE_DETECTION_GUARD_ENABLED": "hunts.detection_guard.enabled",
             "DFE_ENGINE_HUNTS_SMOOTHING_ENABLED": "hunts.smoothing.enabled",
+            "DFE_ENGINE_HUNTS_AUTODISABLE_ENABLED": "hunts.autodisable.enabled",
             "DFE_ENGINE_KAFKA_ENSURE_TOPICS": "kafka.ensure_topics",
             "DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS": "kafka.bootstrap_topics",
             "DFE_ENGINE_KAFKA_TIERED_STORAGE": "kafka.tiered_storage",

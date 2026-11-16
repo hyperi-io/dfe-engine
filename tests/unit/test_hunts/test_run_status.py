@@ -16,7 +16,7 @@ decision this code makes rather than something the query says.
 
 from __future__ import annotations
 
-from dfe_engine.hunts.run_status import live_runner_count, read_run_status
+from dfe_engine.hunts.run_status import clear_auto_disable, live_runner_count, read_run_status
 
 
 class _Rows:
@@ -32,8 +32,41 @@ class _Rows:
         return type("Result", (), {"result_rows": self._rows})()
 
 
-def _row(hunt_id, wm=0, lease=0, overruns=0, aggressive=0, last_fire=0, rows=0, pending=0):
-    return [hunt_id, wm, lease, overruns, aggressive, last_fire, rows, pending]
+class _Recording(_Rows):
+    """A client that also records what is inserted."""
+
+    def __init__(self, rows: list[list]) -> None:
+        super().__init__(rows)
+        self.inserts: list[tuple] = []
+
+    def insert(self, table: str, data: list[list], column_names: list[str], database: str):
+        self.inserts.append((table, data, column_names, database))
+
+
+def _row(
+    hunt_id,
+    wm=0,
+    lease=0,
+    overruns=0,
+    aggressive=0,
+    last_fire=0,
+    rows=0,
+    pending=0,
+    disabled_at=None,
+    disabled_reason="",
+):
+    return [
+        hunt_id,
+        wm,
+        lease,
+        overruns,
+        aggressive,
+        last_fire,
+        rows,
+        pending,
+        disabled_at,
+        disabled_reason,
+    ]
 
 
 def test_a_hunt_that_has_never_run_reports_nothing_rather_than_zero():
@@ -79,6 +112,61 @@ def test_too_aggressive_and_overruns_come_through():
 def test_a_queued_run_is_reported_as_requested():
     status = read_run_status(_Rows([_row("h", pending=1)]), "dfe", ["h"], now=1000)["h"]
     assert status.run_requested is True
+
+
+def test_a_hunt_that_was_never_auto_disabled_reports_neither_field():
+    status = read_run_status(_Rows([_row("h")]), "dfe", ["h"], now=1000)["h"]
+    assert status.auto_disabled_at is None
+    assert status.auto_disabled_reason == ""
+
+
+def test_an_auto_disabled_hunt_reports_when_and_why():
+    status = read_run_status(
+        _Rows([_row("h", disabled_at=950, disabled_reason="resource_limit:241")]),
+        "dfe",
+        ["h"],
+        now=1000,
+    )["h"]
+    assert status.auto_disabled_at == 950
+    assert status.auto_disabled_reason == "resource_limit:241"
+
+
+def test_a_null_reason_reads_as_empty():
+    status = read_run_status(_Rows([_row("h", disabled_reason=None)]), "dfe", ["h"], now=1000)["h"]
+    assert status.auto_disabled_reason == ""
+
+
+def test_the_query_selects_the_auto_disable_columns_from_hunt_state():
+    ch = _Rows([])
+    read_run_status(ch, "dfe", ["h"], now=1000)
+    assert "argMax(auto_disabled_at, updated) AS disabled_at" in ch.sql
+    assert "argMax(auto_disabled_reason, updated) AS disabled_reason" in ch.sql
+
+
+def test_clearing_an_auto_disable_inserts_a_row_that_keeps_the_overrun_signal():
+    ch = _Recording([[3, 1]])
+    clear_auto_disable(ch, "dfe", "h")
+    assert ch.parameters == {"h": "h"}
+    assert ch.inserts == [
+        (
+            "hunt_state",
+            [["h", 3, 1, None, ""]],
+            [
+                "hunt_id",
+                "overrun_count",
+                "too_aggressive",
+                "auto_disabled_at",
+                "auto_disabled_reason",
+            ],
+            "dfe",
+        )
+    ]
+
+
+def test_clearing_a_hunt_with_no_state_row_writes_zeros():
+    ch = _Recording([])
+    clear_auto_disable(ch, "dfe", "fresh")
+    assert ch.inserts[0][1] == [["fresh", 0, 0, None, ""]]
 
 
 def test_no_hunt_ids_asks_clickhouse_nothing():
