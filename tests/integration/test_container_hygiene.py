@@ -39,11 +39,16 @@ _BUSYBOX_DIGEST = "sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94
 _BUSYBOX_IMAGE = f"busybox:{_BUSYBOX_TAG}@{_BUSYBOX_DIGEST}"
 
 
-def test_per_test_container_name_includes_the_test():
-    """A throwaway carries the owning test between the suite and the service."""
+def test_per_test_container_name_includes_the_test_and_the_process():
+    """A throwaway carries the owning test and pid between the suite and the service.
+
+    Two pytest sessions on one docker host run the same node ids. Without the pid
+    the second session's network create fails on the first's, and its teardown
+    force-removes the first's live replicas mid-test.
+    """
     assert (
         _container_name("test_hunt_checkpoint", "clickhouse")
-        == "dfe-engine-test-integration-test-hunt-checkpoint-clickhouse"
+        == f"dfe-engine-test-integration-test-hunt-checkpoint-{os.getpid()}-clickhouse"
     )
 
 
@@ -82,7 +87,7 @@ def test_container_name_is_a_legal_docker_name():
     name is normalised here instead.
     """
     name = _container_name("test_rbac[tenant-a:read]", "ClickHouse")
-    assert name == "dfe-engine-test-integration-test-rbac-tenant-a-read--clickhouse"
+    assert name == f"dfe-engine-test-integration-test-rbac-tenant-a-read--{os.getpid()}-clickhouse"
 
     def legal(value: str) -> bool:
         head, tail = value[0], value[1:]
