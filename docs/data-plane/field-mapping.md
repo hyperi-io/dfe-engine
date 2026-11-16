@@ -6,7 +6,7 @@ written in a standard's vocabulary run transparently against DFE tables
 through generated views - the Sigma converter is a CONSUMER of this layer,
 not the owner of mapping logic.
 
-## Resolution order
+The mapping for a column is the first layer that names it.
 
 | Priority | Layer | Description |
 |----------|-------|-------------|
@@ -16,16 +16,15 @@ not the owner of mapping logic.
 | 4 (lowest) | passthrough | field name used as-is |
 
 A `field_map` pin replaces the source-name convention for the override
-layer, so one named map can be shared across many sources; a view with only
-inline mappings renders even without a registry.
+layer, so several sources can share one map. A view with inline mappings and
+no pin renders with no registry at all.
 
-Maps are YAML in the config repo (engine-, UI-, or human-editable). The
-resolver lives at `src/dfe_engine/fieldmap/resolver.py`; view generation at
+Maps are YAML files under `fieldmaps/` in the config directory, editable by the
+engine, the console or a person. The resolver is
+`src/dfe_engine/fieldmap/resolver.py` and the view generator
 `src/dfe_engine/fieldmap/view_generator.py`.
 
-## Generated views
-
-Each standard x source produces a ClickHouse VIEW named
+Each standard and source pair produces a ClickHouse VIEW named
 `{table}_{standard}` (e.g. `windows_audit_sigma`) that aliases DFE columns
 back to the standard's field names:
 
@@ -38,7 +37,7 @@ SELECT
 FROM {db}.windows_audit;
 ```
 
-A view carries only the mappings whose column the source's table holds. ClickHouse refuses a whole view when one of its columns is missing, and a default map names far more columns than any one table has, so the rest are dropped and logged at debug. A view left with no mapping is not created. The source build, plan, deploy and the sigma view preview all apply the same rule.
+A view holds the mappings whose column the source's table has, and drops the rest. ClickHouse refuses a whole view when one of its columns is missing, and a default map names far more columns than any one table has, so each dropped one is logged at debug. A view left with no mapping is not created. The source build, plan, deploy and the sigma view preview all apply the same rule.
 
 Zero storage overhead - views compute at query time. Consumers:
 [hunt-runner-scaling.md](hunt-runner-scaling.md) (detections),

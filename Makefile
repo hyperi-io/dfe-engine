@@ -19,10 +19,7 @@ build:
 check:
 	hyperi-ci check
 
-# Local dev API server. First time: `cp .env.example .env`. Loads .env (the app
-# does not read it itself), defaults the config dir, and serves Swagger UI at
-# /docs. DFE_ENGINE_SCHEMAS_DIR is left unset on purpose: the schemas then come from
-# the installed dfe-schemas package, which is the version uv.lock pins.
+# Local dev API server: docs/local-dev.md. The app does not read .env itself.
 dev:
 	@test -f .env || { echo "Create .env first: cp .env.example .env"; exit 1; }
 	@echo "Swagger UI -> http://localhost:$${DFE_ENGINE_API_PORT:-8003}/docs"
@@ -30,34 +27,7 @@ dev:
 	: "$${DFE_CONFIG_DIR:=./config}"; export DFE_CONFIG_DIR; \
 	uv run dfe-engine run
 
-# Persisted host-run API for Playwright (dfe-ui `yarn test:e2e`).
-# Fresh slate on every start: YAML config, schema writes, minted secrets and
-# artifacts live under tmp/e2e (gitignored) so the installed schema trees and
-# ./config are never touched, and every ClickHouse database the engine creates
-# is namespaced under the $(E2E_CH_PREFIX) prefix so the wipe can sweep it by
-# prefix rather than by a hand-maintained list. Wiping on START (not on stop) is
-# deliberate: a killed or crashed run leaves nothing behind for the next one.
-# Pass E2E_KEEP=1 to reuse the last run instead of wiping.
-# Playwright must poll /readyz (not /health/ready, which 404s on this binary):
-#   DFE_ENGINE_READY_URL=http://127.0.0.1:8003/readyz yarn test:e2e
-# Startup parity: a plain `dfe-engine run`, so the process comes up with exactly
-# what auth/bootstrap.py seeds (roles.yaml, the four dfe-* groups, break-glass
-# admin) and no baseline beyond it. Fixture data is the suite's job, seeded over
-# the API from dfe-ui.
-# Hunt log and checkpoint paths are pinned in too: they are not among the
-# DFE_CONFIG_DIR-derived subdirs, so their defaults land in the CWD and would
-# outlive the wipe. The gitops deploy repo is pinned for the same reason, and
-# only takes effect when .env.e2e sets DFE_ENGINE_GITOPS_ENABLED=true -- the
-# app-management seeds write their instances, artefacts and sources into it.
-# NOT swept: ClickHouse users/roles, which are server-global rather than
-# per-database. Only the governance reconcile creates those, and it runs
-# unless DFE_ENGINE_TENANT_ISOLATION_ENABLED is false.
-# E2E_NO_CLICKHOUSE=1 runs the engine with no ClickHouse at all: no table
-# bootstrap, no tenant-isolation reconcile, no wipe. Pages that read ClickHouse
-# answer 503 and the rest work. Use it where docker is not running.
-# E2E_ENV_FILE and E2E_WORKSPACE can be set on the command line or in the
-# environment (`make e2e-server E2E_ENV_FILE=/path/env`),
-# so a driver script can keep its env file and workspace outside the checkout.
+# Host-run API for dfe-ui's Playwright suite, wiped on every start: docs/local-dev.md.
 E2E_ENV_FILE ?= ./.env.e2e
 E2E_WORKSPACE ?= $(CURDIR)/tmp/e2e
 E2E_CH_PREFIX := dfe_e2e
@@ -66,10 +36,7 @@ E2E_CH_HUNTS_DB := $(E2E_CH_PREFIX)_hunts
 E2E_CH_AUDIT_DB := $(E2E_CH_PREFIX)_audit
 E2E_CH_OTEL_DB := $(E2E_CH_PREFIX)_otel
 
-# Drop every ClickHouse database under the e2e prefix. Enumerating the server
-# beats a fixed list: a database added by a future bootstrap path is swept the
-# day it appears. The prefix cannot match the shared dfe / dfe_hunts / dfe_audit
-# / dfe_meta databases, so a dev stack on the same server is untouched.
+# Drops every database under the e2e prefix, which no shared dfe database matches.
 define e2e-ch-wipe
 	ch_host="$${DFE_ENGINE_CLICKHOUSE_HOST:-localhost}"; \
 	ch_port="$${DFE_ENGINE_CLICKHOUSE_PORT:-8123}"; \
@@ -98,12 +65,7 @@ define e2e-ch-wipe
 	done
 endef
 
-# Refuse to start behind another listener on the API port. This server binds
-# 0.0.0.0, so a loopback-specific bind -- the dfe-engine container publishing
-# 127.0.0.1:8003 -- shadows it for localhost traffic: both binds succeed, no
-# error is raised, and the browser, dfe-ui and Playwright all reach the OTHER
-# process and its persistent volume. A fresh workspace here cannot show through
-# that, so the collision has to be fatal rather than silent.
+# A loopback bind on the API port would silently take this 0.0.0.0 server's traffic.
 define e2e-port-guard
 	if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$$DFE_ENGINE_API_PORT" -sTCP:LISTEN >/dev/null 2>&1; then \
 		echo "error: something already listens on port $$DFE_ENGINE_API_PORT:"; \
@@ -114,8 +76,7 @@ define e2e-port-guard
 	fi
 endef
 
-# Teardown on demand: same wipe the next `make e2e-server` would do, for when a
-# run is finished with and should leave nothing behind.
+# The wipe the next e2e-server would do.
 e2e-clean:
 	@test -f "$(E2E_ENV_FILE)" || { echo "Create $(E2E_ENV_FILE) first (copy .env.e2e.example and set DFE_ENGINE_ENV=test)"; exit 1; }
 	@echo "Removing $(E2E_WORKSPACE)"

@@ -1,14 +1,6 @@
-# Usage query catalogue. Same conventions as appmgmt/queries.yaml: `__DB__` is the
-# validated data database, and every value is a ClickHouse bind, so nothing is
-# string-interpolated.
-#
-# Reads the usage rollup and nothing else: usage_daily and usage_minute, declared in
-# dfe-schemas tables/usage/. Both are ReplacingMergeTree(computed_at), where a
-# refresh appends a recomputed row, so every read takes FINAL.
-#
-# Per-query keys:
-#   sql              ClickHouse SQL, where __DB__ is the resolved database
-#   timeout_seconds  ClickHouse max_execution_time
+# Usage query catalogue, in keda_shim/queries.yaml's format. Both rollup tables are
+# ReplacingMergeTree, so every read takes FINAL.
+
 queries:
   # One metric per UTC day over a set of scopes, summed across them. A scope is one
   # _org_id, '' for the whole deployment. Exact for a summed metric over any set,

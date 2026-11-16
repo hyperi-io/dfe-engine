@@ -1,7 +1,7 @@
-# Schema bootstrap -- the engine is the only controller
+# Schema bootstrap -- the engine is the one controller
 
 dfe-engine applies every ClickHouse object and every bootstrap Kafka topic a DFE
-deployment needs, at its own startup, from the pinned `dfe-schemas` wheel. No
+deployment needs, at its startup, from the pinned `dfe-schemas` wheel. No
 other component creates, alters or drops a database, table, view, role or topic:
 not a Job, not an init container, not an app at runtime, not the OTel collector.
 
@@ -15,12 +15,12 @@ release.
 The phase sits inside the API lifespan, ahead of readiness
 (`src/dfe_engine/schema/phase.py`):
 
-1. **Connect**, retrying an unreachable ClickHouse for
+1. Connect, retrying an unreachable ClickHouse for
    `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` (default 180). The datastore can be in
    the same deploy wave, so not-up-yet and broken are different answers.
-2. **Resolve the schema tree**: the wheel inside the image, read-only, then the
+2. Resolve the schema tree: the wheel inside the image, read-only, then the
    deployment's optional overlay directory (`DFE_ENGINE_SCHEMAS_OVERLAY_DIR`).
-3. **Render the plan** for the ClickHouse platform dfe-schemas probes off the live
+3. Render the plan for the ClickHouse platform dfe-schemas probes off the live
    server, unless `DFE_ENGINE_CLICKHOUSE_PLATFORM` pins it. Every table is an argumentless
    `Replicated*` engine with no `ON CLUSTER`, inside a Replicated database on
    self-hosted ClickHouse and the Shared database on ClickHouse Cloud. A self-hosted
@@ -32,21 +32,21 @@ The phase sits inside the API lifespan, ahead of readiness
    throw_only_active`, so a down replica catches up from the database log rather
    than holding the DDL until it times out. A CREATE or DROP DATABASE ON CLUSTER
    replays from the DDL task queue instead, so a replica down longer than its
-   `task_max_lifetime` (7 days by default) misses it. Every rendered object carries a checksum taken
+   `task_max_lifetime` (7 days by default) misses it. Every rendered object has a checksum taken
    with the platform token removed, so one schema reads as one checksum on either
    platform. The pattern is at <https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>
-4. **Take the lease** in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One whose wait runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out. Claims wait for a majority of ClickHouse replicas, so with a majority down the lease cannot be taken and the pass reports `observed`. A two-replica cluster cannot take the lease while either replica is down, because a majority of 2 is 2. A claim ClickHouse acknowledges 2 seconds or more after its free read is not kept and is not released either, so it holds the lease until its expiry.
-5. **Compare** against `schema_migrations` and against the live catalogue, and
+4. Take the lease in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One with a wait that runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out. Claims wait for a majority of ClickHouse replicas, so with a majority down the lease cannot be taken and the pass reports `observed`. A two-replica cluster cannot take the lease while either replica is down, because a majority of 2 is 2. A claim ClickHouse acknowledges 2 seconds or more after its free read is not kept: its marker row is ended, so it blocks nobody and the attempt claims again (`src/dfe_engine/schema/lock.py`, `src/dfe_engine/clickhouse/lease.py`).
+5. Compare against `schema_migrations` and against the live catalogue, and
    apply what is additive.
-6. **Record** every applied object: its kind, the dfe-schemas release, the engine
+6. Record every applied object: its kind, the dfe-schemas release, the engine
    release, the checksum, the statement and the action.
-7. **Create the topics**, create-only, skipping with a logged notice where the
+7. Create the topics, create-only, skipping with a logged notice where the
    deployment has no bus.
-8. **Release the lease** and report.
+8. Release the lease and report.
 
 `schema_migrations` and `schema_lock` are manifest objects like any other and the
 manifest declares them first, so the same pass creates them before it records
-anything into them. The engine carries no DDL even for its own bookkeeping.
+anything into them. The engine holds no DDL even for its bookkeeping.
 
 ## What is applied, and what is refused
 
@@ -56,8 +56,8 @@ Applied automatically:
 - a column the definition adds and the table lacks is added
 - a JSON table's settings are brought to the platform's: `MODIFY SETTING` where a
   self-hosted table lacks `write_marks_for_substreams_in_compact_parts = 0`,
-  `RESET SETTING` where a Cloud table carries it
-- a plain view whose SELECT changed is replaced, because it holds no state
+  `RESET SETTING` where a Cloud table has it
+- a plain view with a changed SELECT is replaced, because it holds no state
 - a role, settings profile, quota or grant is re-asserted, because every statement
   in that set converges
 
@@ -70,7 +70,7 @@ Refused and named on the status route:
 
 A refusal is not a failed pass: the object is named, the rest of the manifest
 still converges, and readiness is still reported. An operator applies the change
-deliberately with `dfe schema apply --allow-drift`, which carries out the two
+deliberately with `dfe schema apply --allow-drift`, which makes the two changes
 ClickHouse has an operation for -- a column type and a TTL. An `ORDER BY` or
 `PARTITION BY` change stays refused either way, because the table has to be
 rebuilt.
@@ -85,10 +85,10 @@ consulted -- the pod is not restarted out from under whoever is reading it.
 
 ## The overlay
 
-A deployment's own schema tree is additive. It may declare objects the core does
-not. An object of its own whose definition sits under a core directory
-(`tables/core/`, `tables/internal/`, `tables/otel/`, `tables/meta/`,
-`common-header/`, `registries/`, `roles/`, `topics/`, `views/`) is refused by name
+A deployment's schema tree is additive. It may declare objects the core does
+not. A deployment object defined under a core directory
+(`tables/core/`, `tables/internal/`, `tables/meta/`, `tables/otel/`,
+`tables/usage/`, `common-header/`, `registries/`, `roles/`, `topics/`, `views/`) is refused by name
 and reported, and the core apply is unaffected. The overlay is optional: an
 install with no deploy repo boots core-only.
 
@@ -98,7 +98,7 @@ install with no deploy repo boots core-only.
 |---|---|---|
 | `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES` | `true` | Apply the manifest at startup. Off reports the schema state as unknown and gates nothing. |
 | `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
-| `DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default, such as a wide Elastic meta schema's table, is sent with its own size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's own SQL never gets the setting. |
+| `DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default, such as a wide Elastic meta schema's table, is sent with its size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's SQL never gets the setting. |
 | `DFE_ENGINE_CLICKHOUSE_PLATFORM` | `auto` | The ClickHouse platform schema DDL is rendered for: `auto` probes the server, then reads the hostname. `cloud` or `self_hosted` pins it, for a server the probe reads wrongly. Anything else refuses to start. |
 | `DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
 | `DFE_ENGINE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |
@@ -116,7 +116,7 @@ engine, no tables.
 - `GET /api/v1/system/schema` -- the last pass, object by object: state, versions,
   platform, per-object action and checksum, the refused list, the overlay
   refusals, the topics created
-- `GET /api/v1/system/version` -- carries the dfe-schemas release as `schemas`
+- `GET /api/v1/system/version` -- reports the dfe-schemas release as `schemas`
 - `dfe schema plan` -- what an apply would do, changing nothing
 - `dfe schema apply [--allow-drift]` -- the boot phase by hand, under the same
   lease
@@ -130,13 +130,13 @@ engine, no tables.
 
 ## What the engine still renders itself
 
-Per-SOURCE objects are defined at use time from an operator's own config, so they
+Per-SOURCE objects are defined at use time from an operator's config, so they
 are not manifest data:
 
 - a source's table and its standard views, rendered by
   `src/dfe_engine/schema/schema_builder_v2.py` with the engine form and platform
   settings dfe-schemas supplies
-- an operator's own quota tiers and the per-org and per-group ClickHouse users,
+- an operator's quota tiers and the per-org and per-group ClickHouse users,
   reconciled by `src/dfe_engine/governance/ch/`
 
 Both go through `SchemaApplier`, so the one DDL gate cannot be bypassed.

@@ -1,16 +1,44 @@
 # Data plane
 
-The close-coupled source - ingest - schema - transform path. One source
-definition carries routing, schema binding, and field-map bindings together.
-The receiver, loader, views, hunts, and query API all read the same
-definition, so there is no separate ETL config to drift. The system map is
+The close-coupled source, ingest, schema and transform path. One source
+definition holds the routing, the schema binding and the field-map bindings
+together, and the engine compiles every stage's config from it, so there is no
+separate ETL config to drift. The system map is
 [../architecture.md](../architecture.md).
+
+The engine compiles one source definition into receiver rules, loader table routing and the table with its views.
 
 ```mermaid
 flowchart LR
-    SRC[source YAML] --> RCV[receiver] --> LDR[loader] --> CH[(ClickHouse)]
-    CH --> VIEWS[standard views] --> HUNTS[hunt runner] & QAPI[query API]
+    accTitle: L4 Detail -- What a source definition compiles into
+    accDescr: The engine compiles one source definition into the receiver's routing rules, the loader's table routing and the table with its standard views. The hunt runner and the query API read the table and its views.
+
+    source["Source<br/>definition"]
+
+    engine["dfe-engine<br/>compilers"]
+
+    receiver["Receiver<br/>rules"]
+    loader["Loader<br/>table routing"]
+    views[("Table and<br/>standard views")]
+
+    hunts["Hunt runner"]
+    query["Query API"]
+
+    source --> engine
+    engine --> receiver
+    engine --> loader
+    engine --> views
+    views --> hunts
+    views --> query
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    class source core
+    class views store
 ```
+
+*Figure 1. L4 Detail -- What a source definition compiles into.* Up: [L3 Components -- dfe-engine](../architecture.md).
 
 ## Documents in this area
 

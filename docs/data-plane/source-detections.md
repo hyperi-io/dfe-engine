@@ -26,8 +26,6 @@ where_clause: "event_id = 4625"
 original_sql: SELECT * FROM dfe.winaudit WHERE event_id = 4625
 ```
 
-### Conditions
-
 A `condition` is one test on a field, or `all` or `any` of several, nested to `x-dfe-max-nesting` groups. `negate` inverts a test or a group. The engine compiles it to `original_sql` and `where_clause` and stores it beside them, so `GET /api/v1/rules/{name}` returns the `condition` and the console reopens its builder on it. A rule saved as SQL has no condition, and a `PUT` with SQL drops one.
 
 ```json
@@ -47,8 +45,6 @@ The `RuleCondition` schema in `openapi.json` publishes the operators, the kind o
 
 A field is a column of the source table when the table has one by that name, otherwise a path inside `_json` (`_json.` in front is accepted). A path is read as the type of its operand. A row without the field fails every test but `exists`, and `negate` does not change that, so `exists` negated finds the rows that lack it. Every value is quoted and every field name is split into identifier parts, so no operand reaches the SQL as text. The hunt window bounds time for every rule, so a condition cannot compare `_timestamp` or the other time columns with `lt`, `lte`, `gt` or `gte`, and a save or preview says so. A text operand cannot hold `{window}` or `{unseen}`, which the runner fills in wherever they sit. A condition is always `source_type` `raw`.
 
-### Preview
-
 `POST /api/v1/rules/preview` takes `{source, condition, cel_filter?, cost_window_minutes?}` and runs what a save runs under the same org fence, then stops. Send `name` when editing a rule so the count follows the hunts that run it. A condition the save would refuse still answers 200, with the reasons in `sql_errors` or `matches_everything`.
 
 ```json
@@ -57,11 +53,11 @@ A field is a column of the source table when the table has one by that name, oth
  "matches_everything": null, "cost_estimate": {"estimated_rows": 2, "band": "ok"}}
 ```
 
-`GET /api/v1/hunts?rule=<name>` lists the hunts whose `rules` include exactly that name.
+`GET /api/v1/hunts?rule=<name>` lists the hunts with exactly that name in `rules`.
 
 ## Hunts
 
-A hunt groups rules, names the customers whose rows they read, and carries the
+A hunt groups rules, names the customers the rules read for, and holds the
 schedule. The runner runs `rate` schedules: `anchored` hunts are recognised and
 skipped.
 
@@ -75,12 +71,28 @@ customers: [acme]
 rules: [brute_force_login]
 ```
 
+The hunt runner runs each rule over the hunt's window and writes every matched row to the detection table.
+
 ```mermaid
-flowchart TD
-    R[rule: condition on a source table] --> H[hunt runner, on the hunt's interval]
-    H -->|runs each rule over the window| M[matches]
-    M --> A[(data database .detection)]
+flowchart LR
+    accTitle: L4 Detail -- Rule to detection table
+    accDescr: A hunt groups rules and carries the schedule. The hunt runner runs each rule over the hunt's window and writes every matched row to the detection table.
+
+    rules["Rules"]
+    hunt["Hunt"]
+    runner["Hunt runner"]
+    detection[("detection<br/>table")]
+
+    rules --> hunt
+    hunt --> runner
+    runner -->|matched rows| detection
+
+    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
+    class detection store
 ```
+
+*Figure 1. L4 Detail -- Rule to detection table.* Up: [Data plane](README.md).
 
 Matches land in `<data database>.detection` unless the hunt
 (`global_target_table_name`) or a rule entry (`target_table_name`) names another
@@ -90,7 +102,7 @@ match is [hunt-match-delivery.md](hunt-match-delivery.md).
 
 ## Hunt customers
 
-A hunt's `customers` are org names. The engine resolves each to the org's tenant ids when it saves the hunt and stores them as `customer_tenant_ids`, and the runner reads only rows whose `_org_id` is one of them. Every org create, update and delete stores that org's tenant ids afresh in each hunt naming it, as one deploy-repo change, before the org itself is written. A deleted org keeps its name in `customers` and loses its stored ids, so the hunt fails every fire as `unknown_customers` and holds its watermark until someone edits it. A hunt carrying a direct `query` instead of `rules` is trusted SQL from the operator-controlled deploy repo, and no customer holds it.
+A hunt's `customers` are org names. The engine resolves each to the org's tenant ids when it saves the hunt and stores them as `customer_tenant_ids`, and the runner reads the rows with one of them in `_org_id` and no others. Every org create, update and delete stores that org's tenant ids afresh in each hunt naming it, as one deploy-repo change, before the org itself is written. A deleted org keeps its name in `customers` and loses its stored ids, so the hunt fails every fire as `unknown_customers` and holds its watermark until someone edits it. A hunt carrying a direct `query` instead of `rules` is trusted SQL from the operator-controlled deploy repo, and no customer holds it.
 
 In production+team the hunt change waits on review while the org is written at once. So an org create or update is refused with 409 `tenant_id_held` when it takes a tenant id a hunt reads for another org, on main or on an unmerged review branch. Merge or delete that branch, or edit the hunt, to release the id. A squash merge leaves the branch behind, so turn on the forge's auto-delete of merged head branches. The startup seed skips such an org, and one the forge cannot check, until the next boot.
 
@@ -98,9 +110,9 @@ Accepted residual: the runner keeps the hunts it loaded until its next reload (`
 
 ## Lookup databases
 
-A rule condition reads its own row and one more kind of table: a table of a database `hunts.lookup_databases` lists (`DFE_ENGINE_HUNTS_LOOKUP_DATABASES`, comma-separated, empty by default). The forms are `x IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>])`, `x IN <db>.<table>` and `x IN (<db>.<table>)`, with `NOT` and `GLOBAL` as usual. Any other subquery, join, union or table after `IN` is refused when the rule is saved, in a governance action and when the runner compiles it.
+A rule condition reads its row and one more kind of table: a table of a database `hunts.lookup_databases` lists (`DFE_ENGINE_HUNTS_LOOKUP_DATABASES`, comma-separated, empty by default). The forms are `x IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>])`, `x IN <db>.<table>` and `x IN (<db>.<table>)`, with `NOT` and `GLOBAL` as usual. Any other subquery, join, union or table after `IN` is refused when the rule is saved, in a governance action and when the runner compiles it.
 
-The runner's ClickHouse user reads every org, so a listed database must hold shared reference data, such as threat-intel indicators, and no org's rows. Each of its tables must be a plain store of its own rows, on a `MergeTree`-family, `Log`, `TinyLog`, `StripeLog`, `Memory` or `EmbeddedRocksDB` engine, with no `_org_id` column. So a view, `Merge`, `Distributed`, `Set` or `Join` table is refused. The runner refuses to start while one is there, and stops at the reload that first finds one. The engine refuses to start too when ClickHouse answers at its start. When it does not, the engine starts with the check unrun and logs a warning, and the runner's check still applies. `system`, `information_schema` and the data database cannot be listed. The runner's `hunt_runner` service role needs `SELECT` on each listed database, added to its grants as a governed-ops edit.
+The runner's ClickHouse user reads every org, so a listed database must hold shared reference data, such as threat-intel indicators, and no org's rows. Each of its tables must hold its rows itself, on a `MergeTree`-family, `Log`, `TinyLog`, `StripeLog`, `Memory` or `EmbeddedRocksDB` engine, with no `_org_id` column. So a view, `Merge`, `Distributed`, `Set` or `Join` table is refused. The runner refuses to start while one is there, and stops at the reload that first finds one. The engine refuses to start too when ClickHouse answers at its start. When it does not, the engine starts with the check unrun and logs a warning, and the runner's check still applies. `system`, `information_schema` and the data database cannot be listed. The runner's `hunt_runner` service role needs `SELECT` on each listed database, added to its grants as a governed-ops edit.
 
 ## Sigma views
 

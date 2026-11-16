@@ -26,11 +26,11 @@ release:
     library: "2.14.15"
 
 test:
-  min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
+  min_coverage: 70
   native_tools: [helm]
   python:
     parallel: auto
-    # Peak RSS of one process in a full core run was 1206 MiB (/usr/bin/time -v, 11 workers).
+    # Just over one worker's peak RSS in a full core run.
     worker_mem_mb: 1280
   full:
     # A release waits on a green full-tier run.
@@ -51,11 +51,7 @@ test:
 
 quality:
   python:
-    # semgrep: warn matches hyperi-ci's own default (quality/semgrep.py:36), so
-    # this is a deliberate pin rather than a downgrade. Its 38 findings are
-    # Flask and Django rules firing on a FastAPI codebase -- the SQL-injection
-    # hit is api/v1/queries.py:232, a raw-query endpoint behind
-    # require_action(query_execute), where taking a caller's SQL is the point.
+    # hyperi-ci's default. Its findings are Flask and Django rules on a FastAPI app, and the raw-query endpoint takes SQL on purpose.
     semgrep: warn
     # Above hyperi-ci's warn default: these three are at zero, so a new finding fails the PR.
     vulture: blocking

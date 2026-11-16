@@ -6,7 +6,7 @@ One page per identity provider, written for the customer's IdP admin. The DFE op
 |---|---|---|---|
 | Google Workspace | [google.md](google.md) | `google` | The Cloud Identity group id, the part after `groups/` |
 | Microsoft Entra ID | [entra.md](entra.md) | `entra_id` | The group's object id (a GUID) |
-| Okta | [okta.md](okta.md) | `okta` | The group name the `groups` claim carries |
+| Okta | [okta.md](okta.md) | `okta` | The group name the `groups` claim sends |
 
 Every page uses the same redirect URI, built from those two values:
 

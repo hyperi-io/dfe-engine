@@ -1,39 +1,9 @@
-# Built-in dfe-keda-shim query catalogue. KEDA polls GET /q/<name> (or the
-# /keda/pressure + /keda/hunt-backlog aliases). The shim runs the SQL named here
-# and returns {"value": <int>}. OVERRIDE or EXTEND these via a YAML file at
-# DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG (deep-merged over these defaults) - change a query, or
-# add a new scaling signal, with a config edit and NO rebuild. A new query name adds
-# a query and a key under an existing one overrides it, but a list in the override
-# (`params`) REPLACES the built-in list rather than extending it.
-#
-# Per-query keys:
-#   database         otel | data | <literal db>. Both otel and data resolve to the
-#                    engine's effective data db - everything DFE writes lives in the
-#                    one database. The sentinel __DB__ in `sql` is replaced with the
-#                    resolved, validated database identifier.
-#   sql              ClickHouse SQL. `params` + `binds` become CH-native bind
-#                    placeholders ({name:Type}) - safe against injection. The
-#                    sentinel __PRESSURE_MATCH__ is replaced with the one rule that
-#                    matches the scaling-pressure gauge under any namespace prefix
-#                    (dfe_engine/scaling_pressure.py).
-#   builtin          instead of `sql`: a named in-code SQL provider. hunt_backlog ->
-#                    schedule.due_query, the ONE due-count source of truth (no drift).
-#   params           request query params bound into the SQL (validated identifiers).
-#   binds            fixed CH bind params set from config.
-#   result_field     column index of the scalar in row 0 (default 0).
-#   clamp_min/max    clamp the returned integer into a band.
-#   cold_hold        value on a cold start with NO cached last-good (0 = hold at min -
-#                    a broken metric can only ever hold or scale DOWN, never up).
-#   timeout_seconds  ClickHouse max_execution_time for the query.
+# dfe-keda-shim's query catalogue, overridable by DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG: docs/deployment/keda-scaling.md.
+# A list in the override replaces the built-in list rather than extending it.
+# __DB__ is the validated data database, and params and binds are ClickHouse binds.
+
 queries:
-  # The composite reaches ClickHouse under whatever namespace the app chose, so the
-  # match is the bare name plus any <prefix>_scaling_pressure (dfe-infra#302).
-  # Each series - one metric name, one attribute set, one pod - is averaged over the
-  # window and the MAX across series is returned, so the hottest pod sets the value.
-  # A pushed row names its pod in the resource (service.instance.id), a scraped row
-  # in its attributes. Rows that name no pod share one series. No matching row reads
-  # as 0, a successful answer that replaces the cached last-good value. The window is
-  # two of scalo's 60 s export intervals, so every live pod has a reading inside it.
+  # Matching, series and reduction: docs/deployment/keda-scaling.md.
   pressure:
     database: otel
     sql: >

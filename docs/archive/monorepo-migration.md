@@ -24,7 +24,7 @@ This means:
 - **Monorepo (future):** All plugins are registered from the single `pyproject.toml`.
   Built-in plugins already live in `dfe_engine.services.plugins_builtin`.
 
-No code changes are needed for the migration — only `pyproject.toml` entry points.
+No code changes are needed for the migration -- only `pyproject.toml` entry points.
 
 ### Entry Points (pyproject.toml)
 
@@ -61,28 +61,28 @@ The plugin function must return a `ServicePlugin` instance.
 
 ## Service Type Architecture
 
-### Type 1 — Vanilla Services
+### Type 1 -- Vanilla Services
 
 Receiver, loader, archiver. Single flat config per deployment instance.
 Standard Helm/ArgoCD env cascade.
 
-### Type 2 — Multi-Source Services
+### Type 2 -- Multi-Source Services
 
 Transform-wasm, fetcher. Vanilla base config plus CRUD-managed source
 deployments. Each source has:
 
-- **ENV overrides** — per-source environment variables
-- **Associated files** — CSV, MMDB, JSON, WASM modules (via `SourceFileConfig`)
-- **Enabled state** — can be toggled without deletion
+- **ENV overrides** -- per-source environment variables
+- **Associated files** -- CSV, MMDB, JSON, WASM modules (via `SourceFileConfig`)
+- **Enabled state** -- can be toggled without deletion
 
 Sources are managed via the engine API (called by the control plane REST API).
 
-### Type 2+ — Vector Transform
+### Type 2+ -- Vector Transform
 
 Transform-vector is Type 2 plus an instance-specific config tree:
 
 - Each source has a vector.dev YAML config file
-- Sources can reference a parent (one YAML → multiple child transforms)
+- Sources can reference a parent (one YAML -> multiple child transforms)
 - The tree structure is specific to vector transforms (not reused elsewhere)
 
 ## Config Directory Layout
@@ -109,17 +109,17 @@ May or may not be git-managed.
 
 ```text
 dfe/
-├── engine/              # Python — dfe-engine
+├── engine/              # Python -- dfe-engine
 │   ├── src/dfe_engine/
 │   ├── tests/
 │   └── pyproject.toml
 ├── services/
-│   ├── receiver/        # Rust — dfe-receiver
-│   ├── loader/          # Rust — dfe-loader
-│   ├── archiver/        # Rust — dfe-archiver
-│   ├── transform-vector/# Rust — dfe-transform-vector
-│   ├── transform-wasm/  # Rust — dfe-transform-wasm
-│   └── fetcher/         # Rust — dfe-fetcher
+│   ├── receiver/        # Rust -- dfe-receiver
+│   ├── loader/          # Rust -- dfe-loader
+│   ├── archiver/        # Rust -- dfe-archiver
+│   ├── transform-vector/# Rust -- dfe-transform-vector
+│   ├── transform-wasm/  # Rust -- dfe-transform-wasm
+│   └── fetcher/         # Rust -- dfe-fetcher
 ├── helm/
 │   ├── dfe-receiver/
 │   ├── dfe-loader/

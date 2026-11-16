@@ -8,7 +8,7 @@
 
 # What a source compiles into
 
-The engine emits the receiver's and the loader's own native config -- not a DFE
+The engine emits the receiver's and the loader's native config -- not a DFE
 wrapper the services then translate. This is what to read when a deployed pod's
 behaviour has to be traced back to a source definition. The flow
 is [source-flow.md](source-flow.md). The fields are
@@ -58,8 +58,6 @@ server:                           # Likewise grpc, otlp, splunk_hec and promethe
 | `ends_with` | `ends_with` |
 | `always` | no row, because `default_source` already sends an unmatched record there |
 
-## Compound conditions
-
 A match is one test, or `all` or `any` of several, nested up to four groups deep, and `negate` inverts the test or group it sits on. The receiver has `all` but no `any`, so the engine compiles a match to rows, any one of which matching labels the record:
 
 | Source match | Receiver rows |
@@ -75,7 +73,7 @@ A match that compiles to more than 32 rows is refused at save. Move the `any` ou
 
 Every save compiles the source's rows and checks them with scalo.rules as the receiver will. A refusal is a 422 `invalid_rule`, each problem with its field and, for `when`, its UTF-16 span in `rule_errors`. A stored block that no longer compiles is left out of the rule set with a loud warning rather than failing the whole receiver config, and `GET /api/v1/ingest/rules` lists it with `compiled: false`.
 
-## Rule order
+## Rule order and compatibility profiles
 
 Blocks run in the order `governance/settings/ingest-order.yaml` stores, one list per field. A block the order does not name runs after every one it does, sources by name, then profiles by id. The receiver's `default` runs last for each field and does not move. `GET /api/v1/ingest/rules` lists every block in the order it runs, with each one's warnings, among them the rows an earlier row always shadows. `POST /api/v1/ingest/rules/order` takes one field's full list with that list's `If-Match`.
 
@@ -87,16 +85,14 @@ Blocks run in the order `governance/settings/ingest-order.yaml` stores, one list
 | 422 `invalid_order` | a block listed twice, or the pinned `default` |
 | 428 | no `If-Match` |
 
-## Compatibility profiles
-
-A profile is versioned data in the dfe-schemas wheel, copied into the deploy repo's `config/compat-profiles/` at startup, never code. Its rows read another platform's header and set `_source`, `_org_id` or both. A source binds profiles with `compat_profiles`, else takes the deployment's list (`PUT /api/v1/ingest/compat`), and `[]` binds none.
+A compatibility profile is versioned data in the dfe-schemas wheel, copied into the deploy repo's `config/compat-profiles/` at startup, never code. Its rows read another platform's header and set `_source`, `_org_id` or both. A source binds profiles with `compat_profiles`, else takes the deployment's list (`PUT /api/v1/ingest/compat`), and `[]` binds none.
 
 - A row setting `_source` runs once for the deployment, with its `aliases` lookup filled from each bound source's `aliases.<profile>`, mapped to that source's label. A value no source aliases sets nothing.
-- A row setting `_org_id` compiles once per bound source, guarded with `_source equals <label>`, so it reads only that source's records. The receiver sets `_source` first in the same pass.
-- A row the profile lists under `opt_in` compiles only for a binding that names it.
+- A row setting `_org_id` compiles once per bound source, guarded with `_source equals <label>`, so it reads that source's records and no others. The receiver sets `_source` first in the same pass.
+- A row the profile lists under `opt_in` compiles just for a binding that names it.
 - One version of a profile compiles per deployment. A save binding a second is refused.
 
-`elastic-agent` routes on `data_stream.dataset`, Elastic's own identifier per source. `dfe-legacy-2x` reads a DFE 2.0 or 2.1 sender's `tags.event.category` and `tags.event.org_id`.
+`elastic-agent` routes on `data_stream.dataset`, Elastic's identifier per source. `dfe-legacy-2x` reads a DFE 2.0 or 2.1 sender's `tags.event.category` and `tags.event.org_id`.
 
 ## Ingest credentials and bearer listeners
 
@@ -114,8 +110,8 @@ with no lookup at all:
 
 1. The loader reads `_source` from the payload
 2. `_source` is the target table: `{default_db}.{_source}`
-3. `source_to_table` carries only the sources whose table name differs
-4. The schema for that table comes from the source definition
+3. `source_to_table` lists just the sources whose table name differs
+4. The table's columns come from ClickHouse `system.columns`, which the engine created from the source definition ([schema-sync.md](schema-sync.md))
 
 ```yaml
 # The compiled loader block (dfe-loader RoutingConfig):
@@ -129,5 +125,5 @@ A fetched source's fetcher is compiled with `org_id`, the first tenant id of the
 
 Every key the engine emits must exist in dfe-loader's `RoutingConfig`
 (`src/config/pipeline.rs`): serde drops an unknown key without complaint, so an
-invented one would silently leave the loader on its own default. The engine
+invented one would silently leave the loader on its default. The engine
 model is pinned to that struct by a test that reads the Rust source.

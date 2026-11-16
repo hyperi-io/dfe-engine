@@ -1,6 +1,6 @@
 # DFE Query API - Python client
 
-`dfe_engine.query.QueryClient` ships inside the dfe-engine image. dfe-engine is not published to PyPI, so code outside the image calls the [HTTP API](query-api.md) with its own HTTP client and a bearer token or API key.
+`dfe_engine.query.QueryClient` ships inside the dfe-engine image. dfe-engine is not published to PyPI, so code outside the image calls the [HTTP API](query-api.md) with any HTTP client and a bearer token or API key.
 
 ---
 
@@ -28,7 +28,7 @@
 
 ### Direct Mode (In-Process)
 
-Use inside the engine process. Direct mode runs the view through the engine's own `ViewExecutor` with an admin context:
+Use inside the engine process. Direct mode runs the view through the engine's `ViewExecutor` with an admin context:
 
 ```python
 from dfe_engine.query import QueryClient
@@ -72,7 +72,7 @@ df = result.to_pandas()
 
 ## Security Model
 
-A view is a ClickHouse parameterised view deployed through the governed DDL path and discovered by the engine's `ViewCatalog`. There is no YAML query registry and no per-query role list. The executor passes on only the parameters the view declares, unvalidated, and injects `org_id` from the auth context. A missing or mistyped parameter fails in ClickHouse.
+A view is a ClickHouse parameterised view deployed through the governed DDL path and discovered by the engine's `ViewCatalog`. There is no YAML query registry and no per-query role list. The executor passes on the parameters the view declares and drops the rest, unvalidated, and injects `org_id` from the auth context. A missing or mistyped parameter fails in ClickHouse.
 
 ```python
 result = client.query(
@@ -103,7 +103,7 @@ class QueryClient:
 
 ### Methods
 
-#### `query(query_label, params?, *, limit?, offset?, order_by?, order_dir?, after_key?, tiebreak_by?, after_tiebreak?, time_from?, time_to?, timeout_seconds?, store?, cache?) -> QueryResult`
+#### `query(query_label, params?, *, limit?, offset?, order_by?, order_dir?, after_key?, tiebreak_by?, after_tiebreak?, time_from?, time_to?, timeout_seconds?, cache?) -> QueryResult`
 
 Execute a labeled query and return result.
 
@@ -128,7 +128,7 @@ result = client.query(
 )
 ```
 
-**Parameters:**
+Parameters:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -144,8 +144,7 @@ result = client.query(
 | `time_from` | `str` | Start time (ISO8601) for time-bounded queries |
 | `time_to` | `str` | End time (ISO8601), defaults to now |
 | `timeout_seconds` | `int` | Query timeout (clamped to query/global max) |
-| `store` | `str` | Accepted and ignored: the view executor always runs in the data database |
-| `cache` | `bool` | Allow cached results (default: `True`) |
+| `cache` | `bool` | Allow cached results (default: `True`). No server-side result cache exists, so it changes nothing |
 
 To get a pandas DataFrame directly, call `.to_pandas()` on the `QueryResult`:
 
@@ -334,7 +333,7 @@ while result.metadata.has_more:
     )
 ```
 
-`after_key` is compared as the `order_by` column's type, so a timestamp goes as `"2024-01-15T12:00:00"` (with a fraction if the column has one), never a `datetime` or pandas `Timestamp` object. The key must be non-NULL, and without `tiebreak_by` it must be unique, or rows tying with the cursor are skipped. A view that declares its own `limit` parameter refuses keyset and offset paging.
+`after_key` is compared as the `order_by` column's type, so a timestamp goes as `"2024-01-15T12:00:00"` (with a fraction if the column has one), never a `datetime` or pandas `Timestamp` object. The key must be non-NULL, and without `tiebreak_by` it must be unique, or rows tying with the cursor are skipped. A view that declares a `limit` parameter refuses keyset and offset paging.
 
 ### Pagination Recommendations
 
