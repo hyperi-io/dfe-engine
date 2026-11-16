@@ -8,7 +8,7 @@
 
 # Hunt schedule smoothing
 
-Smoothing is a beta in 2.2.3, off by default. Turn it on with `hunts.smoothing.enabled: true` (`DFE_ENGINE_HUNTS_SMOOTHING_ENABLED=true` on the hunt runner), watch `dfe_hunt_smoothing_flatness`, and turn it off again if you don't like what you see: the schedule returns to the hash offsets. It has been tested against a 3-replica ClickHouse with 30 colliding hunts (the numbers are under "How we know it works"). It has not been proven at PB/day. Tracked in https://github.com/hyperi-io/dfe-engine/issues/864.
+Smoothing is a beta in 2.2.3, off by default. Turn it on with `hunts.smoothing.enabled: true` (`DFE_ENGINE_HUNTS_SMOOTHING_ENABLED=true` on the hunt runner), watch `dfe_hunt_smoothing_flatness`, and turn it off again if you don't like what you see: the schedule returns to the hash offsets. It has been tested against a 3-replica ClickHouse with 30 colliding hunts (the numbers are under "How we know it works"). It has not been proven at PB/day. Tracked in <https://github.com/hyperi-io/dfe-engine/issues/864>.
 
 Without the flag the schedule is the fixed offset: each rate hunt fires at an offset hashed from its id, within the first `hunts.phase_spread_fraction` of its interval (default 0.8, see [hunt-runner-scaling.md](hunt-runner-scaling.md#why-keda-and-a-worker-agree)). Every hunt query is tagged with a JSON `log_comment` naming the hunt and its fire, so ClickHouse attributes its cost to the hunt.
 

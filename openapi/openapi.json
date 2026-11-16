@@ -41527,8 +41527,19 @@
               "$ref": "#/components/schemas/HuntRuleEntry"
             },
             "type": "array",
-            "minItems": 1,
             "title": "Rules"
+          },
+          "query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Query",
+            "description": "The SQL a YAML hunt runs in place of rules, read from the deploy repo"
           },
           "customer_tenant_ids": {
             "additionalProperties": {
@@ -41564,8 +41575,7 @@
         "required": [
           "display_name",
           "cron",
-          "name",
-          "rules"
+          "name"
         ],
         "title": "HuntDetailResponse",
         "description": "Full hunt configuration returned from GET/create/update."
