@@ -62,7 +62,7 @@ for each hunt i, over its fires in the trailing window:
     c_i = p95 of each fire's sum(cpu_us)              the fire's CPU time
 ```
 
-`query_log_archive` carries `cpu_us` from dfe-schemas 0.2.31, and the applier swaps the new SELECT into an older view in place. On an archive still without the column, duration stands in for CPU and the runner logs that once. A hunt with no rows in the window stays on its current offset. A missing archive leaves every hunt where it is and logs once.
+`query_log_archive` carries `cpu_us` in its current schema (`tables/internal/query_log_archive.yaml` in dfe-schemas), and the applier swaps the new SELECT into an older view in place. On an archive still without the column, duration stands in for CPU and the runner logs that once. A hunt with no rows in the window stays on its current offset. A missing archive leaves every hunt where it is and logs once.
 
 On ClickHouse Cloud `system.query_log` is per node, and a server upgrade can rename it under the view (ClickHouse issue 124177, fixed in 124217). A view that has stopped filling shows as every hunt's cost going stale, and the loop stops moving anything rather than move on old numbers.
 
