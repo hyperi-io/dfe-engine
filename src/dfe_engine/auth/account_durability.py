@@ -49,6 +49,7 @@ from dfe_engine.gitcrud.routing import (
     pr_branch_name,
     route_write,
 )
+from dfe_engine.gitops.repo import GitopsRemoteError
 from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
@@ -350,14 +351,17 @@ def steady_state(
     *,
     environment: str,
     mode: str,
+    forge: ForgeProvider | None = None,
 ) -> AccountGitState:
     """Durability state for a named account with no write in flight (setup-status).
 
     ``merged`` compares the deploy repo's tracked-branch copy to the live hash: on
     a review-PR deployment the rotated hash sits on a side branch while the tracked
     branch still has the old one, so ``merged`` stays false until the PR is merged
-    (and the working clone next pulls it). ``pending`` is not reconstructed here --
-    the actionable PR/CLI detail is returned by the reset-password response.
+    (and the working clone next pulls it). While it is false, ``pending`` names the
+    review branch holding the live hash and, with no *forge*, the command that merges
+    it. Setup-status is public, so only the branches this clone already holds are
+    read and nothing reaches the forge.
     """
     if gc is None or account_store is None:
         return _FILE_SHARE_STATE
@@ -370,9 +374,46 @@ def steady_state(
     live = account_store.get(username)
     committed = stored is not None  # an account is committed on the tracked branch
     merged = committed and live is not None and stored.get("password_hash") == live.password_hash
+    pending = None
+    if committed and not merged and live is not None:
+        pending = _open_review(gc, username, live.password_hash, forge=forge, fetch=False)
     return AccountGitState(
-        enabled=True, auto_merge=state.effective, committed=committed, merged=merged, pending=None
+        enabled=True,
+        auto_merge=state.effective,
+        committed=committed,
+        merged=merged,
+        pending=pending,
     )
+
+
+def _open_review(
+    gc: GitCrud, username: str, password_hash: str, *, forge: ForgeProvider | None, fetch: bool
+) -> AccountGitPending | None:
+    """The unmerged review branch that carries *password_hash* for *username*, if any.
+
+    Both branch slug shapes (``dfe/governance/<user>/..`` and
+    ``dfe/governance/account-<user>/..``) match, because the branch is found by the
+    account file it changes, not by its name. With a *forge* the operator merges a PR
+    this layer cannot look up, so only the branch is named. Without one it also gets
+    the merge command. None when no branch holds the hash or the forge cannot be read.
+    """
+    cls = gc.resource_class(ACCOUNTS_CLASS)
+    file_name = f"{username}{cls.suffix}"
+    try:
+        changes = gc.repo.review_branch_files(cls.directory, bound="read", fetch=fetch)
+    except GitopsRemoteError as exc:
+        logger.warning("Review branches not read for the account", account=username, error=str(exc))
+        return None
+    branch = None
+    for change in changes:
+        if change.name == file_name:
+            doc = yaml_load_string(change.content) or {}
+            if doc.get("password_hash") == password_hash:
+                branch = change.branch
+    if branch is None:
+        return None
+    command = None if forge is not None else _cli_merge_command(gc, branch)
+    return AccountGitPending(branch=branch, command=command)
 
 
 def _account_rel(gc: GitCrud, username: str) -> str:
@@ -388,6 +429,7 @@ def remote_state(
     *,
     environment: str,
     mode: str,
+    forge: ForgeProvider | None = None,
 ) -> AccountGitState:
     """Fetch the deploy repo and report whether main now carries the live password.
 
@@ -400,7 +442,9 @@ def remote_state(
     if gc is None or account_store is None:
         return _FILE_SHARE_STATE
     if not gc.repo.has_remote:
-        return steady_state(gc, account_store, username, environment=environment, mode=mode)
+        return steady_state(
+            gc, account_store, username, environment=environment, mode=mode, forge=forge
+        )
 
     state = resolve_state(gc, environment=environment, mode=mode, warn=False)
     content = gc.repo.read_remote_file(_account_rel(gc, username))
@@ -409,10 +453,17 @@ def remote_state(
     if content is not None and live is not None:
         doc = yaml_load_string(content) or {}
         merged = doc.get("password_hash") == live.password_hash
+    pending = None
+    if not merged and live is not None:
+        pending = _open_review(gc, username, live.password_hash, forge=forge, fetch=True)
     # This poll only runs for the git-backed local admin after a committing write, so
     # the change is committed (on main if merged, else the review branch).
     return AccountGitState(
-        enabled=True, auto_merge=state.effective, committed=True, merged=merged, pending=None
+        enabled=True,
+        auto_merge=state.effective,
+        committed=True,
+        merged=merged,
+        pending=pending,
     )
 
 

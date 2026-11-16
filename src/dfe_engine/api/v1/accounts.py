@@ -1029,6 +1029,7 @@ async def account_git_status(
             username,
             environment=settings.env,
             mode=settings.gitops.mode,
+            forge=getattr(request.app.state, "forge", None),
         )
     )
 

@@ -33,6 +33,7 @@ from tests.support.present import present
 # A well-formed-looking bcrypt hash: durability compares hash STRINGS, never verifies.
 _HASH_A = "$2b$12$" + "A" * 53
 _HASH_B = "$2b$12$" + "B" * 53
+_HASH_C = "$2b$12$" + "C" * 53
 
 DEV = "local"  # is_dev_posture(): dev/local/test/ci
 PROD = "production"
@@ -237,6 +238,117 @@ def test_steady_state_unmerged_when_not_yet_persisted(tmp_path):
     store.put(_account(password_hash=_HASH_A))  # live only, nothing in the deploy repo
     state = ad.steady_state(gc, store, "admin", environment=DEV, mode="solo")
     assert state.merged is False
+
+
+def _rotate_to_review_branch(gc: GitCrud, password_hash: str, forge=None):
+    """Rotate the admin's hash in production+team, which lands on a review branch."""
+    outcome = ad.publish_account(
+        gc,
+        forge,
+        environment=PROD,
+        mode="team",
+        username="admin",
+        doc=_doc(_account(password_hash=password_hash)),
+        summary="reset password",
+        actor="admin",
+    )
+    assert outcome is not None
+    assert outcome.branch
+    return outcome
+
+
+def test_steady_state_hands_back_the_merge_command_after_a_reload(tmp_path):
+    gc = _gc(tmp_path)
+    store = AccountStore(tmp_path / "accounts")
+    _publish_seed(gc, _account(password_hash=_HASH_A))
+    outcome = _rotate_to_review_branch(gc, _HASH_B)
+    store.put(_account(password_hash=_HASH_B))
+
+    # No write in flight: this is what setup-status reads after the page reloads.
+    state = ad.steady_state(gc, store, "admin", environment=PROD, mode="team")
+
+    assert state.merged is False
+    assert state.pending is not None
+    assert state.pending.branch == outcome.branch
+    assert state.pending.pr_url is None
+    assert f"git merge --no-ff {outcome.branch}" in (state.pending.command or "")
+
+
+def test_steady_state_names_only_the_branch_where_a_forge_owns_the_pr(tmp_path):
+    gc = _gc(tmp_path)
+    store = AccountStore(tmp_path / "accounts")
+    _publish_seed(gc, _account(password_hash=_HASH_A))
+    outcome = _rotate_to_review_branch(gc, _HASH_B, forge=_FakeForge())
+    store.put(_account(password_hash=_HASH_B))
+
+    state = ad.steady_state(gc, store, "admin", environment=PROD, mode="team", forge=_FakeForge())
+
+    assert state.pending is not None
+    assert state.pending.branch == outcome.branch
+    assert state.pending.command is None  # the operator merges the PR, not a CLI branch
+
+
+def test_steady_state_picks_the_branch_that_carries_the_live_hash(tmp_path):
+    gc = _gc(tmp_path)
+    store = AccountStore(tmp_path / "accounts")
+    _publish_seed(gc, _account(password_hash=_HASH_A))
+    first = _rotate_to_review_branch(gc, _HASH_B)
+    second = _rotate_to_review_branch(gc, _HASH_C)
+
+    store.put(_account(password_hash=_HASH_B))
+    state = ad.steady_state(gc, store, "admin", environment=PROD, mode="team")
+    assert state.pending is not None
+    assert state.pending.branch == first.branch
+
+    store.put(_account(password_hash=_HASH_C))
+    state = ad.steady_state(gc, store, "admin", environment=PROD, mode="team")
+    assert state.pending is not None
+    assert state.pending.branch == second.branch
+
+
+def test_steady_state_has_no_pending_when_no_branch_carries_the_live_hash(tmp_path):
+    gc = _gc(tmp_path)
+    store = AccountStore(tmp_path / "accounts")
+    _publish_seed(gc, _account(password_hash=_HASH_A))
+    _rotate_to_review_branch(gc, _HASH_B)
+    store.put(_account(password_hash=_HASH_C))  # live moved on, no branch holds it
+
+    state = ad.steady_state(gc, store, "admin", environment=PROD, mode="team")
+
+    assert state.merged is False
+    assert state.pending is None
+
+
+def test_steady_state_has_no_pending_once_merged(tmp_path):
+    gc = _gc(tmp_path)
+    store = AccountStore(tmp_path / "accounts")
+    _publish_seed(gc, _account(password_hash=_HASH_A))
+    _rotate_to_review_branch(gc, _HASH_B)
+    store.put(_account(password_hash=_HASH_A))  # live matches main
+
+    state = ad.steady_state(gc, store, "admin", environment=PROD, mode="team")
+
+    assert state.merged is True
+    assert state.pending is None
+
+
+def test_remote_state_hands_back_the_merge_command_for_an_open_review(tmp_path):
+    remote = GitopsRepo(local_path=str(tmp_path / "remote"), repo_url="", push=False)
+    _publish_seed(GitCrud(remote), _account(password_hash=_HASH_A))
+    branch = porcelain.active_branch(str(remote.path)).decode()
+    engine = GitopsRepo(
+        local_path=str(tmp_path / "engine"), repo_url=str(remote.path), push=False, branch=branch
+    )
+    engine_gc = GitCrud(engine)
+    outcome = _rotate_to_review_branch(engine_gc, _HASH_B)
+    store = AccountStore(tmp_path / "live")
+    store.put(_account(password_hash=_HASH_B))
+
+    state = ad.remote_state(engine_gc, store, "admin", environment=PROD, mode="team")
+
+    assert state.merged is False
+    assert state.pending is not None
+    assert f"git merge --no-ff {outcome.branch}" in (state.pending.command or "")
 
 
 # -- Hydration + seed -----------------------------------------
