@@ -8,9 +8,9 @@
 
 # Hunt schedule smoothing
 
-Smoothing is held back from 2.2.2 until it has scaled testing, so no setting turns it on in this release. It comes in 2.2.3 as an opt-in beta behind `hunts.smoothing.enabled`, off by default. Tracked in https://github.com/hyperi-io/dfe-engine/issues/864.
+Smoothing is a beta in 2.2.3, off by default. Turn it on with `hunts.smoothing.enabled: true` (`DFE_ENGINE_HUNTS_SMOOTHING_ENABLED=true` on the hunt runner), watch `dfe_hunt_smoothing_flatness`, and turn it off again if you don't like what you see: the schedule returns to the hash offsets. It has been tested against a 3-replica ClickHouse with 30 colliding hunts (the numbers are under "How we know it works"). It has not been proven at PB/day. Tracked in https://github.com/hyperi-io/dfe-engine/issues/864.
 
-What 2.2.2 ships is the fixed offset: each rate hunt fires at an offset hashed from its id, within the first `hunts.phase_spread_fraction` of its interval (default 0.8, see [hunt-runner-scaling.md](hunt-runner-scaling.md#why-keda-and-a-worker-agree)). Every hunt query is also tagged with a JSON `log_comment`, so ClickHouse attributes its cost to the hunt.
+Without the flag the schedule is the fixed offset: each rate hunt fires at an offset hashed from its id, within the first `hunts.phase_spread_fraction` of its interval (default 0.8, see [hunt-runner-scaling.md](hunt-runner-scaling.md#why-keda-and-a-worker-agree)). Every hunt query is tagged with a JSON `log_comment` naming the hunt and its fire, so ClickHouse attributes its cost to the hunt.
 
 Rate hunts (`schedule.mode: rate`, the default) fire on fixed intervals. Left alone, the heavy ones stack into ClickHouse CPU and memory peaks. Smoothing learns what each hunt costs and drifts WHEN it fires, never how often, so the sum flattens over time. Anchored hunts and one-off monsters are meant to spike, so the loop leaves them alone.
 
@@ -36,10 +36,10 @@ So the loop weights both, and memory is also a hard constraint: no move may push
 
 1. The operator's interval is untouched. Only the offset into it moves.
 2. Every hunt query carries a JSON `log_comment` naming the hunt and its fire. ClickHouse records that in `system.query_log`, and the `query_log_archive` view keeps it with the real cost columns.
-3. One runner replica leads. Each cycle it reads every hunt's trailing p95 cost from the archive, sums the pulses into a load curve over the hyperperiod, finds the tallest bucket, and moves ONE hunt that fires into it by a bounded step toward the deepest trough. A move is kept only if it lowers the objective by more than a hysteresis margin, and a hunt just moved sits out a cool-down.
-4. The new offset is written to `hunt_schedule`, and in the beta the runner, the API's next-due and the KEDA due count all read that one table, so every reader agrees on the next fire. In 2.2.2 only the KEDA due count reads it, and the runner and the API compute the hash offset themselves.
+3. One runner leads each cycle, through a lease in the schema lock table that lasts the whole cycle, so the fleet runs one cycle per window whichever runner wins. The leader reads every hunt's trailing cost from the archive, sums the pulses into a load curve over the hyperperiod, and moves ONE hunt from a bucket above the mean by a bounded step to the offset that lowers the objective most. A move is kept only if it lowers the variance of the curve by more than the hysteresis margin, and a hunt just moved sits out a cool-down. Ties between offsets break on the curve blurred 3, 7 and 15 buckets wide, which slopes toward a hole several buckets away, so a hunt stuck in a pack of alike hunts still walks out one step per cycle.
+4. The new offset is written to `hunt_schedule`. The runner, the API's next-due and the KEDA due count all read that one table, so every reader agrees on the next fire.
 
-Moving an offset changes one window's length and nothing else. A hunt moved later runs one longer window. A hunt moved earlier runs one shorter window. Coverage stays contiguous because every window starts at the last watermark.
+A move writes one row in `hunt_schedule` and touches nothing a running hunt holds: not its lease, not its watermark, not an operator's run-now. Every window starts at the last watermark, so coverage stays contiguous whatever the move. The cost is one odd window: moved later, the hunt runs one extra short window, moved earlier before its fire it runs one shorter window, moved earlier after its fire one longer window. A hunt mid-run finishes under its lease, and the lease check runs before any claim, so a move never double-runs a fire.
 
 With the flag off, nothing reads the archive, nothing leads, and every offset is the hash. Turning the flag off after a run rewrites `hunt_schedule` back to the hash offsets on the runner's next start.
 
@@ -47,7 +47,7 @@ Rescheduling fixes contention and nothing else. A query that busts the memory li
 
 ## What a hunt costs
 
-Per hunt, per fire, over a trailing window (`hunts.smoothing.window_days`):
+Per hunt, per fire, over a trailing window (`hunts.smoothing.window_days`), at the quantile `hunts.smoothing.cost_quantile` (0.95):
 
 $$
 m_i = \operatorname{p95}_{\text{fires}}\bigl(\max \texttt{memory\_usage}\bigr), \qquad
@@ -68,38 +68,51 @@ On ClickHouse Cloud `system.query_log` is per node, and a server upgrade can ren
 
 ## Settings
 
-The 2.2.3 beta's settings. None of them exists in 2.2.2.
-
 | Setting | Default | Meaning |
 |---|---|---|
 | `hunts.smoothing.enabled` | false | the master switch |
 | `hunts.smoothing.cycle_seconds` | 300 | how often the leader runs a cycle |
 | `hunts.smoothing.bucket_seconds` | 30 | Delta, the load curve's resolution |
-| `hunts.smoothing.window_days` | 7 | the trailing window the p95 costs come from |
+| `hunts.smoothing.window_days` | 7 | the trailing window the costs come from |
+| `hunts.smoothing.cost_quantile` | 0.95 | the quantile over a hunt's fires in the window that stands for its cost |
 | `hunts.smoothing.max_step_fraction` | 0.1 | the most an offset moves per cycle, as a share of its interval |
 | `hunts.smoothing.hysteresis` | 0.01 | the least relative drop in the objective that keeps a move |
 | `hunts.smoothing.cooldown_cycles` | 2 | cycles a moved hunt sits out |
 | `hunts.smoothing.weight_memory` | 0.5 | w_m, with w_c = 1 - w_m |
 | `hunts.smoothing.memory_cap_bytes` | 0 | M_cap for the hard constraint, 0 reads `max_server_memory_usage` |
+| `hunts.smoothing.horizon_max_seconds` | 86400 | cap on the hyperperiod H, the least common multiple of the intervals |
 | `smoothing.settling_period`, `autodisable.*` | - | design only, see the top of this page |
 
-Environment form: `DFE_ENGINE_HUNTS_SMOOTHING_<SETTING>`.
+Environment form: `DFE_ENGINE_HUNTS_SMOOTHING_<SETTING>`. Fixed in code, not settings: the tie-break blurs the curve 3, 7 and 15 buckets wide, and the two observed gauges look back one hour.
 
 ## Metrics
 
-The beta's leading runner emits these each cycle, through scalo's OTel exporter ([observability-standard.md](../deployment/observability-standard.md)):
+The leading runner emits these each cycle, through scalo's OTel exporter ([observability-standard.md](../deployment/observability-standard.md)):
 
 - `dfe_hunt_smoothing_enabled` (every runner, 1 when the flag is on), `dfe_hunt_smoothing_flatness` (peak/mean of P), `dfe_hunt_smoothing_objective` (J).
 - `dfe_hunt_cost_mem_bytes{hunt}`, `dfe_hunt_cost_duration_ms{hunt}`.
 - `dfe_hunt_phase_offset{hunt}`, `dfe_hunt_phase_shift_total{hunt}`.
+- `dfe_hunt_observed_overlap_peak` and `dfe_hunt_observed_mem_peak_bytes`: what the archive saw over the trailing hour, the most hunt queries finishing in one bucket and the largest summed peak memory. These are the server's own numbers, not the model's, so the two can be checked against each other.
 
-J trending down is the loop working. J low and flat is settled. The runner's own `dfe_hunt_backlog`, `dfe_hunt_runs_total` and `dfe_hunt_overruns_total` ship in 2.2.2.
+J trending down is the loop working. J low and flat is settled. Peak over mean is not monotone, the variance is. The runner's own `dfe_hunt_backlog`, `dfe_hunt_runs_total` and `dfe_hunt_overruns_total` ship already.
+
+## How we know it works
+
+Three readings, each proving one thing. None of them needs PB/day.
+
+The maths first, with no ClickHouse in the room. The optimiser is handed fleets built to hurt: ten identical hunts stacked on one offset, random fleets, a fleet whose only legal moves swap a 2 for a 1. The tests check what the design claims. The total load never changes when an offset moves. Every accepted move lowers the objective and never raises it. No move leaves its bound or its step. Hysteresis holds a tiny gain, cool-down holds a hunt just moved, the memory cap holds a move that would stack memory. A hundred identical hunts move one per cycle and never herd. The stacked ten go from a peak 20 times the mean to twice the mean, the best the window allows, and then the loop stops on its own.
+
+Then the plumbing, on a real ClickHouse, with time driven by a clock the test owns so nothing races a real second. With the flag off the table holds exactly the hash offsets, and turning the flag off puts them back. Materialise keeps a learned offset for an unchanged hunt and drops it when the interval changes. Real hunt fires leave the archive rows the cost model reads, grouped per fire. A cycle moves one of two colliding hunts and leaves a hunt with no cost where it is. Two runners race for the lease and exactly one leads, and the lease lasts a whole cycle so a second runner ticking seconds later does not run another.
+
+Then real load, on a shared 3-replica ClickHouse, run on 2026-11-16: 30 hunts on 300, 900, 1800 and 3600 s intervals, 16 of them heavy GROUP BYs over 20 million rows, their ids picked so every hash offset landed in the same 30 s of its interval. The flag stayed off for an hour, then on. The gate is two numbers the leader itself emits, read from the archive and not from the model. With the flag off, the busiest 30 s bucket held 12 hunt queries and their summed peak memory reached 8.1 GB. In the first full hour with the flag on, 9 and 6.5 GB, while the model's own flatness fell from 23.7 to about 3 and the objective fell on every one of the 21 moves, each by its 10% step. Memory is the one that tracks the model. The overlap count weighs a light hunt the same as a heavy one, so light hunts that barely move the objective can keep finishing together and hold it up while memory falls.
+
+What this does not prove: the size of the benefit at PB/day, and the code 241 cliff under a real server memory limit. Those wait for a cycle at scale, and the beta flag is what lets this ship without them. One move per cycle across the fleet also means settling time grows with fleet size: 30 colliding hunts took about two hours at the 5 minute cycle, so a fleet of hundreds settles over days at the defaults.
 
 ---
 
 ## Derek's maths geek section
 
-> With apologies for Derek's maths-geek section here. This is Derek's hand-written maths, scanned from his notebook and set in type.
+> With apologies for Derek's maths-geek section here. This is Derek's hand-written maths, scanned from his notebook and set in type, and the optimiser in `hunts/smoothing_model.py` is built from it.
 
 ### Setup
 
