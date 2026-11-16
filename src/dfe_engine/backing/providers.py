@@ -7,10 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The provider catalogue, and what a deployment's provider key makes of a service.
 
-The catalogue is DATA whose source of truth is dfe-infra's ``providers.yaml``, so a
-new provider, or a change to what one leaves the deploy repo to set, is an edit
-there rather than an engine release. It resolves the way the app manifest does:
-an explicit path, then ``DFE_ENGINE_PROVIDER_CATALOGUE_FILE``, then the snapshot bundled
+The catalogue is DATA, the ``providers.yaml`` beside this module, so a deployer can
+change it without an engine release. It resolves the way the app manifest does:
+an explicit path, then ``DFE_ENGINE_PROVIDER_CATALOGUE_FILE``, then the copy bundled
 in the image.
 
 A service is ``dfe``-run unless the deployer states a provider. A key the catalogue
