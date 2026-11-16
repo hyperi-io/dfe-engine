@@ -1081,7 +1081,7 @@ def get_app(service: str, instance: str, user: CurrentUser, request: Request) ->
         service=app.service,
         display_name=desc.display_name or None,
         instance=app.instance,
-        telemetry_name=app.telemetry_name,
+        telemetry_name=appconfig.reporting_name(app, request.app.state.settings),
         scale_deployed=desc.scale_deployed,
         multiplicity=str(desc.multiplicity),
         has_compiled_routing=desc.has_compiled_routing,
@@ -2378,10 +2378,10 @@ def _series_window(
     return window, bucket
 
 
-def _telemetry_name(*, app: AppInstance, process: str | None) -> str:
-    """The OTel name the instance reports under, or the named process."""
+def _telemetry_name(*, app: AppInstance, process: str | None, settings: Any) -> str:
+    """The OTel name the instance reports under in this deployment, or the named process."""
     if process is None:
-        return app.telemetry_name
+        return appconfig.reporting_name(app, settings)
     if process not in _engine_processes(service=app.service):
         raise ProblemError(
             404, f"{app.service!r} has no process {process!r}", code="unknown_process"
@@ -2412,7 +2412,7 @@ def get_status(
     """Whether the instance, or a process deployed from its image, is reporting, and since when."""
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
-    telemetry_name = _telemetry_name(app=app, process=process)
+    telemetry_name = _telemetry_name(app=app, process=process, settings=request.app.state.settings)
     try:
         status = _reader(request, client).status(telemetry_name)
     except MetricsUnavailableError as exc:
@@ -2438,7 +2438,7 @@ def get_metrics(
     """Throughput, CPU, memory and saturation for the instance or a process deployed from its image."""
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
-    telemetry_name = _telemetry_name(app=app, process=process)
+    telemetry_name = _telemetry_name(app=app, process=process, settings=request.app.state.settings)
     # A stack-wide app reports under its own name, so only the overlay says this instance exists.
     _overlay(_gitcrud(request), app)
     # Only an app whose manifest declares a transport carries records to count.
@@ -2471,7 +2471,7 @@ def get_totals(
     """
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
-    telemetry_name = _telemetry_name(app=app, process=process)
+    telemetry_name = _telemetry_name(app=app, process=process, settings=request.app.state.settings)
     _overlay(_gitcrud(request), app)
     reader = _reader(request, client)
     try:
@@ -2513,7 +2513,7 @@ def get_resource_series(
     """
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
-    telemetry_name = _telemetry_name(app=app, process=process)
+    telemetry_name = _telemetry_name(app=app, process=process, settings=request.app.state.settings)
     reader = _reader(request, client)
     try:
         retention = reader.retention_seconds()

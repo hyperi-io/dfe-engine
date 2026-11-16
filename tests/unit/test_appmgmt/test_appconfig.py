@@ -774,6 +774,27 @@ class TestOneContainerForEverySource:
         assert not appconfig.shares_one_container(descriptor(FETCHER), settings)
         assert not (tmp_path / "app-config").exists()
 
+    @pytest.mark.parametrize(
+        ("target", "service", "instance", "expected"),
+        [
+            # One shared container reports as the app, never as an instance name.
+            ("docker", FETCHER, "adsb-tracks", FETCHER),
+            ("kubernetes", FETCHER, "adsb-tracks", f"{FETCHER}-adsb-tracks"),
+            # A transform runs a container per source in either target.
+            ("docker", VRL, "edge", f"{VRL}-edge"),
+            ("docker", LOADER, "default", LOADER),
+        ],
+        ids=["docker-shared-fetcher", "k8s-fetcher", "docker-transform", "docker-loader"],
+    )
+    def test_an_instance_reports_under_the_name_its_container_sets(
+        self, tmp_path, target, service, instance, expected
+    ):
+        settings = _settings(tmp_path, target=target)
+
+        app = instances.instance_of(service, instance)
+
+        assert appconfig.reporting_name(app, settings) == expected
+
     def test_retiring_the_fetcher_s_instances_leaves_every_transform_s_alone(self, crud, tmp_path):
         # A transform runs one container per source, so its index, directories and
         # env files are its own and a fetcher's retirement must not reach them.

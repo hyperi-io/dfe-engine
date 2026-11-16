@@ -640,6 +640,32 @@ class TestRulesVolumePreviewWiring:
         assert estimate["band"] == "unmeasured"
         assert estimate["window_minutes"] == 60
 
+    def test_the_reading_is_not_stored_with_the_rule(self, client, admin_headers):
+        # A reading of the last hour is stale as soon as data arrives, so a later
+        # view of the rule must not replay it.
+        assert (
+            client.post(
+                "/api/v1/rules", json=_sample_create_payload(), headers=admin_headers
+            ).status_code
+            == 201
+        )
+        update = client.put(
+            "/api/v1/rules/test_rule", json=_sample_create_payload(), headers=admin_headers
+        )
+        hyperdx = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_RENDERED_SQL},
+            headers=admin_headers,
+        )
+        assert update.status_code == 200, update.text
+        assert hyperdx.status_code == 201, hyperdx.text
+
+        for name in ("test_rule", hyperdx.json()["id"]):
+            viewed = client.get(f"/api/v1/rules/{name}", headers=admin_headers)
+
+            assert viewed.status_code == 200, viewed.text
+            assert not any(w.startswith(self._UNKNOWN) for w in viewed.json()["warnings"])
+
     def test_opting_out_of_the_numbers_still_warns(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules",
