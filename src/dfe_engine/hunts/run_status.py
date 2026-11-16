@@ -25,12 +25,11 @@ table: whether a runner exists at all, from the per-runner heartbeat rather than
 from a lease that only exists while a hunt is mid-execution.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier
+from dfe_engine.hunts.ch_coordinator import STOP_MARK
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,17 +60,22 @@ def _query(database: str) -> str:
         "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database, ids bound
         "coalesce(s.overruns, 0), coalesce(s.aggressive, 0), "
         "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0), "
-        "toUnixTimestamp(tupleElement(s.disabled, 1)), coalesce(tupleElement(s.disabled, 2), '') "
+        "toUnixTimestamp(tupleElement(d.disabled, 1)), coalesce(tupleElement(d.disabled, 2), '') "
         "FROM (SELECT arrayJoin({ids:Array(String)}) AS hunt_id) h "
         "LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
         f"FROM {db}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(lease_until, claimed) AS lu "
         f"FROM {db}.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(overrun_count, updated) AS overruns, "
-        "argMax(too_aggressive, updated) AS aggressive, "
-        # As a tuple, because argMax skips a NULL argument and a cleared auto-disable is one.
-        "argMax((auto_disabled_at, auto_disabled_reason), updated) AS disabled "
+        "argMax(too_aggressive, updated) AS aggressive "
         f"FROM {db}.hunt_state GROUP BY hunt_id) s USING (hunt_id) "
+        # The stop is its own marker row, read as one tuple: argMax skips a NULL
+        # argument, and a cleared stop is one.
+        f"LEFT JOIN (SELECT substring(k, 1, length(k) - {len(STOP_MARK)}) AS hunt_id, "
+        "d AS disabled FROM (SELECT hunt_id AS k, "
+        "argMax((auto_disabled_at, auto_disabled_reason), updated) AS d "
+        f"FROM {db}.hunt_state WHERE endsWith(hunt_id, {{mark:String}}) GROUP BY hunt_id)) "
+        "d USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, max(fire) AS last_fire, "
         "argMax(rows_written, fire) AS rows_written FROM ("
         "SELECT hunt_id, fire, argMax(status, updated) AS status, "
@@ -117,7 +121,9 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
     """
     if not hunt_ids:
         return {}
-    rows = ch.query(_query(database), parameters={"ids": list(hunt_ids)}).result_rows
+    rows = ch.query(
+        _query(database), parameters={"ids": list(hunt_ids), "mark": STOP_MARK}
+    ).result_rows
     status: dict[str, RunStatus] = {}
     for row in rows:
         hunt_id = str(row[0])
@@ -138,26 +144,19 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
 
 
 def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
-    """Insert the hunt_state row that replaces a disabled one. Only the API calls it.
+    """Write the hunt's stop marker row with a NULL time, which lifts the runner's stop.
 
-    The overrun count and too-aggressive flag are read back and carried over, so
-    clearing the auto-disable leaves the UI's overrun signal as it was.
+    The stop is its own row, keyed ``<hunt_id>#stopped``, so the overrun counters are
+    untouched and there is no read to race the runner.
 
     Args:
-        ch: a ClickHouse client exposing ``query`` and ``insert``.
+        ch: a ClickHouse client exposing ``insert``.
         database: the data database the coordination tables live in.
         hunt_id: the hunt to re-enable.
     """
-    rows = ch.query(
-        "SELECT argMax(overrun_count, updated), argMax(too_aggressive, updated) "  # noqa: S608 - quoted configured database, id bound
-        f"FROM {quote_identifier(database)}.hunt_state WHERE hunt_id = {{h:String}}",
-        parameters={"h": hunt_id},
-    ).result_rows
-    overrun_count = int(rows[0][0]) if rows else 0
-    too_aggressive = int(rows[0][1]) if rows else 0
     ch.insert(
         "hunt_state",
-        [[hunt_id, overrun_count, too_aggressive, None, ""]],
+        [[f"{hunt_id}{STOP_MARK}", 0, 0, None, ""]],
         column_names=[
             "hunt_id",
             "overrun_count",

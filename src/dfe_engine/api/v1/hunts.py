@@ -43,6 +43,7 @@ from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.customers import CUSTOMER_TENANT_IDS, hunt_customers
 from dfe_engine.hunts.hunt_config_registry import (
@@ -255,6 +256,15 @@ class _HuntConfigFields(BaseModel):
 class HuntWriteRequest(_HuntConfigFields):
     """Hunt scheduler payload for create/update (without hunt file ``name``)."""
 
+    # None keeps the stored flag on an update, so an edit of the cron never re-enables
+    # a hunt an operator stopped. A new hunt is on.
+    enabled: bool | None = Field(  # ty: ignore[incompatible-attribute-override]  # the write model widens the field to mean "unchanged"
+        default=None,
+        description=(
+            "Whether the runner fires this hunt. Omitted on an update keeps the stored "
+            "value. True also clears a stop the runner put on the hunt."
+        ),
+    )
     rules: list[str] = Field(
         min_length=1,
         description="Rule names, each the ``{name}.yaml`` rule file the hunt runner reads",
@@ -308,6 +318,15 @@ class HuntDetailResponse(_HuntConfigFields):
             "Each customer's tenant ids, resolved when the hunt was saved: the _org_id "
             "values the runner reads. A customer missing here stops every run."
         ),
+    )
+    # The runner's stop rides on GET alone: a save answers with what it stored, and a
+    # save naming enabled true has just cleared the stop.
+    auto_disabled_at: int | None = Field(
+        default=None,
+        description="When the runner stopped the hunt after repeated resource-limit failures, epoch seconds",
+    )
+    auto_disabled_reason: str = Field(
+        default="", description="The ClickHouse error category and code that tripped the stop"
     )
 
     @classmethod
@@ -412,24 +431,37 @@ def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
         return {}
 
 
-def _clear_auto_disable_if_enabled(name: str, *, enabled: bool) -> None:
-    """Re-enable a hunt the runner auto-disabled when the save turns it on.
+def _clear_auto_disable(name: str, *, enabled: bool | None, outcome: WriteOutcome | None) -> None:
+    """Lift the runner's stop on a hunt when a direct save names ``enabled: true``.
 
-    Only a save that names ``enabled: true`` clears the stop, so an edit of the cron
-    or the rules leaves a hunt the runner stopped where it is. Best-effort like the
-    run state: the YAML is already saved, so an unreachable ClickHouse leaves the
-    stop in place for the next save rather than failing this one.
+    An edit that omits ``enabled`` leaves the stop where it is, and so does a save
+    routed to a review branch, since nothing has changed on the branch the runner
+    reads. The YAML is saved by now, so a failure is told to the caller as 503
+    rather than answering 200 over a hunt that is still stopped.
+
+    Raises:
+        ProblemError: 503 ``auto_disable_not_cleared`` when ClickHouse did not take it.
     """
-    if not enabled:
+    if enabled is not True or (outcome is not None and outcome.review_required):
         return
     try:
-        run = _run_status_for([name], int(time.time())).get(name)
+        client, db = _data_database_client()
+        run = read_run_status(client, db, [name], int(time.time())).get(name)
         if run is None or run.auto_disabled_at is None:
             return
-        client, db = _data_database_client()
         clear_auto_disable(client, db, name)
     except Exception as exc:
-        logger.warning(f"could not clear the auto-disable on hunt '{name}': {exc}")
+        raise ProblemError(
+            503,
+            f"Hunt '{name}' was saved, but the runner's stop on it could not be cleared: "
+            f"{exc}. Repeat the request once ClickHouse answers.",
+            code="auto_disable_not_cleared",
+        ) from exc
+
+
+def _enabled_flag(value: Any) -> bool:
+    """A stored ``enabled`` as the flag the runner reads: absent is on, anything but True is off."""
+    return value is None or value is True
 
 
 def _learned_offsets(enabled: bool) -> dict[str, tuple[int, int]]:
@@ -490,7 +522,7 @@ def _hunt_row_to_summary(
         too_aggressive=run.too_aggressive,
         run_requested=run.run_requested,
         next_due=_next_due(row, now, fraction, learned),
-        enabled=bool(row.get("enabled", True)),
+        enabled=_enabled_flag(row.get("enabled")),
         auto_disabled_at=run.auto_disabled_at,
         auto_disabled_reason=run.auto_disabled_reason,
     )
@@ -624,12 +656,17 @@ def get_hunt(
     user: CurrentUser,
     registry: HuntConfigReg,
 ) -> HuntDetailResponse:
-    """Get full hunt configuration by file name."""
+    """Get full hunt configuration by file name, with the runner's stop on it if any."""
     try:
         config = registry.get(name)
     except HuntConfigNotFoundError:
         raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
-    return HuntDetailResponse.from_stored_config(name, config)
+    detail = HuntDetailResponse.from_stored_config(name, config)
+    run = _run_status_for([name], int(time.time())).get(name)
+    if run is not None:
+        detail.auto_disabled_at = run.auto_disabled_at
+        detail.auto_disabled_reason = run.auto_disabled_reason
+    return detail
 
 
 @router.put(
@@ -660,12 +697,12 @@ def update_hunt(
 
     _refuse_new_rule_names(body.rules, stored)
     config = body.to_config_dict(hunt_name=name)
+    if body.enabled is None and "enabled" in stored:
+        config["enabled"] = stored["enabled"]
     _validate_hunt_config(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
-    _clear_auto_disable_if_enabled(
-        name, enabled="enabled" in body.model_fields_set and body.enabled
-    )
+    _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(name, config)

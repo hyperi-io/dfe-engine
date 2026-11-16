@@ -616,6 +616,19 @@ def test_the_back_off_doubles_from_its_first_step_up_to_its_cap():
     assert set(gaps[3:]) == {120}
 
 
+def test_autodisable_off_in_settings_counts_nothing():
+    from dfe_engine.settings import HuntAutodisableSettings, HuntsSettings
+
+    off = HuntFailures.from_settings(
+        HuntsSettings(autodisable=HuntAutodisableSettings(enabled=False, failures=1))
+    )
+    assert off.limit_tripped("h", 0, _code(241)) is None
+    on = HuntFailures.from_settings(
+        HuntsSettings(autodisable=HuntAutodisableSettings(enabled=True, failures=1))
+    )
+    assert on.limit_tripped("h", 0, _code(241)) == "resource_limit:241"
+
+
 def test_the_back_off_takes_its_start_and_cap_from_the_hunts_settings():
     from dfe_engine.settings import HuntsSettings
 
@@ -800,6 +813,10 @@ def _code(code: int) -> Exception:
             3, 3600, [(0, 516), (10, 241), (20, 241)], None, id="an_auth_failure_is_not_a_hit"
         ),
         pytest.param(0, 3600, [(0, 241), (10, 241), (20, 241)], None, id="autodisable_off"),
+        pytest.param(
+            2, 60, [(0, 241), (60, 241)], "resource_limit:241", id="a_hit_on_the_window_edge_counts"
+        ),
+        pytest.param(2, 60, [(0, 241), (61, 241)], None, id="one_past_the_edge_does_not"),
     ],
 )
 def test_limit_tripped_counts_only_resource_limits_inside_the_window(failures, window, hits, want):

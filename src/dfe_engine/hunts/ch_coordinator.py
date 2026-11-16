@@ -112,21 +112,17 @@ class Lease:
 
 @dataclass(frozen=True, slots=True)
 class HuntStateRow:
-    """Persisted UI signal for a hunt: overrun count, too-aggressive, and an auto-disable.
+    """Persisted UI signal for a hunt: overrun count and too-aggressive.
 
     Attributes:
         hunt_id: The hunt.
         overrun_count: Fires deferred because the previous one still ran.
         too_aggressive: Whether the schedule is tighter than the hunt keeps up with.
-        auto_disabled_at: Epoch seconds the runner stopped the hunt, None while it runs.
-        auto_disabled_reason: The error category and code that tripped it, empty otherwise.
     """
 
     hunt_id: str
     overrun_count: int
     too_aggressive: bool
-    auto_disabled_at: int | None = None
-    auto_disabled_reason: str = ""
 
 
 _STATE_COLUMNS = [
@@ -136,6 +132,10 @@ _STATE_COLUMNS = [
     "auto_disabled_at",
     "auto_disabled_reason",
 ]
+
+# The runner's stop on a hunt is its own hunt_state row, keyed ``<hunt_id>#stopped``, so
+# the counter row's read-then-write never carries it and no overrun can overwrite it.
+STOP_MARK = "#stopped"
 
 
 class ChCoordinator:
@@ -527,69 +527,48 @@ class ChCoordinator:
     def get_state(self, hunt_id: str) -> HuntStateRow | None:
         """The hunt's persisted overrun / too-aggressive signal, if any."""
         rows = self._ch.query(
-            "SELECT overrun_count, too_aggressive, toUnixTimestamp(auto_disabled_at), "  # noqa: S608 - quoted configured database, values bound
-            f"auto_disabled_reason FROM {self._qdb}.hunt_state "
+            f"SELECT overrun_count, too_aggressive FROM {self._qdb}.hunt_state "  # noqa: S608 - quoted configured database, values bound
             "WHERE hunt_id = {h:String} ORDER BY updated DESC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
         if not rows:
             return None
-        disabled_at = rows[0][2]
         return HuntStateRow(
-            hunt_id=hunt_id,
-            overrun_count=int(rows[0][0]),
-            too_aggressive=bool(rows[0][1]),
-            auto_disabled_at=int(disabled_at) if disabled_at is not None else None,
-            auto_disabled_reason=str(rows[0][3] or ""),
+            hunt_id=hunt_id, overrun_count=int(rows[0][0]), too_aggressive=bool(rows[0][1])
         )
 
     def auto_disabled_hunts(self) -> dict[str, str]:
         """Every hunt the runner has stopped, as ``hunt_id -> reason``, read fresh each tick.
 
-        The API clears an auto-disable by writing a row with a NULL time, so a
+        The API clears a stop by writing its marker row with a NULL time, so a
         re-enabled hunt leaves this map on the next read and fires again. argMax skips
         a NULL argument, so the latest row is taken as a tuple, which is never NULL.
         """
         rows = self._ch.query(
-            "SELECT hunt_id, tupleElement(s, 2) FROM (SELECT hunt_id, "  # noqa: S608 - quoted configured database
+            "SELECT k, tupleElement(s, 2) FROM (SELECT hunt_id AS k, "  # noqa: S608 - quoted configured database, values bound
             "argMax((auto_disabled_at, auto_disabled_reason), updated) AS s "
-            f"FROM {self._qdb}.hunt_state GROUP BY hunt_id) WHERE tupleElement(s, 1) IS NOT NULL"
+            f"FROM {self._qdb}.hunt_state WHERE endsWith(hunt_id, {{mark:String}}) "
+            "GROUP BY hunt_id) WHERE tupleElement(s, 1) IS NOT NULL",
+            parameters={"mark": STOP_MARK},
         ).result_rows
-        return {str(r[0]): str(r[1]) for r in rows}
+        return {str(r[0])[: -len(STOP_MARK)]: str(r[1]) for r in rows}
 
     def _write_state(self, row: HuntStateRow) -> None:
-        """Write the hunt's whole state row, since a ReplacingMergeTree row replaces all columns."""
-        disabled_at = (
-            datetime.fromtimestamp(row.auto_disabled_at, tz=UTC)
-            if row.auto_disabled_at is not None
-            else None
-        )
+        """Write the hunt's counter row. The stop lives in its own row, so this never carries it."""
         self._ch.insert(
             "hunt_state",
-            [
-                [
-                    row.hunt_id,
-                    row.overrun_count,
-                    1 if row.too_aggressive else 0,
-                    disabled_at,
-                    row.auto_disabled_reason,
-                ]
-            ],
+            [[row.hunt_id, row.overrun_count, 1 if row.too_aggressive else 0, None, ""]],
             column_names=_STATE_COLUMNS,
             database=self._db,
         )
 
     def record_auto_disable(self, hunt_id: str, reason: str, now: int) -> None:
-        """Stop the hunt: stamp when and why, keeping its overrun counters."""
-        current = self.get_state(hunt_id)
-        self._write_state(
-            HuntStateRow(
-                hunt_id=hunt_id,
-                overrun_count=current.overrun_count if current else 0,
-                too_aggressive=current.too_aggressive if current else False,
-                auto_disabled_at=now,
-                auto_disabled_reason=reason,
-            )
+        """Stop the hunt: write its marker row with when and why. No read, so nothing to race."""
+        self._ch.insert(
+            "hunt_state",
+            [[f"{hunt_id}{STOP_MARK}", 0, 0, datetime.fromtimestamp(now, tz=UTC), reason]],
+            column_names=_STATE_COLUMNS,
+            database=self._db,
         )
 
     # ---- runs (row count + operator run-now) --------------------------
@@ -655,12 +634,4 @@ class ChCoordinator:
         """
         current = self.get_state(hunt_id)
         count = (current.overrun_count if current else 0) + 1
-        self._write_state(
-            HuntStateRow(
-                hunt_id=hunt_id,
-                overrun_count=count,
-                too_aggressive=True,
-                auto_disabled_at=current.auto_disabled_at if current else None,
-                auto_disabled_reason=current.auto_disabled_reason if current else "",
-            )
-        )
+        self._write_state(HuntStateRow(hunt_id=hunt_id, overrun_count=count, too_aggressive=True))

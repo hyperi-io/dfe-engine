@@ -220,7 +220,7 @@ def test_enabling_an_auto_disabled_hunt_clears_the_auto_disable(
     assert ch.inserts == [
         (
             "hunt_state",
-            [[created_hunt, 3, 1, None, ""]],
+            [[f"{created_hunt}#stopped", 0, 0, None, ""]],
             [
                 "hunt_id",
                 "overrun_count",
@@ -253,7 +253,7 @@ def test_a_save_that_does_not_re_enable_an_auto_disabled_hunt_writes_no_state(
     assert ch.inserts == []
 
 
-def test_a_save_still_succeeds_when_the_auto_disable_cannot_be_cleared(
+def test_a_clear_clickhouse_did_not_take_is_a_503_not_a_quiet_200(
     client, admin_headers, created_hunt, coordination
 ):
     ch = coordination(1700000000, "resource_limit:241")
@@ -265,4 +265,46 @@ def test_a_save_still_succeeds_when_the_auto_disable_cannot_be_cleared(
     resp = client.put(
         f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=True), headers=admin_headers
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "auto_disable_not_cleared"
+
+
+def test_a_save_routed_to_a_review_branch_lifts_no_stop(created_hunt, coordination):
+    from dfe_engine.api.v1.hunts import _clear_auto_disable
+    from dfe_engine.gitcrud.routing import WriteOutcome
+
+    ch = coordination(1700000000, "resource_limit:241")
+    routed = WriteOutcome(changed=True, review_required=True, branch="dfe/hunt/x/1")
+    _clear_auto_disable(created_hunt, enabled=True, outcome=routed)
+    assert ch.inserts == []
+    _clear_auto_disable(created_hunt, enabled=True, outcome=WriteOutcome(changed=True))
+    assert len(ch.inserts) == 1
+
+
+def test_an_edit_that_omits_enabled_keeps_a_hunt_disabled(client, admin_headers, created_hunt):
+    off = client.put(
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=False), headers=admin_headers
+    )
+    assert off.status_code == 200
+    assert off.json()["enabled"] is False
+    edit = client.put(
+        f"/api/v1/hunts/{created_hunt}",
+        json=_update_body(cron="*/7 * * * *"),
+        headers=admin_headers,
+    )
+    assert edit.status_code == 200
+    assert edit.json()["enabled"] is False
+    assert (
+        client.get(f"/api/v1/hunts/{created_hunt}", headers=admin_headers).json()["enabled"]
+        is False
+    )
+
+
+def test_the_detail_carries_the_runners_stop_so_a_direct_link_shows_it(
+    client, admin_headers, created_hunt, coordination
+):
+    coordination(1700000000, "resource_limit:241")
+    detail = client.get(f"/api/v1/hunts/{created_hunt}", headers=admin_headers).json()
+    assert detail["enabled"] is True
+    assert detail["auto_disabled_at"] == 1700000000
+    assert detail["auto_disabled_reason"] == "resource_limit:241"

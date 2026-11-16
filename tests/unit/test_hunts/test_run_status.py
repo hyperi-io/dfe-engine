@@ -140,18 +140,20 @@ def test_the_query_selects_the_auto_disable_columns_from_hunt_state():
     ch = _Rows([])
     read_run_status(ch, "dfe", ["h"], now=1000)
     # One argMax over the tuple: argMax skips a NULL argument, and a cleared stop is one.
-    assert "argMax((auto_disabled_at, auto_disabled_reason), updated) AS disabled" in ch.sql
-    assert "toUnixTimestamp(tupleElement(s.disabled, 1))" in ch.sql
+    assert "argMax((auto_disabled_at, auto_disabled_reason), updated) AS d" in ch.sql
+    assert "WHERE endsWith(hunt_id, {mark:String})" in ch.sql
+    assert "toUnixTimestamp(tupleElement(d.disabled, 1))" in ch.sql
 
 
-def test_clearing_an_auto_disable_inserts_a_row_that_keeps_the_overrun_signal():
+def test_clearing_an_auto_disable_writes_the_stop_marker_with_no_time_and_reads_nothing():
     ch = _Recording([[3, 1]])
     clear_auto_disable(ch, "dfe", "h")
-    assert ch.parameters == {"h": "h"}
+    # No read: the counters live in the hunt's own row and are not touched.
+    assert ch.parameters is None
     assert ch.inserts == [
         (
             "hunt_state",
-            [["h", 3, 1, None, ""]],
+            [["h#stopped", 0, 0, None, ""]],
             [
                 "hunt_id",
                 "overrun_count",
@@ -162,12 +164,6 @@ def test_clearing_an_auto_disable_inserts_a_row_that_keeps_the_overrun_signal():
             "dfe",
         )
     ]
-
-
-def test_clearing_a_hunt_with_no_state_row_writes_zeros():
-    ch = _Recording([])
-    clear_auto_disable(ch, "dfe", "fresh")
-    assert ch.inserts[0][1] == [["fresh", 0, 0, None, ""]]
 
 
 def test_no_hunt_ids_asks_clickhouse_nothing():
@@ -181,7 +177,7 @@ def test_the_hunt_ids_are_passed_as_a_bound_parameter():
     # than interpolated into the SQL.
     ch = _Rows([])
     read_run_status(ch, "dfe", ["a", "b"], now=1000)
-    assert ch.parameters == {"ids": ["a", "b"]}
+    assert ch.parameters == {"ids": ["a", "b"], "mark": "#stopped"}
     assert "{ids:Array(String)}" in ch.sql
 
 
