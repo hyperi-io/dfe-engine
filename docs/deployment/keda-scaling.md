@@ -79,7 +79,7 @@ scalo registers the composite as a bare `scaling_pressure` gauge. An app emits i
 
 With no matching rows the query answers 0. That is a successful answer, so it replaces the cached value rather than holding it, and the CPU trigger sets the replica count. A failed query (ClickHouse unreachable, a timeout, a bad query) alone returns the last-good value, or the `cold_hold` of 0 when there is none yet.
 
-KEDA polls the shim at `GET /q/<name>`. Its built-in queries are in `src/dfe_engine/keda_shim/queries.yaml`, and a YAML file at `DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG` is deep-merged over them, so a changed query or a new signal is a config edit with no rebuild. A list in the override replaces the built-in list. Each query takes these keys:
+The charts' pressure trigger polls `GET /keda/pressure?service=<app>` (dfe-infra `argocd/values/apps/_fragments/pressure-trigger.yaml`), the alias for the `pressure` query of the generic `GET /q/{name}` route, and `/keda/hunt-backlog` is the alias for `backlog`. Its built-in queries are in `src/dfe_engine/keda_shim/queries.yaml`, and a YAML file at `DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG` is deep-merged over them, so a changed query or a new signal is a config edit with no rebuild. A list in the override replaces the built-in list. Each query takes these keys:
 
 | Key | Meaning |
 |---|---|
@@ -103,8 +103,7 @@ The docs site fills the table below from the dfe-infra chart renders at the stac
 | App | KEDA | Triggers by default |
 |-----|------|---------------------|
 | dfe-receiver / dfe-loader | on | CPU ~70% and scalo ScalingPressure (shim, target 70) |
-| dfe-archiver, dfe-transform-elastic / vrl | on | CPU ~70%, plus ScalingPressure on the single, scale and mesh profiles |
-| dfe-transform-vector | on | CPU ~70% |
+| dfe-archiver, dfe-transform-elastic / vrl / vector | on | CPU ~70%, plus ScalingPressure on the single, scale and mesh profiles |
 | dfe-ui | on | CPU ~70% |
 <!-- /dfe-keda-table -->
 

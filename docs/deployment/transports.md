@@ -62,6 +62,16 @@ flowchart LR
 
 Values in the deploy repo select the broker. `kafka.provider` chooses which operator deploys it in-cluster: Strimzi by default, Redpanda behind a licence gate (`redpanda.acceptLicense`). `kafka.mode: external` with `kafka.external.bootstrap` points the stack at a broker you run, and `kafka.external.provider` names it: `msk`, `confluent-cloud` or `redpanda-cloud` (dfe-infra `helm/charts/kafka/values.yaml`). Deployed brokers and MSK use SCRAM-SHA-512, and Confluent Cloud takes its API key over SASL PLAIN. The apps reject a broker that takes IAM auth alone, such as MSK Serverless (`msk_iam`, scalo-rs `src/transport/kafka/config.rs`). Nothing in the engine changes for any of these. Sizing and the swap matrix: [backing-services.md](backing-services.md).
 
+## Buffering without a bus
+
+On the direct transport no stage stores records, and no fetcher runs, so the receiver is the one stage that holds them. What it holds depends on the receiver's acknowledgement mode, and dfe-infra's `apps/dfe-receiver/profile-mesh.yaml` sets the figures for both.
+
+With acknowledgements on, the default, the receiver builds no buffer or spool. It holds each request until the loader confirms delivery. Once that hold expires the sender gets a 503 and retries from its copy.
+
+With acknowledgements off, the buffer and spool apply. mesh sets `buffer.memory_limit` to 3 GiB of the pod's 4Gi limit, so back-pressure starts at 2.4 GiB, and turns on `buffer.spillover` with 20 GiB of node-local spool per replica. A loader outage shorter than that is invisible to senders, and a longer one back-pressures them (503) until the loader returns. A record held there has had its 2xx, so it is lost if the pod dies, the trade for turning acknowledgements off.
+
+The knobs are the receiver's (`config.example.yaml`, `buffer:`), so a deployer tunes them in the overlay like any other dial.
+
 ## The mesh tier balances between pools with a listener per pool
 
 Status: design built, never run against a live cluster. The charts, the `mesh` profile and the engine's pool addressing are on main, and dfe-infra's `bootstrap.sh` stops on `DFE_PROFILE=mesh` ([dfe-infra#875](https://github.com/hyperi-io/dfe-infra/issues/875)).

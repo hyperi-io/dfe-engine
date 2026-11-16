@@ -25,25 +25,26 @@ A label-based query interface over ClickHouse parameterised views, with multi-te
 
 ## Security Model
 
-A view execution checks scope, keeps the declared parameters, injects `org_id` and runs the view on ClickHouse.
+The route checks `query:execute` and fetches the view through the executor. The executor then keeps the declared parameters, injects `org_id` and runs the view on ClickHouse.
 
 ```mermaid
 sequenceDiagram
     accTitle: L4 Detail -- View execution
-    accDescr: The client posts to a view's execute route. The API checks the caller's scope. The executor looks the view up in the catalog, keeps the parameters the view declares, injects org_id from the auth context and runs the view on ClickHouse, and the rows return to the client as JSON.
+    accDescr: The client posts to a view's execute route. The API asks the executor for the view, which reads it from the catalog. The API then calls execute, and the executor keeps the declared parameters, injects org_id and runs the view on ClickHouse. The rows return to the executor, the result to the API and JSON to the client.
     participant client as Client
     participant api as Engine API
-    participant catalog as ViewCatalog
     participant executor as ViewExecutor
+    participant catalog as ViewCatalog
     participant ch as ClickHouse
     client->>api: Execute view
-    api->>api: Check query:execute
-    api->>catalog: Look up view
-    catalog-->>executor: View and parameters
-    executor->>executor: Keep declared parameters
-    executor->>executor: Inject org_id
+    api->>executor: get_view
+    executor->>catalog: Look up view
+    catalog-->>executor: View definition
+    executor-->>api: View definition
+    api->>executor: execute
     executor->>ch: Run view
-    ch-->>api: Rows
+    ch-->>executor: Rows
+    executor-->>api: Result
     api-->>client: JSON
 ```
 
