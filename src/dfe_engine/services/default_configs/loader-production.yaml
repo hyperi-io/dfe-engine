@@ -87,7 +87,6 @@ metadata:
     - metadata.tags
   tags_output: _tags
   drop_tags: false
-  capture_json: true
   json_output: _json
   capture_raw: true
   raw_source_fields: []
