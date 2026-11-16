@@ -244,21 +244,14 @@ class _HuntConfigFields(BaseModel):
     scheduling_mode: str | None = None
     min_interval_seconds: int | None = None
     explain_queries: bool | None = None
-    enabled: bool = Field(
-        default=True,
-        description=(
-            "Whether the runner fires this hunt. False keeps its YAML, state and watermark "
-            "and fires nothing."
-        ),
-    )
 
 
 class HuntWriteRequest(_HuntConfigFields):
     """Hunt scheduler payload for create/update (without hunt file ``name``)."""
 
-    # None keeps the stored flag on an update, so an edit of the cron never re-enables
-    # a hunt an operator stopped. A new hunt is on.
-    enabled: bool | None = Field(  # ty: ignore[incompatible-attribute-override]  # the write model widens the field to mean "unchanged"
+    # The read model carries its own enabled flag: here None keeps the stored flag on
+    # an update, so an edit of the cron never re-enables a hunt an operator stopped.
+    enabled: bool | None = Field(
         default=None,
         description=(
             "Whether the runner fires this hunt. Omitted on an update keeps the stored "
@@ -307,6 +300,13 @@ class HuntDetailResponse(_HuntConfigFields):
 
     name: str = Field(description="Hunt file name (YAML stem)")
     display_name: str = Field(description="Resolved human-readable label")  # ty: ignore[invalid-mutable-override]  # the response model narrows the field, never writes it
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether the runner fires this hunt. False keeps its YAML, state and watermark "
+            "and fires nothing."
+        ),
+    )
     rules: list[HuntRuleEntry] = Field(min_length=1)
     # A stored hunt naming none is shown, and runs nothing.
     customers: list[str] = Field(

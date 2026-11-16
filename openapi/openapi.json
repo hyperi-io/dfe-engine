@@ -41511,16 +41511,16 @@
             ],
             "title": "Explain Queries"
           },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Hunt file name (YAML stem)"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
             "description": "Whether the runner fires this hunt. False keeps its YAML, state and watermark and fires nothing.",
             "default": true
-          },
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Hunt file name (YAML stem)"
           },
           "rules": {
             "items": {
