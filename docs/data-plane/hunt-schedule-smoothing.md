@@ -52,17 +52,17 @@ Per hunt, per fire, over a trailing window (`hunts.smoothing.window_days`), at t
 $$
 m_i = \operatorname{p95}_{\text{fires}}\bigl(\max \texttt{memory\_usage}\bigr), \qquad
 d_i = \operatorname{p95}_{\text{fires}}\Bigl(\sum \texttt{query\_duration\_ms}\Bigr), \qquad
-c_i = d_i
+c_i = \operatorname{p95}_{\text{fires}}\Bigl(\sum \texttt{cpu\_us}\Bigr)
 $$
 
 ```text
 for each hunt i, over its fires in the trailing window:
     m_i = p95 of each fire's max(memory_usage)        the fire's peak memory
     d_i = p95 of each fire's sum(query_duration_ms)   the fire's duration, in buckets
-    c_i = d_i                                         CPU, proxied by duration
+    c_i = p95 of each fire's sum(cpu_us)              the fire's CPU time
 ```
 
-`query_log_archive` has no CPU column, so duration stands in for CPU. A hunt with no rows in the window stays on its current offset. A missing archive leaves every hunt where it is and logs once.
+`query_log_archive` carries `cpu_us` in its current schema (`tables/internal/query_log_archive.yaml` in dfe-schemas), and the applier swaps the new SELECT into an older view in place. On an archive still without the column, duration stands in for CPU and the runner logs that once. A hunt with no rows in the window stays on its current offset. A missing archive leaves every hunt where it is and logs once.
 
 On ClickHouse Cloud `system.query_log` is per node, and a server upgrade can rename it under the view (ClickHouse issue 124177, fixed in 124217). A view that has stopped filling shows as every hunt's cost going stale, and the loop stops moving anything rather than move on old numbers.
 
@@ -95,7 +95,7 @@ The leading runner emits these each cycle, through scalo's OTel exporter ([obser
 - `dfe_hunt_smoothing_enabled` (every runner, 1 when the flag is on), `dfe_hunt_smoothing_flatness` (peak/mean of P), `dfe_hunt_smoothing_objective` (J).
 - `dfe_hunt_cost_mem_bytes{hunt}`, `dfe_hunt_cost_duration_ms{hunt}`.
 - `dfe_hunt_phase_offset{hunt}`, `dfe_hunt_phase_shift_total{hunt}`.
-- `dfe_hunt_observed_overlap_peak` and `dfe_hunt_observed_mem_peak_bytes`: what the archive saw over the trailing hour, the most hunt queries finishing in one bucket and the largest summed peak memory. These are the server's own numbers, not the model's, so the two can be checked against each other.
+- `dfe_hunt_observed_overlap_peak`, `dfe_hunt_observed_mem_peak_bytes` and `dfe_hunt_observed_cpu_wait_seconds`: what the archive saw over the trailing hour, the most hunt queries finishing in one bucket, the largest summed peak memory, and the CPU wait those queries summed, 0 on an archive without `cpu_wait_us`. These are the server's own numbers, not the model's, so the two can be checked against each other.
 
 J trending down is the loop working. J low and flat is settled. Peak over mean is not monotone, the variance is. The runner's own `dfe_hunt_backlog`, `dfe_hunt_runs_total` and `dfe_hunt_overruns_total` ship already.
 
