@@ -16,7 +16,7 @@ services:
 
   # For `make e2e-server`. single-node.xml adds the Keeper the replicated tables need.
   clickhouse:
-    image: clickhouse/clickhouse-server:26.3.17.56@sha256:422be85ae7344058369cdd366ac0efea9daa8428b55c9cf50258e83a7d12fcb3
+    image: clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a
     environment:
       CLICKHOUSE_PASSWORD: ${DFE_ENGINE_CLICKHOUSE_PASSWORD:-dfe-local-dev}
       # The engine creates roles, quotas and row policies for each org.

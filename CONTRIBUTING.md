@@ -61,52 +61,6 @@ affected (e.g., `api`, `auth`, `core`, `cli`, `docs`).
 
 semantic-release works out the version from the commit types, following [Semantic Versioning 2.0.0](https://semver.org/). Never edit a version number by hand.
 
-## Developer Certificate of Origin and sign-off
-
-This project uses the Developer Certificate of Origin (DCO), so every
-contributor certifies they have the right to submit their contribution.
-
-By making a contribution to this project, you certify that:
-
-1. The contribution was created in whole or in part by you and you have the
-   right to submit it under the license indicated in the file, or
-
-2. The contribution is based upon previous work that, to the best of your
-   knowledge, is covered under an appropriate open source license and you
-   have the right under that license to submit that work with modifications,
-   or
-
-3. The contribution was provided directly to me by some other person who
-   certified (1), (2) or (3) and you have not modified it.
-
-4. You understand and agree that this project and the contribution are public
-   and that a record of the contribution (including all personal information
-   you submit with it, including your sign-off) is maintained indefinitely
-   and may be redistributed consistent with this project or the license(s)
-   involved.
-
-You must sign off each commit to indicate your acceptance of the DCO. Combine
-the signoff with your conventional commit message:
-
-```bash
-git commit --signoff -m "feat(auth): add two-factor authentication"
-```
-
-This produces:
-
-```text
-feat(auth): add two-factor authentication
-
-Signed-off-by: Your Name <your.email@example.com>
-```
-
-Make sure your Git configuration has your correct name and email:
-
-```bash
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-```
-
 ## License for Contributions
 
 All contributions to this project are licensed under the Business Source
@@ -124,14 +78,13 @@ local dfe-deploy clone, see [docs/local-dev.md](docs/local-dev.md).
 
 ## How to Contribute
 
-Fork the repository and branch from `main`. Commit in the format above, sign off
-every commit, test the change, and open a pull request that says what it does.
+Fork the repository and branch from `main`. Commit in the format above, test the
+change, and open a pull request that says what it does.
 A question that is not a bug goes in an issue.
 
 Before you open it, check:
 
 - [ ] Commits follow the conventional commit format
-- [ ] All commits are signed off (DCO)
 - [ ] Tests pass (if applicable)
 - [ ] Documentation is updated (if applicable)
 

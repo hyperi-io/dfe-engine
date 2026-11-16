@@ -75,6 +75,7 @@ jobs:
             exit 0
           fi
 
+          # Close any prior auto-sync PRs so only one types sync PR is open at a time
           export GH_TOKEN="${DFE_UI_TOKEN}"
           while IFS= read -r pr_num; do
             [ -z "$pr_num" ] && continue
