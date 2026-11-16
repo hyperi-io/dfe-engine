@@ -1013,7 +1013,7 @@ that tests which source a record is has this as its field.
 # shadow every rule after it.
 
 # Keys the engine sets on the compiled fetcher stanza. A source may not carry them.
-_FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
+_FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic", "topic_per_dump_unit"})
 
 # Contact details the logger masks are personal data, not secrets, so a source may commit them.
 _PERSONAL_WORDS = frozenset({"email", "phone"})
@@ -1105,7 +1105,8 @@ class SourceFetcher(BaseModel):
     under the source's name for a family the app manifest declares keyed. The
     engine owns ``enabled`` and ``topic`` on that stanza: ``topic`` selects
     whether records land on the source's own topic (and table) or on the shared
-    ``main`` landing.
+    ``main`` landing. It also sets ``topic_per_dump_unit`` false on a keyed family's
+    stanza, so a dump unit lands on that topic rather than on ``<topic>-<unit>``.
     """
 
     source_type: str = Field(
