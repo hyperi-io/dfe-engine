@@ -16,7 +16,7 @@ decision this code makes rather than something the query says.
 
 from __future__ import annotations
 
-from dfe_engine.hunts.run_status import live_runner_count, read_run_status
+from dfe_engine.hunts.run_status import clear_auto_disable, live_runner_count, read_run_status
 
 
 class _Rows:
@@ -32,8 +32,41 @@ class _Rows:
         return type("Result", (), {"result_rows": self._rows})()
 
 
-def _row(hunt_id, wm=0, lease=0, overruns=0, aggressive=0, last_fire=0, rows=0, pending=0):
-    return [hunt_id, wm, lease, overruns, aggressive, last_fire, rows, pending]
+class _Recording(_Rows):
+    """A client that also records what is inserted."""
+
+    def __init__(self, rows: list[list]) -> None:
+        super().__init__(rows)
+        self.inserts: list[tuple] = []
+
+    def insert(self, table: str, data: list[list], column_names: list[str], database: str):
+        self.inserts.append((table, data, column_names, database))
+
+
+def _row(
+    hunt_id,
+    wm=0,
+    lease=0,
+    overruns=0,
+    aggressive=0,
+    last_fire=0,
+    rows=0,
+    pending=0,
+    disabled_at=None,
+    disabled_reason="",
+):
+    return [
+        hunt_id,
+        wm,
+        lease,
+        overruns,
+        aggressive,
+        last_fire,
+        rows,
+        pending,
+        disabled_at,
+        disabled_reason,
+    ]
 
 
 def test_a_hunt_that_has_never_run_reports_nothing_rather_than_zero():
@@ -81,6 +114,58 @@ def test_a_queued_run_is_reported_as_requested():
     assert status.run_requested is True
 
 
+def test_a_hunt_that_was_never_auto_disabled_reports_neither_field():
+    status = read_run_status(_Rows([_row("h")]), "dfe", ["h"], now=1000)["h"]
+    assert status.auto_disabled_at is None
+    assert status.auto_disabled_reason == ""
+
+
+def test_an_auto_disabled_hunt_reports_when_and_why():
+    status = read_run_status(
+        _Rows([_row("h", disabled_at=950, disabled_reason="resource_limit:241")]),
+        "dfe",
+        ["h"],
+        now=1000,
+    )["h"]
+    assert status.auto_disabled_at == 950
+    assert status.auto_disabled_reason == "resource_limit:241"
+
+
+def test_a_null_reason_reads_as_empty():
+    status = read_run_status(_Rows([_row("h", disabled_reason=None)]), "dfe", ["h"], now=1000)["h"]
+    assert status.auto_disabled_reason == ""
+
+
+def test_the_query_selects_the_auto_disable_columns_from_hunt_state():
+    ch = _Rows([])
+    read_run_status(ch, "dfe", ["h"], now=1000)
+    # One argMax over the tuple: argMax skips a NULL argument, and a cleared stop is one.
+    assert "argMax((auto_disabled_at, auto_disabled_reason), updated) AS d" in ch.sql
+    assert "WHERE endsWith(hunt_id, {mark:String})" in ch.sql
+    assert "toUnixTimestamp(tupleElement(d.disabled, 1))" in ch.sql
+
+
+def test_clearing_an_auto_disable_writes_the_stop_marker_with_no_time_and_reads_nothing():
+    ch = _Recording([[3, 1]])
+    clear_auto_disable(ch, "dfe", "h")
+    # No read: the counters live in the hunt's own row and are not touched.
+    assert ch.parameters is None
+    table, rows, columns, database = ch.inserts[0]
+    assert (table, database) == ("hunt_state", "dfe")
+    assert columns == [
+        "hunt_id",
+        "overrun_count",
+        "too_aggressive",
+        "auto_disabled_at",
+        "auto_disabled_reason",
+        "updated",
+    ]
+    # Its own version stamp: a clear left to the column default is the same block as
+    # the last clear, which ClickHouse drops as a duplicate on a replicated table.
+    assert rows[0][:5] == ["h#stopped", 0, 0, None, ""]
+    assert rows[0][5].tzinfo is not None
+
+
 def test_no_hunt_ids_asks_clickhouse_nothing():
     ch = _Rows([])
     assert read_run_status(ch, "dfe", [], now=1000) == {}
@@ -92,7 +177,7 @@ def test_the_hunt_ids_are_passed_as_a_bound_parameter():
     # than interpolated into the SQL.
     ch = _Rows([])
     read_run_status(ch, "dfe", ["a", "b"], now=1000)
-    assert ch.parameters == {"ids": ["a", "b"]}
+    assert ch.parameters == {"ids": ["a", "b"], "mark": "#stopped"}
     assert "{ids:Array(String)}" in ch.sql
 
 

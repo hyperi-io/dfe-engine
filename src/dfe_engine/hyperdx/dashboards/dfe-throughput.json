@@ -1,6 +1,7 @@
 {
   "version": "0.1.0",
   "name": "DFE Throughput",
+  "description": "Bytes are an estimate: the tiles sum the stored size of each event, which runs above the wire size on small events, because sizing the text of every row in the range timed out.",
   "tiles": [
     {
       "id": "events-total",
@@ -31,7 +32,7 @@
       "w": 4,
       "h": 3,
       "config": {
-        "name": "Bytes ingested",
+        "name": "Bytes ingested (est.)",
         "source": "all_sources",
         "displayType": "number",
         "numberFormat": {
@@ -42,7 +43,7 @@
             "aggFn": "sum",
             "aggCondition": "",
             "aggConditionLanguage": "lucene",
-            "valueExpression": "coalesce(length(_raw), length(toString(_json)))"
+            "valueExpression": "coalesce(length(_raw), byteSize(_json))"
           }
         ],
         "where": "",
@@ -103,6 +104,7 @@
         "name": "Ingest lag p95 (ms)",
         "source": "all_sources",
         "displayType": "number",
+        "numberFormat": { "output": "number", "mantissa": 0 },
         "select": [
           {
             "aggFn": "quantile",
@@ -258,7 +260,7 @@
       "w": 12,
       "h": 6,
       "config": {
-        "name": "Top orgs by volume",
+        "name": "Top orgs by volume (est. bytes)",
         "source": "all_sources",
         "displayType": "table",
         "select": [
@@ -273,7 +275,7 @@
             "aggFn": "sum",
             "aggCondition": "",
             "aggConditionLanguage": "lucene",
-            "valueExpression": "coalesce(length(_raw), length(toString(_json)))",
+            "valueExpression": "coalesce(length(_raw), byteSize(_json))",
             "alias": "bytes"
           }
         ],

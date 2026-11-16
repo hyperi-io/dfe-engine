@@ -482,7 +482,8 @@ class TestVolumePreview:
         assert result.cost_estimate.estimated_rows is None
         assert result.cost_estimate.window_minutes == 60
         assert result.cost_estimate.warnings == [_NO_CLICKHOUSE]
-        assert _NO_CLICKHOUSE in result.rule.warnings
+        assert result.volume_warnings == [_NO_CLICKHOUSE]
+        assert _NO_CLICKHOUSE not in result.rule.warnings
 
     def test_opting_out_of_the_numbers_keeps_the_warning(self, service):
         result = service.create_rule(
@@ -493,7 +494,8 @@ class TestVolumePreview:
         )
 
         assert result.cost_estimate is None
-        assert _NO_CLICKHOUSE in result.rule.warnings
+        assert result.volume_warnings == [_NO_CLICKHOUSE]
+        assert _NO_CLICKHOUSE not in result.rule.warnings
 
     def test_a_disabled_guard_warns_nothing_and_measures_only_on_request(self):
         hunts = HuntsSettings(detection_guard=DetectionGuardSettings(enabled=False))
@@ -512,7 +514,7 @@ class TestVolumePreview:
 
         assert quiet.cost_estimate is None
         assert asked.cost_estimate is not None
-        assert _NO_CLICKHOUSE not in quiet.rule.warnings + asked.rule.warnings
+        assert quiet.volume_warnings == asked.volume_warnings == []
 
     def test_a_zero_window_takes_the_deployment_window(self):
         hunts = HuntsSettings(detection_guard=DetectionGuardSettings(preview_window_minutes=15))

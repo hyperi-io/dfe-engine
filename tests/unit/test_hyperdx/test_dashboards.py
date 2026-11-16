@@ -197,6 +197,33 @@ def test_every_throughput_tile_names_all_sources():
     ] == []
 
 
+def test_the_lag_percentile_tile_rounds_to_whole_milliseconds():
+    """A quantile is a float, so the tile needs a format or it shows 10137.149999999994."""
+    config = _throughput_tiles()["lag-p95"]["config"]
+
+    assert config["numberFormat"] == {"output": "number", "mantissa": 0}
+
+
+def test_throughput_byte_tiles_never_serialise_json():
+    """A byte tile sizes `_json` with byteSize, never by serialising it.
+
+    `length(toString(_json))` builds the text of every row in the range: 11.2 s
+    over 2M rows against 0.22 s for `byteSize(_json)`, which is why the Bytes
+    ingested and Top orgs by volume tiles timed out at the proxy.
+    """
+    sizing = {
+        tile["config"]["name"]: entry["valueExpression"]
+        for tile in _throughput_tiles().values()
+        for entry in tile["config"]["select"]
+        if "_json" in entry.get("valueExpression", "")
+    }
+
+    assert sizing == {
+        "Bytes ingested (est.)": "coalesce(length(_raw), byteSize(_json))",
+        "Top orgs by volume (est. bytes)": "coalesce(length(_raw), byteSize(_json))",
+    }
+
+
 @pytest.mark.parametrize("case", EPOCH_GUARD_CASES, ids=[case["id"] for case in EPOCH_GUARD_CASES])
 def test_throughput_time_maths_skips_epoch_defaults(case: EpochGuardCase):
     config = _throughput_tiles()[case["tile_id"]]["config"]

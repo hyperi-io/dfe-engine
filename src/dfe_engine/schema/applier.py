@@ -1018,7 +1018,8 @@ class ManifestApplier(SchemaApplier):
     which a live read cannot, and the catalogue answers "is the object there and the
     shape the definition says", which the ledger cannot. A plain view, a role and
     its grants are re-asserted whenever their checksum moved, and a materialised view
-    is created and never replaced, because it holds what it has aggregated.
+    whose SELECT moved gets the new SELECT in place with MODIFY QUERY, so no source
+    row is missed while it changes.
 
     ``allow_drift`` turns the refusals ClickHouse can carry out -- a column type
     and a TTL -- into applied ALTERs. An ORDER BY or PARTITION BY change stays
@@ -1122,11 +1123,18 @@ class ManifestApplier(SchemaApplier):
         if kind == "table":
             return self._apply_table(rendered)
         if kind == "materialized_view" and recorded is not None and not current:
-            return self._record(
-                rendered,
-                "refused",
-                drift=("the SELECT changed, and the view holds what it has aggregated",),
-            )
+            # The SELECT is swapped in place: a drop and a create would lose every
+            # source row that lands between the two statements. The target table's
+            # own apply added any column the new SELECT fills, because the manifest
+            # orders it first.
+            _, separator, select = rendered.statements[0].partition(" AS\n")
+            if not separator or not select.strip():
+                raise SchemaApplyError(
+                    f"{rendered.id}: the CREATE for view {rendered.name} carries no "
+                    "' AS' before its SELECT, so there is nothing to swap in"
+                )
+            self._run(f"ALTER TABLE {table_target(database, rendered.name)} MODIFY QUERY {select}")
+            return self._record(rendered, "altered")
         if kind == "view" and not current:
             for statement in rendered.statements:
                 self._run(statement)

@@ -139,3 +139,175 @@ def test_a_programming_fault_is_a_500_not_an_outage_claim(
     # ClickHouse answered the socket. Saying it is unreachable would be a lie.
     assert resp.status_code == 500
     assert resp.json()["code"] == "queue_failed"
+
+
+class _CoordinationClient:
+    """A ClickHouse client whose run-status row says whether the hunt is auto-disabled."""
+
+    def __init__(self, hunt_id: str, disabled_at: int | None, reason: str = "") -> None:
+        self._row = [hunt_id, 0, 0, 3, 1, 0, 0, 0, disabled_at, reason]
+        self.inserts: list[tuple] = []
+
+    def query(self, sql: str, parameters: dict | None = None):
+        if sql.startswith("SELECT h.hunt_id"):
+            return type("Result", (), {"result_rows": [self._row]})()
+        return type("Result", (), {"result_rows": [[3, 1]]})()
+
+    def insert(self, table: str, data: list[list], column_names: list[str], database: str):
+        self.inserts.append((table, data, column_names, database))
+
+
+@pytest.fixture
+def coordination(monkeypatch, created_hunt):
+    """Install a coordination client for the created hunt, disabled or not."""
+    from dfe_engine.api.v1 import hunts
+
+    def _install(disabled_at: int | None, reason: str = "") -> _CoordinationClient:
+        client = _CoordinationClient(created_hunt, disabled_at, reason)
+        monkeypatch.setattr(hunts, "_data_database_client", lambda: (client, "dfe"))
+        return client
+
+    return _install
+
+
+def _update_body(**changes) -> dict:
+    body = {k: v for k, v in _HUNT.items() if k != "name"}
+    return {**body, **changes}
+
+
+def test_a_hunt_row_carries_enabled_and_the_auto_disable(
+    client, admin_headers, created_hunt, coordination
+):
+    coordination(1700000000, "resource_limit:241")
+    row = next(
+        item
+        for item in client.get("/api/v1/hunts", headers=admin_headers).json()["items"]
+        if item["name"] == created_hunt
+    )
+    assert row["enabled"] is True
+    assert row["auto_disabled_at"] == 1700000000
+    assert row["auto_disabled_reason"] == "resource_limit:241"
+
+
+def test_a_hunt_saved_disabled_lists_as_disabled_and_keeps_the_field_in_its_detail(
+    client, admin_headers, created_hunt
+):
+    resp = client.put(
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=False), headers=admin_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+    row = next(
+        item
+        for item in client.get("/api/v1/hunts", headers=admin_headers).json()["items"]
+        if item["name"] == created_hunt
+    )
+    assert row["enabled"] is False
+    assert (
+        client.get(f"/api/v1/hunts/{created_hunt}", headers=admin_headers).json()["enabled"]
+        is False
+    )
+
+
+def test_enabling_an_auto_disabled_hunt_clears_the_auto_disable(
+    client, admin_headers, created_hunt, coordination
+):
+    ch = coordination(1700000000, "resource_limit:241")
+    resp = client.put(
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=True), headers=admin_headers
+    )
+    assert resp.status_code == 200
+    assert len(ch.inserts) == 1
+    table, rows, columns, database = ch.inserts[0]
+    assert (table, database) == ("hunt_state", "dfe")
+    assert rows[0][:5] == [f"{created_hunt}#stopped", 0, 0, None, ""]
+    assert columns[-1] == "updated"
+
+
+@pytest.mark.parametrize(
+    ("changes", "disabled_at"),
+    [
+        ({"enabled": False}, 1700000000),
+        ({"enabled": True}, None),
+        ({"cron": "*/7 * * * *"}, 1700000000),
+    ],
+    ids=["saved-disabled", "never-auto-disabled", "an-edit-that-omits-enabled"],
+)
+def test_a_save_that_does_not_re_enable_an_auto_disabled_hunt_writes_no_state(
+    client, admin_headers, created_hunt, coordination, changes, disabled_at
+):
+    ch = coordination(disabled_at, "resource_limit:241" if disabled_at else "")
+    resp = client.put(
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(**changes), headers=admin_headers
+    )
+    assert resp.status_code == 200
+    assert ch.inserts == []
+
+
+def test_a_clear_clickhouse_did_not_take_is_a_503_not_a_quiet_200(
+    client, admin_headers, created_hunt, coordination
+):
+    ch = coordination(1700000000, "resource_limit:241")
+
+    def _refuse(*args, **kwargs):
+        raise ConnectionError("[Errno 111] Connection refused")
+
+    ch.insert = _refuse
+    resp = client.put(
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=True), headers=admin_headers
+    )
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "auto_disable_not_cleared"
+
+
+def test_a_save_routed_to_a_review_branch_lifts_no_stop(created_hunt, coordination):
+    from dfe_engine.api.v1.hunts import _clear_auto_disable
+    from dfe_engine.gitcrud.routing import WriteOutcome
+
+    ch = coordination(1700000000, "resource_limit:241")
+    routed = WriteOutcome(changed=True, review_required=True, branch="dfe/hunt/x/1")
+    _clear_auto_disable(created_hunt, enabled=True, outcome=routed)
+    assert ch.inserts == []
+    _clear_auto_disable(created_hunt, enabled=True, outcome=WriteOutcome(changed=True))
+    assert len(ch.inserts) == 1
+
+
+def test_an_edit_that_omits_enabled_keeps_a_hunt_disabled(client, admin_headers, created_hunt):
+    off = client.put(
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=False), headers=admin_headers
+    )
+    assert off.status_code == 200
+    assert off.json()["enabled"] is False
+    edit = client.put(
+        f"/api/v1/hunts/{created_hunt}",
+        json=_update_body(cron="*/7 * * * *"),
+        headers=admin_headers,
+    )
+    assert edit.status_code == 200
+    assert edit.json()["enabled"] is False
+    assert (
+        client.get(f"/api/v1/hunts/{created_hunt}", headers=admin_headers).json()["enabled"]
+        is False
+    )
+
+
+def test_the_detail_carries_the_runners_stop_so_a_direct_link_shows_it(
+    client, admin_headers, created_hunt, coordination
+):
+    coordination(1700000000, "resource_limit:241")
+    detail = client.get(f"/api/v1/hunts/{created_hunt}", headers=admin_headers).json()
+    assert detail["enabled"] is True
+    assert detail["auto_disabled_at"] == 1700000000
+    assert detail["auto_disabled_reason"] == "resource_limit:241"
+
+
+def test_a_direct_query_hunt_with_no_rules_is_a_detail_not_a_500():
+    from dfe_engine.api.v1.hunts import HuntDetailResponse
+
+    detail = HuntDetailResponse.from_stored_config(
+        "stop_limit",
+        {"cron": "* * * * *", "display_name": "Stop Limit", "query": "SELECT 1 WHERE {window}"},
+    )
+    assert detail.rules == []
+    assert detail.query == "SELECT 1 WHERE {window}"
+    assert detail.enabled is True

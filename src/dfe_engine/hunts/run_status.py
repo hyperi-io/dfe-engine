@@ -25,12 +25,12 @@ table: whether a runner exists at all, from the per-runner heartbeat rather than
 from a lease that only exists while a hunt is mid-execution.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier
+from dfe_engine.hunts.ch_coordinator import STOP_MARK
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +48,10 @@ class RunStatus:
     overrun_count: int = 0
     run_requested: bool = False
     """An operator asked for a run the runner has not served yet."""
+    auto_disabled_at: int | None = None
+    """Epoch seconds the runner stopped the hunt after repeated resource-limit failures."""
+    auto_disabled_reason: str = ""
+    """The ClickHouse error category and code that tripped the auto-disable."""
 
 
 def _query(database: str) -> str:
@@ -56,7 +60,8 @@ def _query(database: str) -> str:
     return (
         "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database, ids bound
         "coalesce(s.overruns, 0), coalesce(s.aggressive, 0), "
-        "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0) "
+        "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0), "
+        "toUnixTimestamp(tupleElement(d.disabled, 1)), coalesce(tupleElement(d.disabled, 2), '') "
         "FROM (SELECT arrayJoin({ids:Array(String)}) AS hunt_id) h "
         "LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
         f"FROM {db}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
@@ -65,6 +70,13 @@ def _query(database: str) -> str:
         "LEFT JOIN (SELECT hunt_id, argMax(overrun_count, updated) AS overruns, "
         "argMax(too_aggressive, updated) AS aggressive "
         f"FROM {db}.hunt_state GROUP BY hunt_id) s USING (hunt_id) "
+        # The stop is its own marker row, read as one tuple: argMax skips a NULL
+        # argument, and a cleared stop is one.
+        f"LEFT JOIN (SELECT substring(k, 1, length(k) - {len(STOP_MARK)}) AS hunt_id, "
+        "d AS disabled FROM (SELECT hunt_id AS k, "
+        "argMax((auto_disabled_at, auto_disabled_reason), updated) AS d "
+        f"FROM {db}.hunt_state WHERE endsWith(hunt_id, {{mark:String}}) GROUP BY hunt_id)) "
+        "d USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, max(fire) AS last_fire, "
         "argMax(rows_written, fire) AS rows_written FROM ("
         "SELECT hunt_id, fire, argMax(status, updated) AS status, "
@@ -110,7 +122,9 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
     """
     if not hunt_ids:
         return {}
-    rows = ch.query(_query(database), parameters={"ids": list(hunt_ids)}).result_rows
+    rows = ch.query(
+        _query(database), parameters={"ids": list(hunt_ids), "mark": STOP_MARK}
+    ).result_rows
     status: dict[str, RunStatus] = {}
     for row in rows:
         hunt_id = str(row[0])
@@ -124,5 +138,36 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
             too_aggressive=bool(row[4]),
             overrun_count=int(row[3]),
             run_requested=bool(row[7]),
+            auto_disabled_at=int(row[8]) if row[8] else None,
+            auto_disabled_reason=str(row[9] or ""),
         )
     return status
+
+
+def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
+    """Write the hunt's stop marker row with a NULL time, which lifts the runner's stop.
+
+    The stop is its own row, keyed ``<hunt_id>#stopped``, so the overrun counters are
+    untouched and there is no read to race the runner. The row carries its own
+    ``updated``: ClickHouse drops an insert block identical to a recent one on a
+    replicated table, and a clear left to the column default is the same block every
+    time, so the second clear of a hunt in its lifetime would never land.
+
+    Args:
+        ch: a ClickHouse client exposing ``insert``.
+        database: the data database the coordination tables live in.
+        hunt_id: the hunt to re-enable.
+    """
+    ch.insert(
+        "hunt_state",
+        [[f"{hunt_id}{STOP_MARK}", 0, 0, None, "", datetime.now(UTC)]],
+        column_names=[
+            "hunt_id",
+            "overrun_count",
+            "too_aggressive",
+            "auto_disabled_at",
+            "auto_disabled_reason",
+            "updated",
+        ],
+        database=database,
+    )

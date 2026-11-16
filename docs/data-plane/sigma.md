@@ -9,9 +9,11 @@
 
 # Sigma detection pipeline
 
-Sigma is off by default: every path under `/api/v1/sigma` answers 404 until the engine runs with `sigma.enabled` set, which is `DFE_ENGINE_SIGMA_ENABLED=true` in its environment. A `sigma` entry in a source's `views` is a field-map view and deploys either way.
+Sigma is a beta, held back until it is tested from feed to detection. It is off by default behind `sigma.enabled` (`DFE_ENGINE_SIGMA_ENABLED=true`), and while it is off every path under `/api/v1/sigma` answers 404. The work to finish it is tracked in <https://github.com/hyperi-io/dfe-engine/issues/887>.
 
-DFE turns community + commercial Sigma rules into live DFE detections. External
+What works today is the source mapping. A `sigma` entry in a source's `views` is a field-map view, and it deploys whether the flag is on or off. The console does not offer Sigma for a new view, and an existing view keeps it. The rest of the pipeline sits behind the flag, works through the API only with no console flow, and has not yet run from feed to detection.
+
+The design turns community and commercial Sigma rules into DFE detections. External
 feeds are pulled into an operator-curated catalogue. The operator SELECTS the
 rules they want. Propagation then generates a DFE detection rule and a per-source
 hunt for each selection, running against a per-source Sigma VIEW that exposes the
@@ -35,7 +37,7 @@ flowchart LR
 
 A provider fetches Sigma rules from an external feed and normalises each via
 pySigma into a `SigmaRuleDoc` (a mandatory UUID `id` plus `modified`/`date` change
-signals, tagged with a provenance `origin`). Three kinds ship:
+signals, tagged with a provenance `origin`). Three kinds are built, and each works through the API with `sigma.enabled` on. The console has no page for providers or their sync status yet.
 
 | Kind | Source | Auth |
 |---|---|---|
@@ -58,6 +60,8 @@ edit (via `deep_merge`, where the operator's lists replace upstream's), reportin
 changed. The operator then SELECTS the rules to activate. Selection is its own
 gitcrud object.
 
+Writing a new rule is not built. `PUT /api/v1/sigma/catalogue/{rule_id}` edits a rule already in the catalogue and answers 404 for a new id, and the console has no catalogue browser or rule editor.
+
 ## Propagation - selection to live detections
 
 `SigmaPropagator.propagate()` walks the selection and, for each selected rule,
@@ -66,6 +70,8 @@ WHERE over the source's `{source}_sigma` view) plus a per-source hunt. The
 generated rule carries a `sigma_rule_id` back-reference and a `sigma_provenance`
 marker (the upstream change signal + a hash of the generated WHERE) so drift and
 hand-edits are detected. Deselecting a rule leaves its binding STALE until pruned.
+
+Propagation runs through the API only. There is no console flow for it, and it has not yet run against real rules and a real source.
 
 The conversion is the [pysigma-backend-clickhouse](https://pypi.org/project/pysigma-backend-clickhouse/) backend, which owns the Sigma modifiers, wildcards and LIKE, regex and CIDR escaping. `sigma_backend_clickhouse.py` subclasses it to emit the bare condition, quote field names through the engine's column quoting and match a text-indexed column through `lower(col) LIKE`. What does not convert is recorded as `failed` in the report:
 
@@ -84,6 +90,8 @@ the `assumeNotNull(_json).path` idiom (as text or a declared type). Identifiers 
 are validated (`_safe_ident` / `_safe_type` / parens-balance) so a definition
 cannot inject into the DDL.
 
+There are no stock ECS to Sigma or CIM to Sigma maps yet, so every source maps its own fields.
+
 ## API + RBAC
 
 The `/api/v1/sigma` router exposes provider CRUD + sync, catalogue browse/edit/
@@ -93,6 +101,8 @@ provider register/update/delete need `sigma:admin` (admin-only via the `*`
 wildcard - the SSRF/path-reach surface). See [rbac.md](../control-plane/rbac.md).
 
 ## Query cost attribution + the cost leaderboard
+
+This section and the next are not part of Sigma, and they work with `sigma.enabled` off.
 
 Every ClickHouse query the engine issues carries a JSON `DfeQueryTags` `log_comment`
 (service / feature / tenant / kind / id), stamped by the `ClickHouseClientWrapper`

@@ -21,11 +21,14 @@ forbidden writes return 403.
 """
 
 import json
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any, Literal
 
+from clickhouse_connect.driver.exceptions import ClickHouseError
 from fastapi import APIRouter, Body, Header, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from scalo.api import CliHints, ListParams, Page, ProblemError, paginate, scalo_extra
 from scalo.logger import logger
@@ -39,13 +42,48 @@ from dfe_engine.api.deps import (
     check_action,
     is_action_allowed,
 )
+from dfe_engine.api.errors import backend_failure
+from dfe_engine.api.middleware.access_log import route_template
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.models import AuthContext, Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.names import VALID_NAME
 from dfe_engine.repository.store import ConflictError, RepositoryStore, json_merge_patch
+from dfe_engine.schema.require import SchemaNotAppliedError
 
-router = APIRouter(prefix="/repository", tags=["Repository"])
+_CH_UNAVAILABLE = (
+    "The repository could not reach ClickHouse, retry shortly. The engine log has the reason"
+)
+
+
+class _ClickHouseRoute(APIRoute):
+    """A route whose ClickHouse failures answer 503 with the reason logged, not sent.
+
+    Every repository route reads or writes the store, so one handler here covers them
+    all. Without it a server error such as MEMORY_LIMIT_EXCEEDED answers 500.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        """Wrap the route's handler so a ClickHouse failure raises the 503."""
+        handler = super().get_route_handler()
+
+        async def guarded(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except (ClickHouseError, SchemaNotAppliedError) as exc:
+                raise backend_failure(
+                    503,
+                    "clickhouse_unavailable",
+                    _CH_UNAVAILABLE,
+                    exc,
+                    event="repository: ClickHouse failed",
+                    route=route_template(request.scope),
+                ) from exc
+
+        return guarded
+
+
+router = APIRouter(prefix="/repository", tags=["Repository"], route_class=_ClickHouseRoute)
 
 _VALID_SCOPES = ("system", "org", "group", "user")
 
