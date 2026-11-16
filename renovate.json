@@ -14,6 +14,12 @@
   ],
   "packageRules": [
     {
+      "description": "The Dockerfile's runtime FROM and the deployment contract's base_image must move together, or the contract drift test fails, so one PR carries both.",
+      "matchDatasources": ["docker"],
+      "matchDepNames": ["python"],
+      "groupName": "python base image"
+    },
+    {
       "description": "Held below 2.0 until after GA: their next majors change behaviour the engine relies on. Updates inside the held line, security fixes included, still arrive. The reason for each hold sits beside its dependency in pyproject.toml.",
       "matchPackageNames": ["pysigma", "apprise"],
       "minimumReleaseAge": "7 days",
