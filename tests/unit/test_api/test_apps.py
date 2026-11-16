@@ -1530,10 +1530,24 @@ def test_a_series_read_is_bounded_by_what_the_gauge_table_holds(
 def test_a_process_reads_under_its_own_telemetry_name(service, process, expected):
     from dfe_engine.api.v1.apps import _telemetry_name
     from dfe_engine.appmgmt import instances
+    from dfe_engine.settings import DFESettings
 
     app = instances.instance_of(service, "default")
 
-    assert _telemetry_name(app=app, process=process) == expected
+    assert _telemetry_name(app=app, process=process, settings=DFESettings(env="dev")) == expected
+
+
+def test_a_shared_container_s_instance_reads_under_the_app_name():
+    from dfe_engine.api.v1.apps import _telemetry_name
+    from dfe_engine.appmgmt import instances
+    from dfe_engine.settings import DFESettings
+
+    app = instances.instance_of("dfe-fetcher", "adsb-tracks")
+    docker = DFESettings(env="dev", deployment={"target": "docker"})
+    kubernetes = DFESettings(env="dev", deployment={"target": "kubernetes"})
+
+    assert _telemetry_name(app=app, process=None, settings=docker) == "dfe-fetcher"
+    assert _telemetry_name(app=app, process=None, settings=kubernetes) == "dfe-fetcher-adsb-tracks"
 
 
 @pytest.mark.parametrize(
@@ -1550,10 +1564,11 @@ def test_a_process_the_app_does_not_run_is_404(service, process):
 
     from dfe_engine.api.v1.apps import _telemetry_name
     from dfe_engine.appmgmt import instances
+    from dfe_engine.settings import DFESettings
 
     app = instances.instance_of(service, "default")
 
     with pytest.raises(ProblemError) as refused:
-        _telemetry_name(app=app, process=process)
+        _telemetry_name(app=app, process=process, settings=DFESettings(env="dev"))
     assert refused.value.status == 404
     assert refused.value.problem.code == "unknown_process"

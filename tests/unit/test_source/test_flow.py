@@ -472,7 +472,10 @@ class TestATargetThatRunsOneOfEachApp:
         said = str(refused.value)
         assert f"dfe-transform-elastic only for the sources it was published with {running}" in said
         assert "dfe-docker checkout" in said
-        assert "docs/profiles.md#per-source-apps" in said
+        assert "dfe-docker docs, Profiles page" in said
+        # dfe-ui prints the reason as plain text, so no markdown and no raw URL.
+        assert "`" not in said
+        assert "http" not in said
         assert "Kubernetes" not in said
 
     def test_a_source_needing_only_stack_wide_apps_still_saves(self):

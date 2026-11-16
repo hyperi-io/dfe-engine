@@ -197,6 +197,13 @@ def test_every_throughput_tile_names_all_sources():
     ] == []
 
 
+def test_the_lag_percentile_tile_rounds_to_whole_milliseconds():
+    """A quantile is a float, so the tile needs a format or it shows 10137.149999999994."""
+    config = _throughput_tiles()["lag-p95"]["config"]
+
+    assert config["numberFormat"] == {"output": "number", "mantissa": 0}
+
+
 @pytest.mark.parametrize("case", EPOCH_GUARD_CASES, ids=[case["id"] for case in EPOCH_GUARD_CASES])
 def test_throughput_time_maths_skips_epoch_defaults(case: EpochGuardCase):
     config = _throughput_tiles()[case["tile_id"]]["config"]

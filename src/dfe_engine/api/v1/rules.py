@@ -460,7 +460,7 @@ def _create_rule_from_sql(
         id=rule_id,
         display_name=result.rule.name,
         sanitize_summary=result.sanitize_summary or {},
-        warnings=list(result.rule.warnings),
+        warnings=[*result.rule.warnings, *result.volume_warnings],
         sql_errors=_map_sql_errors(result.sql_errors or []),
     )
 
@@ -714,7 +714,13 @@ def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[
     return _map_sql_errors(service.validate_sql(original_sql))
 
 
-def _rule_to_response(rule, *, sql_errors: list[SqlValidationError] | None = None) -> RuleResponse:
+def _rule_to_response(
+    rule,
+    *,
+    sql_errors: list[SqlValidationError] | None = None,
+    volume_warnings: list[str] | None = None,
+) -> RuleResponse:
+    """A rule as the API returns it, with the create-time volume reading beside its stored warnings."""
     return RuleResponse(
         name=rule.rule_id,
         display_name=rule.name,
@@ -727,7 +733,7 @@ def _rule_to_response(rule, *, sql_errors: list[SqlValidationError] | None = Non
         original_sql=rule.original_sql,
         hunt_name=rule.hunt_name,
         source=rule.source,
-        warnings=rule.warnings,
+        warnings=[*rule.warnings, *(volume_warnings or [])],
         sql_errors=sql_errors or [],
         created_at=rule.created_at,
     )
@@ -817,7 +823,9 @@ def _unique_rule_id(registry, saved_search_name: str | None) -> str:
 def _build_create_response(result) -> RuleCreateResponse:
     sql_errors = _map_sql_errors(result.sql_errors or [])
     return RuleCreateResponse(
-        rule=_rule_to_response(result.rule, sql_errors=sql_errors),
+        rule=_rule_to_response(
+            result.rule, sql_errors=sql_errors, volume_warnings=result.volume_warnings
+        ),
         sanitize_summary=result.sanitize_summary or {},
         sql_errors=sql_errors,
         cost_estimate=result.cost_estimate,

@@ -17,6 +17,7 @@ from collections.abc import Iterator
 
 import jwt as pyjwt
 import pytest
+from clickhouse_connect.driver.exceptions import DatabaseError
 from common.fake_repository_ch import FakeRepositoryCH
 from fastapi.testclient import TestClient
 
@@ -516,3 +517,63 @@ class TestValidation:
         resp = client.get(f"{OBJECTS}/user/user1/blobs/raw", headers=user1)
         assert resp.headers["Content-Type"].startswith("application/octet-stream")
         assert resp.content == b"\x00\x01binary"
+
+
+class _FailingCH(FakeRepositoryCH):
+    """A server that refuses every statement, as ClickHouse does past its memory ceiling."""
+
+    REASON = (
+        "Code: 241. DB::Exception: (total) memory limit exceeded: would use 2.70 GiB "
+        "(MEMORY_LIMIT_EXCEEDED), user dfe_engine_owner"
+    )
+
+    def execute(self, query: str, *args, parameters=None, **kwargs):
+        raise DatabaseError(self.REASON)
+
+
+class _UnreadableCH(FakeRepositoryCH):
+    """A server the schema presence check cannot read."""
+
+    def query(self, sql: str, *args, parameters=None, **kwargs):
+        raise DatabaseError(_FailingCH.REASON)
+
+
+class TestClickHouseFailure:
+    """A ClickHouse failure is a 503 with the reason logged, never a 500."""
+
+    @pytest.mark.parametrize(
+        ("method", "url", "kwargs"),
+        [
+            ("get", PREFS, {}),
+            ("patch", PREFS, {"json": {"theme": "dark"}}),
+            ("get", f"{OBJECTS}/system/-/ns", {}),
+            ("get", f"{OBJECTS}/system/-/ns/key", {}),
+            ("put", f"{OBJECTS}/system/-/ns/key", {"content": b"v"}),
+            ("delete", f"{OBJECTS}/system/-/ns/key", {}),
+        ],
+    )
+    @pytest.mark.parametrize("failing", [_FailingCH, _UnreadableCH])
+    def test_a_server_failure_answers_503(
+        self, client: TestClient, app, admin_headers, method, url, kwargs, failing
+    ):
+        ch = failing(applied={("dfe", "repository")})
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        try:
+            resp = getattr(client, method)(url, headers=admin_headers, **kwargs)
+        finally:
+            app.dependency_overrides.pop(get_clickhouse_client, None)
+
+        assert resp.status_code == 503, resp.text
+        assert resp.json()["code"] == "clickhouse_unavailable"
+        assert "MEMORY_LIMIT_EXCEEDED" not in resp.text
+        assert "dfe_engine_owner" not in resp.text
+
+    def test_a_caller_error_is_still_its_own_status(self, client: TestClient, app, admin_headers):
+        ch = _FailingCH(applied={("dfe", "repository")})
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        try:
+            resp = client.get(f"{OBJECTS}/system/-/bad space", headers=admin_headers)
+        finally:
+            app.dependency_overrides.pop(get_clickhouse_client, None)
+
+        assert resp.status_code == 422

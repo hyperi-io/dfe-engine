@@ -148,7 +148,7 @@ def test_a_broad_rule_is_called_plainly_bad_with_its_measured_numbers(ch_params,
     assert estimate.projected_per_day == 14_400
     assert estimate.band == "plainly_bad"
     source = f"{seeded}.main"
-    assert result.rule.warnings == [
+    assert result.volume_warnings == [
         f"Over the last 60 minutes this rule matched 600 of 2,000 events in {source}, "
         "about 14,400 alerts a day -- far more than a team can review. Narrow it before it runs.",
         f"That is 30% of all events in {source}. Check the condition narrows it to what you meant.",
@@ -171,7 +171,7 @@ def test_each_band_carries_the_projected_number(
     assert result.cost_estimate.estimated_rows == matched
     assert result.cost_estimate.projected_per_day == per_day
     assert result.cost_estimate.band is band
-    assert result.rule.warnings == [
+    assert result.volume_warnings == [
         f"Over the last 60 minutes this rule matched {matched:,} of 2,000 events in "
         f"{seeded}.main, about {per_day:,} alerts a day -- {tail}"
     ]
@@ -184,7 +184,7 @@ def test_a_narrow_rule_gets_no_warning(seeded, manager):
     assert result.cost_estimate.estimated_rows == 5
     assert result.cost_estimate.projected_per_day == 120
     assert result.cost_estimate.band is VolumeBand.OK
-    assert result.rule.warnings == []
+    assert result.volume_warnings == []
 
 
 def test_a_longer_window_reaches_the_older_events(seeded, manager):
@@ -207,7 +207,7 @@ def test_a_preview_past_its_time_limit_says_it_could_not_finish(seeded, manager)
     assert result.cost_estimate is not None
     assert result.cost_estimate.band is VolumeBand.UNMEASURED
     assert result.cost_estimate.estimated_rows is None
-    assert result.rule.warnings == [
+    assert result.volume_warnings == [
         "The alert-volume preview could not finish: it ran past its 0.5 second limit on "
         f"{seeded}.main. This rule's alert volume is unknown until it runs."
     ]
@@ -218,7 +218,7 @@ def test_a_preview_over_its_row_budget_says_it_could_not_finish(seeded, manager)
 
     assert result.cost_estimate is not None
     assert result.cost_estimate.band is VolumeBand.UNMEASURED
-    assert result.rule.warnings == [
+    assert result.volume_warnings == [
         "The alert-volume preview could not finish: the last 60 minutes of "
         f"{seeded}.main are more than its 100 row limit. This rule's alert volume is "
         "unknown until it runs."
@@ -232,7 +232,7 @@ def test_a_query_clickhouse_refuses_is_named_not_passed(seeded, manager):
     assert result.sql_errors == []
     assert result.cost_estimate is not None
     assert result.cost_estimate.band is VolumeBand.UNMEASURED
-    assert result.rule.warnings == [
+    assert result.volume_warnings == [
         "The alert-volume preview could not finish: ClickHouse refused it. "
         "This rule's alert volume is unknown until it runs."
     ]
@@ -244,7 +244,7 @@ def test_an_empty_window_is_unmeasured(dfe_db, manager):
     assert result.cost_estimate is not None
     assert result.cost_estimate.band is VolumeBand.UNMEASURED
     assert result.cost_estimate.rows_in_window == 0
-    assert result.rule.warnings == [
+    assert result.volume_warnings == [
         f"No events reached {dfe_db}.main in the last 60 minutes, so this rule's alert "
         "volume could not be measured."
     ]
