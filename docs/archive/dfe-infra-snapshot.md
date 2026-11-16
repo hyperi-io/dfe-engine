@@ -37,7 +37,6 @@ Identical deployment on ANY K8s. Cloud-agnostic.
 | Strimzi Kafka | 3.9.0 (KRaft) | Event streaming |
 | ClickHouse | 24.8 (Altinity) | Analytics + observability |
 | CNPG PostgreSQL | 17 | UI/HyperDX metadata |
-| FerretDB | 1.24.0 | MongoDB wire protocol over PG17 |
 | OTel Collector | 0.114.0 | Telemetry (DaemonSet + Gateway) |
 | HyperDX | 1.7.0 | Observability UI |
 | KEDA | 2.20.1 | Event-driven autoscaling (CPU default, scalo ScalingPressure opt-in via `dfe-keda-shim`) |
