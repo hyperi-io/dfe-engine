@@ -239,7 +239,8 @@ class TestRenderTenantAxis:
     def test_no_tables_just_role_and_its_system_grants(self):
         assert render_tenant_axis([]) == [
             "CREATE ROLE IF NOT EXISTS `dfe_tenant_role`",
-            "GRANT SELECT ON system.columns, SELECT ON system.settings, "
+            "GRANT SELECT ON system.columns, SELECT ON system.merge_tree_settings, "
+            "SELECT ON system.settings, SELECT ON system.shared_merge_tree_settings, "
             "SELECT ON system.table_engines, SELECT ON system.tables "
             "TO `dfe_tenant_role` WITH REPLACE OPTION",
         ]
