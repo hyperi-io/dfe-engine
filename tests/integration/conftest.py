@@ -33,7 +33,7 @@ Controls (env):
 On the local tier a test shares the run's one ClickHouse, which scalo's
 ``shared_clickhouse`` fixture starts and removes, unless it is marked
 ``own_clickhouse``. Containers this suite starts itself are named
-`dfe-engine-test-integration-<test>-clickhouse`, or
+`dfe-engine-test-integration-<test>-<pid>-clickhouse`, or
 `dfe-engine-test-integration-clickhouse` for the shared DFE_TEST_KEEP one, and carry `io.hyperi.test.*` labels naming the suite, the repo,
 the service and the owning pid. To sweep whatever a killed run left behind:
 
@@ -314,9 +314,12 @@ def _container_name(test: str | None, service: str) -> str:
     """Container name for a backing service in this suite.
 
     ``test`` is the owning test for a throwaway container, or None for the shared
-    DFE_TEST_KEEP instance. Docker only accepts ``[a-zA-Z0-9][a-zA-Z0-9_.-]*``,
-    and a pytest node id carries brackets and colons from parametrisation, so
-    every non-alphanumeric collapses to ``-``.
+    DFE_TEST_KEEP instance. A throwaway name also carries this process's pid: two
+    pytest sessions on one docker host run the same node ids, and without it the
+    second session's network create fails on the first's, and its teardown
+    force-removes the first's live replicas mid-test. Docker only accepts
+    ``[a-zA-Z0-9][a-zA-Z0-9_.-]*``, and a pytest node id carries brackets and
+    colons from parametrisation, so every non-alphanumeric collapses to ``-``.
     """
 
     def slug(value: str) -> str:
@@ -324,7 +327,7 @@ def _container_name(test: str | None, service: str) -> str:
 
     if test is None:
         return f"dfe-engine-test-integration-{slug(service)}"
-    return f"dfe-engine-test-integration-{slug(test)}-{slug(service)}"
+    return f"dfe-engine-test-integration-{slug(test)}-{os.getpid()}-{slug(service)}"
 
 
 def _container_running(docker: list[str], name: str) -> bool:
@@ -1195,7 +1198,7 @@ def openbao() -> Iterator[OpenBao]:
     docker = _docker_prefix(spec)
     host = _reach_address(spec)
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    name = _container_name(f"{worker}-{os.getpid()}", "openbao")
+    name = _container_name(worker, "openbao")
     token = secrets.token_hex(16)
     run_cmd = [
         *docker,
@@ -1296,7 +1299,7 @@ def kafka_bootstrap() -> Iterator[str]:
 
     docker = _docker_prefix("local")
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    name = _container_name(f"{worker}-{os.getpid()}", "kafka")
+    name = _container_name(worker, "kafka")
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
