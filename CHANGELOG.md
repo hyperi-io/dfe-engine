@@ -3,6 +3,34 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.92](https://github.com/hyperi-io/dfe-engine/compare/v1.22.91...v1.22.92) (2026-11-16)
+
+### Bug Fixes
+
+* **api:** fill setup-status merge command ([#1194](https://github.com/hyperi-io/dfe-engine/issues/1194)) ([a09d51c](https://github.com/hyperi-io/dfe-engine/commit/a09d51c132a9b3f1f3a74b98fc404fc4ff500338))
+* **api:** fix catalogue, repository, fetcher status, rules ([#1198](https://github.com/hyperi-io/dfe-engine/issues/1198)) ([7b3dcf1](https://github.com/hyperi-io/dfe-engine/commit/7b3dcf19921f56851e5945ccec96665e1863e712))
+* **appmgmt:** send dump units to the source topic ([#1192](https://github.com/hyperi-io/dfe-engine/issues/1192)) ([bd66928](https://github.com/hyperi-io/dfe-engine/commit/bd669284719aaf2e279b3b5919baff36f8b76158))
+* **ci:** drop the engine runner-test pin ([#1205](https://github.com/hyperi-io/dfe-engine/issues/1205)) ([7196a3b](https://github.com/hyperi-io/dfe-engine/commit/7196a3b7fbc1ab257d692ccfefdfd4b91d9c8a86))
+* **dashboards:** label the byte tiles as estimates ([#1204](https://github.com/hyperi-io/dfe-engine/issues/1204)) ([6c9b1b0](https://github.com/hyperi-io/dfe-engine/commit/6c9b1b011138f44aec0a1c1a9733f9fa982d1e5a))
+* **dashboards:** measure ingested bytes without serialising _json ([#1203](https://github.com/hyperi-io/dfe-engine/issues/1203)) ([2338860](https://github.com/hyperi-io/dfe-engine/commit/23388603513491376041106133dba4b70704d536))
+* **deps:** take dfe-schemas 0.2.32 for the HyperDX settings grants ([#1202](https://github.com/hyperi-io/dfe-engine/issues/1202)) ([e257cb2](https://github.com/hyperi-io/dfe-engine/commit/e257cb21d8831ac3b177bcc2cb9b5f4cf31391ed))
+* **deps:** update clickhouse/clickhouse-server Docker tag to v26.3.62.3 ([8ef4560](https://github.com/hyperi-io/dfe-engine/commit/8ef456078a7745e5214e2da746fc177c392c5236))
+* **e2e:** clear stale xfails, correct three docstrings ([#1175](https://github.com/hyperi-io/dfe-engine/issues/1175)) ([2566d4e](https://github.com/hyperi-io/dfe-engine/commit/2566d4e389ac99f4e78ed13860384b9cafc5b8be))
+* **engine:** fix test, unused argument and docstrings ([5d4e20b](https://github.com/hyperi-io/dfe-engine/commit/5d4e20b690b9515957fe94cfd286c0157ab40165))
+* **hunts:** a direct-query hunt has a detail page ([#1193](https://github.com/hyperi-io/dfe-engine/issues/1193)) ([66b124d](https://github.com/hyperi-io/dfe-engine/commit/66b124d67db924785c2825998042223f535fa676))
+* **hunts:** a failed first fire does not skip the first window ([#1197](https://github.com/hyperi-io/dfe-engine/issues/1197)) ([17ab1ab](https://github.com/hyperi-io/dfe-engine/commit/17ab1abaf1bcdc96fb319199833437fd8565cdf0))
+* **hunts:** a second re-enable clears the stop ([#1195](https://github.com/hyperi-io/dfe-engine/issues/1195)) ([1433ec2](https://github.com/hyperi-io/dfe-engine/commit/1433ec2b04d116b88f4fa6522999f2ef1b16c552))
+* **hunts:** enabled flag, auto-disable on limits ([#1191](https://github.com/hyperi-io/dfe-engine/issues/1191)) ([b342190](https://github.com/hyperi-io/dfe-engine/commit/b3421909ec62af39462dcb1a8da2d9ec4744f66c))
+* **hunts:** measure hunt CPU for smoothing ([#1196](https://github.com/hyperi-io/dfe-engine/issues/1196)) ([97a58c7](https://github.com/hyperi-io/dfe-engine/commit/97a58c7967f08f4e51b335c4eae4263f736793b1))
+* **hunts:** move rate-hunt offsets to flatten ClickHouse load ([#1185](https://github.com/hyperi-io/dfe-engine/issues/1185)) ([3c5f278](https://github.com/hyperi-io/dfe-engine/commit/3c5f27805c4feb9aad624c9db586d9574e082fbf))
+* **image:** let the container build place THIRD-PARTY-NOTICES ([44615bd](https://github.com/hyperi-io/dfe-engine/commit/44615bdda82f2613a4996e1145fcc8ebcb688586))
+* **secrets:** test replicas sharing one OpenBao ([b7d7ebf](https://github.com/hyperi-io/dfe-engine/commit/b7d7ebf7e22cdb8eea8bf72034ebcb199de0facf))
+* **system:** report the stack matching the running images ([#1171](https://github.com/hyperi-io/dfe-engine/issues/1171)) ([d827f0b](https://github.com/hyperi-io/dfe-engine/commit/d827f0b9e345350e8398f9754d80f32e58e7f1c2))
+* **tests:** give throwaway test containers the owning pid ([#1200](https://github.com/hyperi-io/dfe-engine/issues/1200)) ([210832c](https://github.com/hyperi-io/dfe-engine/commit/210832c56554ef16dca3343fc325a9b14f06a86a))
+* **tests:** move four producer contract pins ([#1199](https://github.com/hyperi-io/dfe-engine/issues/1199)) ([fa87447](https://github.com/hyperi-io/dfe-engine/commit/fa8744710edb26e5942844e42e5a35c4f834ce6a))
+* **tests:** pin the busybox probe image by tag and digest ([a959a33](https://github.com/hyperi-io/dfe-engine/commit/a959a33e9e380ebf5dbbb00a984feb04ffcb87d7))
+* **tests:** use synthetic filebeat corpus, drop tests/resources ([#1178](https://github.com/hyperi-io/dfe-engine/issues/1178)) ([1d4e66c](https://github.com/hyperi-io/dfe-engine/commit/1d4e66cb11ad8100a7b3773bbf849dc0b9be37b4))
+
 ## [1.22.91](https://github.com/hyperi-io/dfe-engine/compare/v1.22.90...v1.22.91) (2026-11-15)
 
 ### Bug Fixes
