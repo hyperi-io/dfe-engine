@@ -98,6 +98,14 @@ def test_k_limit_failures_stop_the_hunt_until_the_api_clears_it(ch_client, state
     runner.tick(now + 3)
     assert ch.fires == 4
 
+    # Stopped and cleared a second time: the clear must not be dropped as a duplicate
+    # of the first clear's insert block by the replicated table.
+    coord.record_auto_disable("h", "resource_limit:158", now + 4)
+    assert coord.auto_disabled_hunts() == {"h": "resource_limit:158"}
+    clear_auto_disable(ch_client, state_db, "h")
+    assert coord.auto_disabled_hunts() == {}
+    assert read_run_status(ch_client, state_db, ["h"], now + 5)["h"].auto_disabled_at is None
+
 
 def test_a_hunt_disabled_in_yaml_is_tombstoned_in_the_schedule(ch_client, dfe_db, tmp_path: Path):
     hunt_dir = tmp_path / "hunts"

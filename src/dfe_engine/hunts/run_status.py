@@ -26,6 +26,7 @@ from a lease that only exists while a hunt is mid-execution.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier
@@ -147,7 +148,10 @@ def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
     """Write the hunt's stop marker row with a NULL time, which lifts the runner's stop.
 
     The stop is its own row, keyed ``<hunt_id>#stopped``, so the overrun counters are
-    untouched and there is no read to race the runner.
+    untouched and there is no read to race the runner. The row carries its own
+    ``updated``: ClickHouse drops an insert block identical to a recent one on a
+    replicated table, and a clear left to the column default is the same block every
+    time, so the second clear of a hunt in its lifetime would never land.
 
     Args:
         ch: a ClickHouse client exposing ``insert``.
@@ -156,13 +160,14 @@ def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
     """
     ch.insert(
         "hunt_state",
-        [[f"{hunt_id}{STOP_MARK}", 0, 0, None, ""]],
+        [[f"{hunt_id}{STOP_MARK}", 0, 0, None, "", datetime.now(UTC)]],
         column_names=[
             "hunt_id",
             "overrun_count",
             "too_aggressive",
             "auto_disabled_at",
             "auto_disabled_reason",
+            "updated",
         ],
         database=database,
     )
