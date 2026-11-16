@@ -66,6 +66,8 @@ from dfe_engine.settings import (
 )
 
 WINDOW_TOKEN = "{window}"  # noqa: S105, RUF100 - a SQL template placeholder
+# The hunt_watermark mark holding the fire a hunt first attempted, read while it has no watermark.
+FIRST_FIRE = "first_fire"
 
 # Header columns a detection copies from its matched row, so its seen lookup can bound on them.
 _DETECTION_TIME_COLUMNS = frozenset({"_timestamp_load", "_timestamp"})
@@ -385,7 +387,15 @@ class HuntWorker:
             )
 
         last = self._coord.get_watermark(spec.hunt_id)
-        start, end = window(last, scheduled_start, spec.interval_seconds)
+        first = None
+        if last is None:
+            # The first fire is pinned before it runs, so a fire that never completes
+            # leaves the next one reading from the same start rather than its own.
+            first = self._coord.get_safe_horizon_mark(spec.hunt_id, FIRST_FIRE)
+            if first is None:
+                self._coord.set_safe_horizon_mark(spec.hunt_id, FIRST_FIRE, scheduled_start)
+                first = scheduled_start
+        start, end = window(last, scheduled_start, spec.interval_seconds, first_fire=first)
         released = self._released.pop(spec.hunt_id, None)
         if released is not None and released[0] != scheduled_start:
             released = None
