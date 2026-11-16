@@ -547,12 +547,13 @@ class ChCoordinator:
         """Every hunt the runner has stopped, as ``hunt_id -> reason``, read fresh each tick.
 
         The API clears an auto-disable by writing a row with a NULL time, so a
-        re-enabled hunt leaves this map on the next read and fires again.
+        re-enabled hunt leaves this map on the next read and fires again. argMax skips
+        a NULL argument, so the latest row is taken as a tuple, which is never NULL.
         """
         rows = self._ch.query(
-            "SELECT hunt_id, reason FROM (SELECT hunt_id, "  # noqa: S608 - quoted configured database
-            "argMax(auto_disabled_at, updated) AS at, argMax(auto_disabled_reason, updated) AS reason "
-            f"FROM {self._qdb}.hunt_state GROUP BY hunt_id) WHERE at IS NOT NULL"
+            "SELECT hunt_id, tupleElement(s, 2) FROM (SELECT hunt_id, "  # noqa: S608 - quoted configured database
+            "argMax((auto_disabled_at, auto_disabled_reason), updated) AS s "
+            f"FROM {self._qdb}.hunt_state GROUP BY hunt_id) WHERE tupleElement(s, 1) IS NOT NULL"
         ).result_rows
         return {str(r[0]): str(r[1]) for r in rows}
 

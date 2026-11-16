@@ -26,21 +26,22 @@ from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.hunts.worker import HuntWorker
 
 LIMIT_SQL = (
-    "SELECT count() FROM (SELECT number AS timestamp_load FROM numbers(1000)) "
+    "SELECT count() FROM (SELECT toDateTime64(number, 3) AS _timestamp_load FROM numbers(1000)) "
     "WHERE {window} SETTINGS max_rows_to_read = 10"
 )
 
 
 class _CountingClient:
-    """The real client, counting the statements the worker sends."""
+    """The real client, counting the fires of the hunt's own SQL among every statement."""
 
     def __init__(self, ch) -> None:
         self._ch = ch
-        self.commands = 0
+        self.fires = 0
 
-    def command(self, sql: str, settings: dict | None = None):
-        self.commands += 1
-        return self._ch.command(sql, settings=settings)
+    def command(self, sql: str, *args, **kwargs):
+        if "max_rows_to_read" in sql:
+            self.fires += 1
+        return self._ch.command(sql, *args, **kwargs)
 
     def query(self, *args, **kwargs):
         return self._ch.query(*args, **kwargs)
@@ -74,23 +75,28 @@ def test_k_limit_failures_stop_the_hunt_until_the_api_clears_it(ch_client, state
     )
     runner = HuntRunner(coord, HuntWorker(ch, coord), {"h": spec}, cap=4, failures=failures)
     now = current_fire("h", 600, 5000) + 1
+    # The fixture SQL trips the row limit, a resource limit, and nothing else.
+    with pytest.raises(Exception, match="Code: 158"):
+        HuntWorker(ch, coord).run(spec, scheduled_start=now)
+    assert ch.fires == 1
 
     runner.tick(now)
+    assert ch.fires == 2
     assert coord.auto_disabled_hunts() == {}
     runner.tick(now + 1)
+    assert ch.fires == 3, (coord.get_state("h"), coord.current_lease("h"))
     assert coord.auto_disabled_hunts() == {"h": "resource_limit:158"}
     status = read_run_status(ch_client, state_db, ["h"], now + 1)["h"]
     assert (status.auto_disabled_at, status.auto_disabled_reason) == (now + 1, "resource_limit:158")
-    # Stopped: a tick with the back-off at zero sends ClickHouse nothing.
-    sent = ch.commands
+    # Stopped: a tick with the back-off at zero fires nothing.
     runner.tick(now + 2)
-    assert ch.commands == sent
+    assert ch.fires == 3
 
     clear_auto_disable(ch_client, state_db, "h")
     assert coord.auto_disabled_hunts() == {}
     assert read_run_status(ch_client, state_db, ["h"], now + 3)["h"].auto_disabled_at is None
     runner.tick(now + 3)
-    assert ch.commands == sent + 1
+    assert ch.fires == 4
 
 
 def test_a_hunt_disabled_in_yaml_is_tombstoned_in_the_schedule(ch_client, dfe_db, tmp_path: Path):

@@ -11,8 +11,8 @@ readme = "README.md"
 dependencies = [
     # [kafka] supplies genson to scalo.kafka.providers. Without [metrics], /metrics 404s.
     "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.7,<3",
-    # Floor: the first release with catalogue/.
-    "dfe-schemas>=0.2.29,<1",
+    # Floor: hunt_state 1.1.0, the auto-disable columns the runner writes.
+    "dfe-schemas>=0.2.30,<1",
     "pandas>=3.0.3",
     "numpy>=2.5.4",
     "clickhouse-connect>=1.10.0",

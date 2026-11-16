@@ -139,8 +139,9 @@ def test_a_null_reason_reads_as_empty():
 def test_the_query_selects_the_auto_disable_columns_from_hunt_state():
     ch = _Rows([])
     read_run_status(ch, "dfe", ["h"], now=1000)
-    assert "argMax(auto_disabled_at, updated) AS disabled_at" in ch.sql
-    assert "argMax(auto_disabled_reason, updated) AS disabled_reason" in ch.sql
+    # One argMax over the tuple: argMax skips a NULL argument, and a cleared stop is one.
+    assert "argMax((auto_disabled_at, auto_disabled_reason), updated) AS disabled" in ch.sql
+    assert "toUnixTimestamp(tupleElement(s.disabled, 1))" in ch.sql
 
 
 def test_clearing_an_auto_disable_inserts_a_row_that_keeps_the_overrun_signal():

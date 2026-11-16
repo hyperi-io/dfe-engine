@@ -61,7 +61,7 @@ def _query(database: str) -> str:
         "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database, ids bound
         "coalesce(s.overruns, 0), coalesce(s.aggressive, 0), "
         "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0), "
-        "toUnixTimestamp(s.disabled_at), coalesce(s.disabled_reason, '') "
+        "toUnixTimestamp(tupleElement(s.disabled, 1)), coalesce(tupleElement(s.disabled, 2), '') "
         "FROM (SELECT arrayJoin({ids:Array(String)}) AS hunt_id) h "
         "LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
         f"FROM {db}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
@@ -69,8 +69,8 @@ def _query(database: str) -> str:
         f"FROM {db}.hunt_lease GROUP BY hunt_id) l USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, argMax(overrun_count, updated) AS overruns, "
         "argMax(too_aggressive, updated) AS aggressive, "
-        "argMax(auto_disabled_at, updated) AS disabled_at, "
-        "argMax(auto_disabled_reason, updated) AS disabled_reason "
+        # As a tuple, because argMax skips a NULL argument and a cleared auto-disable is one.
+        "argMax((auto_disabled_at, auto_disabled_reason), updated) AS disabled "
         f"FROM {db}.hunt_state GROUP BY hunt_id) s USING (hunt_id) "
         "LEFT JOIN (SELECT hunt_id, max(fire) AS last_fire, "
         "argMax(rows_written, fire) AS rows_written FROM ("
