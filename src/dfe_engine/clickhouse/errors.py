@@ -99,6 +99,7 @@ _CODES: dict[int, _Meta] = {
     164: _Meta(ErrorCategory.ACCESS, user_safe=True),  # READONLY
     192: _Meta(ErrorCategory.ACCESS, user_safe=True),  # UNKNOWN_USER
     193: _Meta(ErrorCategory.ACCESS, user_safe=True),  # WRONG_PASSWORD
+    201: _Meta(ErrorCategory.RESOURCE_LIMIT, user_safe=True),  # QUOTA_EXCEEDED
     202: _Meta(ErrorCategory.RATE_LIMITED, user_safe=True),  # TOO_MANY_SIMULTANEOUS_QUERIES
     209: _Meta(ErrorCategory.CONNECTION),  # SOCKET_TIMEOUT
     210: _Meta(ErrorCategory.CONNECTION),  # NETWORK_ERROR

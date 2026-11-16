@@ -284,3 +284,19 @@ def test_the_runner_runs_only_the_hunts_the_registry_reads(tmp_path: Path):
 
     assert run == read == {"ok_hunt"}
     assert [h.hunt for h in registry.tenant_id_holders("newcorp", ["t1"])] == ["ok_hunt"]
+
+
+def test_a_disabled_hunt_is_skipped_and_its_sibling_loads(tmp_path: Path):
+    """``enabled: false`` keeps a hunt out of the runner's specs, and the default is on."""
+    _write(tmp_path, "off", 'schedule:\n  mode: rate\n  interval: "5m"\nenabled: false\n')
+    _write(tmp_path, "on", 'schedule:\n  mode: rate\n  interval: "5m"\n')
+    specs = load_specs(tmp_path)
+    assert set(specs) == {"on"}
+    assert specs["on"].enabled is True
+
+
+def test_a_hunt_whose_enabled_is_not_a_bool_is_skipped_not_fired(tmp_path: Path):
+    """A quoted "false" must never load as an enabled hunt."""
+    _write(tmp_path, "quoted", 'schedule:\n  mode: rate\n  interval: "5m"\nenabled: "false"\n')
+    _write(tmp_path, "on", 'schedule:\n  mode: rate\n  interval: "5m"\n')
+    assert set(load_specs(tmp_path)) == {"on"}

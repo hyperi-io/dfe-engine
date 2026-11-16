@@ -110,6 +110,9 @@ class _Coordinator:
     def pending_runs(self, now: int) -> dict[str, int]:
         return {}
 
+    def auto_disabled_hunts(self) -> dict[str, str]:
+        return {}
+
     def current_lease(self, hunt_id: str) -> None:
         return None
 
@@ -245,3 +248,31 @@ def test_global_channels_alert_a_hunt_with_no_alerts_block():
     assert len(sent) == 1
     assert "h" in sent[0][0]
     assert "4" in sent[0][1]
+
+
+@pytest.mark.parametrize(
+    ("alerts", "channels", "want_sent"),
+    [
+        pytest.param({"channels": ["json://example.invalid/x"]}, [], True, id="hunt_destinations"),
+        pytest.param({}, ["json://example.invalid/x"], True, id="global_channels"),
+        pytest.param({}, [], False, id="nowhere_to_send"),
+    ],
+)
+def test_an_auto_disable_alert_names_the_hunt_the_reason_and_the_clear(alerts, channels, want_sent):
+    sent: list[tuple[str, str]] = []
+
+    class _Dispatcher(AlertDispatcher):
+        def _send(self, title: str, body: str) -> bool:
+            sent.append((title, body))
+            return True
+
+    spec = HuntSpec(hunt_id="h", interval_seconds=60, alerts=alerts)
+    notifier = MatchNotifier(global_channels=channels, dispatcher_factory=_Dispatcher)
+
+    assert notifier.notify_auto_disabled(spec, "resource_limit:241") is want_sent
+    assert len(sent) == (1 if want_sent else 0)
+    if want_sent:
+        title, body = sent[0]
+        assert "h" in title
+        assert "resource_limit:241" in body
+        assert "PUT /api/v1/hunts/h" in body

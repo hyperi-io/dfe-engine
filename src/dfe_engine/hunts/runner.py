@@ -41,6 +41,7 @@ wait once.
 """
 
 import time
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -114,6 +115,10 @@ class HuntFailures:
         reminder_seconds: How often a failure that has not changed is logged again
             (``hunts.failure_reminder_seconds``).
         jitter: Spreads each wait, so hunts that failed together retry apart.
+        autodisable_failures: Resource-limit failures within the window that stop the
+            hunt (``hunts.autodisable.failures``), 0 for never.
+        autodisable_window: Seconds the failures are counted over
+            (``hunts.autodisable.window_seconds``).
     """
 
     def __init__(
@@ -123,23 +128,32 @@ class HuntFailures:
         max_seconds: float = FAILURE_BACKOFF_MAX_SECONDS,
         reminder_seconds: float = FAILURE_REMINDER_SECONDS,
         jitter: Callable[[float], float] = jittered,
+        autodisable_failures: int = 0,
+        autodisable_window: float = 3600.0,
     ) -> None:
         self._initial = initial_seconds
         self._max = max_seconds
         self._reminder = reminder_seconds
         self._jitter = jitter
         self._failing: dict[str, _Failing] = {}
+        self._autodisable_failures = autodisable_failures
+        self._autodisable_window = autodisable_window
+        # Resource-limit failure times per hunt, inside the window.
+        self._limit_hits: dict[str, deque[int]] = {}
 
     @classmethod
     def from_settings(
         cls, hunts: HuntsSettings, *, jitter: Callable[[float], float] = jittered
     ) -> HuntFailures:
         """The tracker a deployment's ``hunts.failure_*`` settings describe."""
+        autodisable = hunts.autodisable
         return cls(
             initial_seconds=hunts.failure_backoff_initial_seconds,
             max_seconds=hunts.failure_backoff_max_seconds,
             reminder_seconds=hunts.failure_reminder_seconds,
             jitter=jitter,
+            autodisable_failures=autodisable.failures if autodisable.enabled else 0,
+            autodisable_window=autodisable.window_seconds,
         )
 
     def retry_at(self, hunt_id: str) -> float | None:
@@ -173,6 +187,26 @@ class HuntFailures:
         keep = set(hunt_ids)
         for hunt_id in [h for h in self._failing if h not in keep]:
             del self._failing[hunt_id]
+        for hunt_id in [h for h in self._limit_hits if h not in keep]:
+            del self._limit_hits[hunt_id]
+
+    def limit_tripped(self, hunt_id: str, now: int, exc: BaseException) -> str | None:
+        """Count a resource-limit failure and say whether it is the one that stops the hunt.
+
+        Only ``ErrorCategory.RESOURCE_LIMIT`` counts, never a syntax, access or
+        connection failure. Returns the reason to record (``resource_limit:<code>``)
+        when the window now holds ``autodisable_failures`` hits, else None.
+        """
+        if self._autodisable_failures <= 0 or classify(exc) is not ErrorCategory.RESOURCE_LIMIT:
+            return None
+        hits = self._limit_hits.setdefault(hunt_id, deque())
+        hits.append(now)
+        while hits and now - hits[0] > self._autodisable_window:
+            hits.popleft()
+        if len(hits) < self._autodisable_failures:
+            return None
+        hits.clear()
+        return f"{ErrorCategory.RESOURCE_LIMIT.value}:{parse_code(exc)}"
 
     def failed(
         self,
@@ -251,6 +285,8 @@ class HuntRunner:
         smoother: PhaseSmoother | None = None,
     ) -> None:
         self._coord = coordinator
+        # Hunts this runner stopped, kept so a failed hunt_state read still skips them.
+        self._stopped: dict[str, str] = {}
         # hunts.phase_spread_fraction: the same value publish_schedule writes for KEDA.
         self._phase_fraction = phase_fraction
         # With smoothing on, every tick reads the offsets KEDA scales on and the smoother
@@ -311,6 +347,48 @@ class HuntRunner:
             )
             return {}
 
+    def _auto_disabled(self) -> dict[str, str]:
+        """Hunts to skip this tick: every auto-disable in hunt_state, else the ones this runner stopped.
+
+        The table is the truth, since the API clears an auto-disable there. A failed
+        read falls back to this runner's own record rather than firing a stopped hunt.
+        """
+        try:
+            self._stopped = self._coord.auto_disabled_hunts()
+        except Exception as exc:
+            logger.warning(
+                "auto-disabled hunts unreadable; using this runner's record", error=str(exc)
+            )
+        return self._stopped
+
+    def _auto_disable(self, spec: HuntSpec, reason: str, now: int) -> None:
+        """Stop a hunt that kept tripping a resource limit: record, count, alert.
+
+        A query that busts the memory limit on its own fails at 3am too, and each
+        retry fails whatever else is allocating, so the hunt stops until an operator
+        re-enables it through the API.
+        """
+        self._stopped[spec.hunt_id] = reason
+        logger.error(
+            "hunt auto-disabled after repeated resource-limit failures",
+            hunt_id=spec.hunt_id,
+            reason=reason,
+            clear=f"PUT /api/v1/hunts/{spec.hunt_id} with enabled true",
+        )
+        try:
+            self._coord.record_auto_disable(spec.hunt_id, reason, now)
+        except Exception as exc:
+            logger.error(
+                "auto-disable not recorded; this runner skips the hunt anyway",
+                hunt_id=spec.hunt_id,
+                error=str(exc),
+            )
+        self._metrics.auto_disabled(spec.hunt_id, reason=reason)
+        try:
+            self._worker.alert_auto_disabled(spec, reason)
+        except Exception as exc:
+            logger.warning("auto-disable alert not sent", hunt_id=spec.hunt_id, error=str(exc))
+
     def _smooth(self, now: int) -> None:
         """Run the smoother's cycle if one is due. A failed cycle costs nothing but the cycle."""
         if self._smoother is None:
@@ -357,6 +435,7 @@ class HuntRunner:
         # Read every outstanding run-now once per tick, not once per hunt.
         requested = self._coord.pending_runs(now)
         offsets = self._learned_offsets()
+        disabled = self._auto_disabled()
         executed = 0
         started = 0
         specs = list(self._specs.values())
@@ -365,6 +444,8 @@ class HuntRunner:
             if running + started >= self._cap:
                 self._start = first + reached
                 break  # global cap protects ClickHouse, lateness surfaces as overload
+            if spec.hunt_id in disabled:
+                continue
             fire = self._fire_for(spec, now, requested, offsets)
             if fire is None:
                 continue
@@ -411,6 +492,9 @@ class HuntRunner:
                 self._failures.failed(
                     spec.hunt_id, fire, now, exc, requested=requested.get(spec.hunt_id)
                 )
+                reason = self._failures.limit_tripped(spec.hunt_id, now, exc)
+                if reason is not None:
+                    self._auto_disable(spec, reason, now)
         self._smooth(now)
         self._metrics.tick_completed(time.monotonic() - tick_began)
         return executed

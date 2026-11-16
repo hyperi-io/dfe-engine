@@ -61,6 +61,7 @@ PHASE_OFFSET = "hunt_phase_offset"
 PHASE_SHIFTS = "hunt_phase_shift_total"
 OBSERVED_OVERLAP_PEAK = "hunt_observed_overlap_peak"
 OBSERVED_MEM_PEAK = "hunt_observed_mem_peak_bytes"
+AUTODISABLED = "hunt_autodisabled_total"
 
 
 class HuntRunnerMetrics:
@@ -198,6 +199,11 @@ class HuntRunnerMetrics:
             OBSERVED_MEM_PEAK,
             "Largest summed peak memory of hunt queries finishing in one bucket of the "
             "trailing hour, read from query_log_archive",
+        )
+        self._autodisabled = manager.counter(
+            AUTODISABLED,
+            "Hunts the runner stopped after repeated resource-limit failures, by reason",
+            ["hunt_id", "reason"],
         )
 
     @property
@@ -386,6 +392,12 @@ class HuntRunnerMetrics:
         self._observed_overlap.set(overlap_peak)
         self._observed_mem.set(mem_peak_bytes)
 
+    def auto_disabled(self, hunt_id: str, *, reason: str) -> None:
+        """Record a hunt the runner stopped after repeated resource-limit failures."""
+        if self._manager is None:
+            return
+        self._autodisabled.labels(hunt_id=hunt_id, reason=reason).inc()
+
 
 def create(app_name: str = SERVICE_NAME) -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -425,6 +437,7 @@ def _register_unprefixed_groups(manager: Any) -> None:
 
 
 __all__ = [
+    "AUTODISABLED",
     "BACKLOG",
     "CLAIMS",
     "CLICKHOUSE_UNAVAILABLE",

@@ -641,6 +641,15 @@ class TestEnvOverrides:
         ("path", "env", "default", "raw", "expected"),
         [
             ("hunts.phase_spread_fraction", "HUNTS_PHASE_SPREAD_FRACTION", 0.8, "0.5", 0.5),
+            ("hunts.autodisable.enabled", "HUNTS_AUTODISABLE_ENABLED", True, "false", False),
+            ("hunts.autodisable.failures", "HUNTS_AUTODISABLE_FAILURES", 3, "5", 5),
+            (
+                "hunts.autodisable.window_seconds",
+                "HUNTS_AUTODISABLE_WINDOW_SECONDS",
+                3600,
+                "900",
+                900,
+            ),
             ("hunts.smoothing.enabled", "HUNTS_SMOOTHING_ENABLED", False, "true", True),
             ("hunts.smoothing.cycle_seconds", "HUNTS_SMOOTHING_CYCLE_SECONDS", 300.0, "60", 60.0),
             ("hunts.smoothing.bucket_seconds", "HUNTS_SMOOTHING_BUCKET_SECONDS", 30, "10", 10),
@@ -754,6 +763,8 @@ class TestEnvOverrides:
         [
             {"phase_spread_fraction": 0},
             {"phase_spread_fraction": 1.5},
+            {"autodisable": {"failures": 0}},
+            {"autodisable": {"window_seconds": 0}},
             {"smoothing": {"hysteresis": 1.0}},
             {"smoothing": {"max_step_fraction": 0}},
             {"smoothing": {"weight_memory": 1.5}},

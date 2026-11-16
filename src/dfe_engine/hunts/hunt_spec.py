@@ -69,6 +69,9 @@ class HuntSpec(BaseModel):
     alerts: dict[str, Any] = {}
     # FIXED watermark field - the always-present common-header column.
     timestamp_field: str = TIMESTAMP_FIELD
+    # False keeps the hunt out of the runner's specs, so it fires nothing and KEDA
+    # stops counting it, while its YAML, state and watermark stay.
+    enabled: bool = True
 
     @field_validator("queries", mode="before")
     @classmethod

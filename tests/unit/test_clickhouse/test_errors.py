@@ -52,6 +52,7 @@ class TestClassify:
         assert classify(_exc(62)) is ErrorCategory.USER_ERROR  # SYNTAX_ERROR
         assert classify(_exc(60)) is ErrorCategory.NOT_FOUND  # UNKNOWN_TABLE
         assert classify(_exc(241)) is ErrorCategory.RESOURCE_LIMIT  # MEMORY_LIMIT_EXCEEDED
+        assert classify(_exc(201)) is ErrorCategory.RESOURCE_LIMIT  # QUOTA_EXCEEDED
         assert classify(_exc(159)) is ErrorCategory.TIMEOUT  # TIMEOUT_EXCEEDED
 
     def test_python_builtin_connection_errors(self):
@@ -82,6 +83,7 @@ class TestIsRetryableError:
 
     def test_memory_limit_not_retryable(self):
         assert is_retryable_error(_exc(241)) is False
+        assert is_retryable_error(_exc(201)) is False
 
     def test_exec_timeout_not_retryable(self):
         # 159 TIMEOUT_EXCEEDED is a query-exec timeout, NOT a transport timeout.
