@@ -217,20 +217,11 @@ def test_enabling_an_auto_disabled_hunt_clears_the_auto_disable(
         f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=True), headers=admin_headers
     )
     assert resp.status_code == 200
-    assert ch.inserts == [
-        (
-            "hunt_state",
-            [[f"{created_hunt}#stopped", 0, 0, None, ""]],
-            [
-                "hunt_id",
-                "overrun_count",
-                "too_aggressive",
-                "auto_disabled_at",
-                "auto_disabled_reason",
-            ],
-            "dfe",
-        )
-    ]
+    assert len(ch.inserts) == 1
+    table, rows, columns, database = ch.inserts[0]
+    assert (table, database) == ("hunt_state", "dfe")
+    assert rows[0][:5] == [f"{created_hunt}#stopped", 0, 0, None, ""]
+    assert columns[-1] == "updated"
 
 
 @pytest.mark.parametrize(

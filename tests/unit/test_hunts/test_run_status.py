@@ -150,20 +150,20 @@ def test_clearing_an_auto_disable_writes_the_stop_marker_with_no_time_and_reads_
     clear_auto_disable(ch, "dfe", "h")
     # No read: the counters live in the hunt's own row and are not touched.
     assert ch.parameters is None
-    assert ch.inserts == [
-        (
-            "hunt_state",
-            [["h#stopped", 0, 0, None, ""]],
-            [
-                "hunt_id",
-                "overrun_count",
-                "too_aggressive",
-                "auto_disabled_at",
-                "auto_disabled_reason",
-            ],
-            "dfe",
-        )
+    table, rows, columns, database = ch.inserts[0]
+    assert (table, database) == ("hunt_state", "dfe")
+    assert columns == [
+        "hunt_id",
+        "overrun_count",
+        "too_aggressive",
+        "auto_disabled_at",
+        "auto_disabled_reason",
+        "updated",
     ]
+    # Its own version stamp: a clear left to the column default is the same block as
+    # the last clear, which ClickHouse drops as a duplicate on a replicated table.
+    assert rows[0][:5] == ["h#stopped", 0, 0, None, ""]
+    assert rows[0][5].tzinfo is not None
 
 
 def test_no_hunt_ids_asks_clickhouse_nothing():
