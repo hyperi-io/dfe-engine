@@ -133,7 +133,8 @@ class SchemaLock:
 
     Construct with the table's real name, which the caller reads off the rendered
     manifest object -- this module names no table of its own. With no *holder*,
-    the instance writes the hostname plus a suffix of its own.
+    the instance writes the hostname plus a suffix of its own. A lock name other than
+    the default is an independent lease in the same table.
     """
 
     def __init__(
@@ -144,8 +145,10 @@ class SchemaLock:
         table: str,
         holder: str | None = None,
         lease_seconds: int = 300,
+        lock_name: str = LOCK_NAME,
     ) -> None:
         self._client = client
+        self._lock_name = lock_name
         self._database = database
         self._table = table
         # Concurrent deploys on one pod each build a lock, and a tie needs their names to differ.
@@ -184,7 +187,9 @@ class SchemaLock:
             "WHERE lock_name = {lock:String}"
         )
         try:
-            result = self._client.query(sql, parameters={"lock": LOCK_NAME}, settings=READ_SETTINGS)
+            result = self._client.query(
+                sql, parameters={"lock": self._lock_name}, settings=READ_SETTINGS
+            )
             rows = list(result.result_rows)
         except Exception as exc:
             raise _lock_error("could not read the schema lock", exc) from exc
@@ -281,7 +286,7 @@ class SchemaLock:
         claimed, ends = self._claimed_at, datetime.now(UTC)
         self._write_rows(
             [
-                self._row(LOCK_NAME, claimed, ends, 1),
+                self._row(self._lock_name, claimed, ends, 1),
                 self._row(self._marker(claimed), claimed, ends, 1),
             ]
         )
@@ -331,7 +336,7 @@ class SchemaLock:
 
     def _marker(self, claimed_at: datetime) -> str:
         """The lock name of this lock's marker for the claim made at *claimed_at*."""
-        return f"{LOCK_NAME}/claim/{self._holder}/{claimed_at.isoformat(timespec='milliseconds')}"
+        return f"{self._lock_name}/claim/{self._holder}/{claimed_at.isoformat(timespec='milliseconds')}"
 
     def _end_marker(self, claimed_at: datetime, expires: datetime | None = None) -> None:
         """Mark the claim made at *claimed_at* as holding nothing."""
@@ -366,8 +371,8 @@ class SchemaLock:
             "WHERE startsWith(lock_name, {prefix:String}) GROUP BY holder, acquired_at"
         )
         parameters = {
-            "lock": LOCK_NAME,
-            "prefix": f"{LOCK_NAME}/claim/",
+            "lock": self._lock_name,
+            "prefix": f"{self._lock_name}/claim/",
             "now": now.replace(tzinfo=None),
         }
         try:
@@ -392,7 +397,7 @@ class SchemaLock:
         expires = now + timedelta(seconds=self._lease_seconds)
         self._write_rows(
             [
-                self._row(LOCK_NAME, acquired, expires, 0),
+                self._row(self._lock_name, acquired, expires, 0),
                 self._row(self._marker(acquired), acquired, expires, 0),
             ]
         )
@@ -421,9 +426,15 @@ class SchemaLock:
         return [lock_name, self._holder, acquired, expires.replace(microsecond=0), released]
 
     def _write(
-        self, acquired: datetime, *, expires: datetime, released: int, lock_name: str = LOCK_NAME
+        self,
+        acquired: datetime,
+        *,
+        expires: datetime,
+        released: int,
+        lock_name: str | None = None,
     ) -> None:
-        self._write_rows([self._row(lock_name, acquired, expires, released)])
+        name = self._lock_name if lock_name is None else lock_name
+        self._write_rows([self._row(name, acquired, expires, released)])
 
     def _write_rows(self, rows: list[list[Any]]) -> None:
         settings = self._write_settings()

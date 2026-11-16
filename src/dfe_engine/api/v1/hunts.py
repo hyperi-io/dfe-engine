@@ -51,7 +51,7 @@ from dfe_engine.hunts.hunt_config_registry import (
     resolve_display_name,
 )
 from dfe_engine.hunts.run_status import RunStatus, live_runner_count, read_run_status
-from dfe_engine.hunts.schedule import next_due
+from dfe_engine.hunts.schedule import next_due, read_schedule
 from dfe_engine.hunts.spec_loader import interval_seconds_for
 from dfe_engine.hunts.validator import HuntValidator
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
@@ -383,16 +383,45 @@ def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
         return {}
 
 
-def _next_due(row: dict[str, Any], now: int, fraction: float) -> int | None:
-    """The hunt's next scheduled fire, from the same cron reading and phase spread the runner uses."""
+def _learned_offsets(enabled: bool) -> dict[str, tuple[int, int]]:
+    """The offsets ``hunt_schedule`` holds, read once per listing when smoothing is on.
+
+    Best-effort like the run state: an unreadable table leaves every next_due on
+    its hash offset rather than failing the page.
+    """
+    if not enabled:
+        return {}
+    try:
+        client, db = _data_database_client()
+        return read_schedule(client, db)
+    except Exception as exc:
+        logger.warning(f"hunt schedule offsets unavailable: {exc}")
+        return {}
+
+
+def _next_due(
+    row: dict[str, Any], now: int, fraction: float, learned: dict[str, tuple[int, int]]
+) -> int | None:
+    """The hunt's next fire, from the same cron reading and offset source the runner uses.
+
+    A learned offset applies only while the hunt's interval matches the one it was
+    learned for, as in the runner.
+    """
     interval = interval_seconds_for({"cron": row.get("cron")}, row["name"])
     if interval is None:
         return None
-    return next_due(row["name"], interval, now, fraction)
+    offset = None
+    if row["name"] in learned and learned[row["name"]][0] == interval:
+        offset = learned[row["name"]][1]
+    return next_due(row["name"], interval, now, fraction, offset)
 
 
 def _hunt_row_to_summary(
-    row: dict[str, Any], status: RunStatus | None, now: int, fraction: float
+    row: dict[str, Any],
+    status: RunStatus | None,
+    now: int,
+    fraction: float,
+    learned: dict[str, tuple[int, int]],
 ) -> HuntSummary:
     customers = row.get("customers") or []
     # No status = the runner has never touched this hunt, or ClickHouse is down.
@@ -411,7 +440,7 @@ def _hunt_row_to_summary(
         last_run_rows=run.last_run_rows,
         too_aggressive=run.too_aggressive,
         run_requested=run.run_requested,
-        next_due=_next_due(row, now, fraction),
+        next_due=_next_due(row, now, fraction, learned),
     )
 
 
@@ -494,7 +523,10 @@ def list_hunts(
     now = int(time.time())
     status = _run_status_for([row["name"] for row in raw], now)
     fraction = settings.hunts.phase_spread_fraction
-    summaries = [_hunt_row_to_summary(row, status.get(row["name"]), now, fraction) for row in raw]
+    learned = _learned_offsets(settings.hunts.smoothing.enabled)
+    summaries = [
+        _hunt_row_to_summary(row, status.get(row["name"]), now, fraction, learned) for row in raw
+    ]
     return paginate(summaries, query, bound={"search": search, "rule": rule})
 
 

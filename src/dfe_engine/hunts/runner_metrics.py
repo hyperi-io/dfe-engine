@@ -52,6 +52,15 @@ SAFE_HORIZON_QUERY_DURATION = "hunt_safe_horizon_query_duration_seconds"
 OVERLAP_ROWS_REREAD = "hunt_overlap_rows_reread_total"
 DUPLICATES_SKIPPED = "hunt_duplicates_skipped_total"
 DETECTION_LATENCY = "hunt_detection_latency_seconds"
+SMOOTHING_ENABLED = "hunt_smoothing_enabled"
+SMOOTHING_FLATNESS = "hunt_smoothing_flatness"
+SMOOTHING_OBJECTIVE = "hunt_smoothing_objective"
+COST_MEM_BYTES = "hunt_cost_mem_bytes"
+COST_DURATION_MS = "hunt_cost_duration_ms"
+PHASE_OFFSET = "hunt_phase_offset"
+PHASE_SHIFTS = "hunt_phase_shift_total"
+OBSERVED_OVERLAP_PEAK = "hunt_observed_overlap_peak"
+OBSERVED_MEM_PEAK = "hunt_observed_mem_peak_bytes"
 
 
 class HuntRunnerMetrics:
@@ -157,6 +166,38 @@ class HuntRunnerMetrics:
             DETECTION_LATENCY,
             "Seconds from a matched row's _timestamp_load to its detection's insert",
             ["hunt_id"],
+        )
+        self._smoothing_enabled = manager.gauge(
+            SMOOTHING_ENABLED, "1 while phase drift is on in this runner"
+        )
+        self._smoothing_flatness = manager.gauge(
+            SMOOTHING_FLATNESS, "Peak over mean of the composite load curve, 1.0 when flat"
+        )
+        self._smoothing_objective = manager.gauge(
+            SMOOTHING_OBJECTIVE, "Sum of squared composite pressure over the hyperperiod"
+        )
+        self._cost_mem = manager.gauge(
+            COST_MEM_BYTES, "p95 peak memory of one fire of the hunt", ["hunt_id"]
+        )
+        self._cost_duration = manager.gauge(
+            COST_DURATION_MS, "p95 duration of one fire of the hunt", ["hunt_id"]
+        )
+        self._phase_offset = manager.gauge(
+            PHASE_OFFSET, "Seconds into its interval the hunt fires", ["hunt_id"]
+        )
+        self._phase_shifts = manager.counter(
+            PHASE_SHIFTS, "Offset moves the controller committed", ["hunt_id"]
+        )
+
+        self._observed_overlap = manager.gauge(
+            OBSERVED_OVERLAP_PEAK,
+            "Most hunt queries finishing in one bucket of the trailing hour, read from "
+            "query_log_archive",
+        )
+        self._observed_mem = manager.gauge(
+            OBSERVED_MEM_PEAK,
+            "Largest summed peak memory of hunt queries finishing in one bucket of the "
+            "trailing hour, read from query_log_archive",
         )
 
     @property
@@ -305,6 +346,46 @@ class HuntRunnerMetrics:
         for value in seconds:
             histogram.observe(value)
 
+    def smoothing_enabled(self, on: bool) -> None:
+        """Record whether phase drift is on in this runner."""
+        if self._manager is None:
+            return
+        self._smoothing_enabled.set(1 if on else 0)
+
+    def smoothing_cycle(self, *, flatness: float, objective: float) -> None:
+        """Record the load curve's flatness and objective after a controller cycle."""
+        if self._manager is None:
+            return
+        self._smoothing_flatness.set(flatness)
+        self._smoothing_objective.set(objective)
+
+    def hunt_cost(self, hunt_id: str, *, mem_bytes: float, duration_ms: float) -> None:
+        """Record the p95 cost of one fire of a hunt."""
+        if self._manager is None:
+            return
+        self._cost_mem.labels(hunt_id=hunt_id).set(mem_bytes)
+        self._cost_duration.labels(hunt_id=hunt_id).set(duration_ms)
+
+    def phase_offset(self, hunt_id: str, offset: int) -> None:
+        """Record the seconds into its interval a hunt fires."""
+        if self._manager is None:
+            return
+        self._phase_offset.labels(hunt_id=hunt_id).set(offset)
+
+    def phase_shift(self, hunt_id: str, offset: int) -> None:
+        """Record a committed offset move and the offset it landed on."""
+        if self._manager is None:
+            return
+        self._phase_shifts.labels(hunt_id=hunt_id).inc()
+        self._phase_offset.labels(hunt_id=hunt_id).set(offset)
+
+    def observed(self, *, overlap_peak: int, mem_peak_bytes: float) -> None:
+        """Record the trailing hour's load as the archive saw it, the evidence beside the model."""
+        if self._manager is None:
+            return
+        self._observed_overlap.set(overlap_peak)
+        self._observed_mem.set(mem_peak_bytes)
+
 
 def create(app_name: str = SERVICE_NAME) -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -347,14 +428,20 @@ __all__ = [
     "BACKLOG",
     "CLAIMS",
     "CLICKHOUSE_UNAVAILABLE",
+    "COST_DURATION_MS",
+    "COST_MEM_BYTES",
     "DETECTIONS_CAPPED",
     "DETECTIONS_DROPPED",
     "DETECTION_LATENCY",
     "DUPLICATES_SKIPPED",
     "FIRES_HELD",
     "FIRE_FAILURES",
+    "OBSERVED_MEM_PEAK",
+    "OBSERVED_OVERLAP_PEAK",
     "OVERLAP_ROWS_REREAD",
     "OVERRUNS",
+    "PHASE_OFFSET",
+    "PHASE_SHIFTS",
     "ROWS_WRITTEN",
     "RUNS",
     "RUN_DURATION",
@@ -365,6 +452,9 @@ __all__ = [
     "SAFE_HORIZON_QUERY_DURATION",
     "SAFE_HORIZON_SECONDS_BEHIND",
     "SAFE_HORIZON_UNREADABLE",
+    "SMOOTHING_ENABLED",
+    "SMOOTHING_FLATNESS",
+    "SMOOTHING_OBJECTIVE",
     "TICK_DURATION",
     "HuntRunnerMetrics",
     "create",
