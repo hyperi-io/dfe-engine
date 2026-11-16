@@ -415,8 +415,10 @@ def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
 def _clear_auto_disable_if_enabled(name: str, *, enabled: bool) -> None:
     """Re-enable a hunt the runner auto-disabled when the save turns it on.
 
-    Best-effort like the run state: the YAML is already saved, so an unreachable
-    ClickHouse leaves the stop in place for the next save rather than failing this one.
+    Only a save that names ``enabled: true`` clears the stop, so an edit of the cron
+    or the rules leaves a hunt the runner stopped where it is. Best-effort like the
+    run state: the YAML is already saved, so an unreachable ClickHouse leaves the
+    stop in place for the next save rather than failing this one.
     """
     if not enabled:
         return
@@ -661,7 +663,9 @@ def update_hunt(
     _validate_hunt_config(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
-    _clear_auto_disable_if_enabled(name, enabled=body.enabled)
+    _clear_auto_disable_if_enabled(
+        name, enabled="enabled" in body.model_fields_set and body.enabled
+    )
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(name, config)

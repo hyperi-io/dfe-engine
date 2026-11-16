@@ -1375,8 +1375,6 @@ class TestEverySettingIsRead:
     # Read inside settings.py by e2e_routes_enabled, which this search skips.
     KNOWN_UNREAD = {
         ("DFESettings", "e2e_server"),
-        # Read by the runner's auto-disable, built beside this.
-        ("HuntsSettings", "autodisable"),
     }
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the

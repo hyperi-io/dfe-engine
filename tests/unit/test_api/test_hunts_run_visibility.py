@@ -234,16 +234,20 @@ def test_enabling_an_auto_disabled_hunt_clears_the_auto_disable(
 
 
 @pytest.mark.parametrize(
-    ("enabled", "disabled_at"),
-    [(False, 1700000000), (True, None)],
-    ids=["saved-disabled", "never-auto-disabled"],
+    ("changes", "disabled_at"),
+    [
+        ({"enabled": False}, 1700000000),
+        ({"enabled": True}, None),
+        ({"cron": "*/7 * * * *"}, 1700000000),
+    ],
+    ids=["saved-disabled", "never-auto-disabled", "an-edit-that-omits-enabled"],
 )
 def test_a_save_that_does_not_re_enable_an_auto_disabled_hunt_writes_no_state(
-    client, admin_headers, created_hunt, coordination, enabled, disabled_at
+    client, admin_headers, created_hunt, coordination, changes, disabled_at
 ):
     ch = coordination(disabled_at, "resource_limit:241" if disabled_at else "")
     resp = client.put(
-        f"/api/v1/hunts/{created_hunt}", json=_update_body(enabled=enabled), headers=admin_headers
+        f"/api/v1/hunts/{created_hunt}", json=_update_body(**changes), headers=admin_headers
     )
     assert resp.status_code == 200
     assert ch.inserts == []

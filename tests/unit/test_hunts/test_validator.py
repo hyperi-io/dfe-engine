@@ -113,6 +113,25 @@ class TestValidatorSchedulingFields:
         data = _base_hunt_data()
         HuntValidator.validate_hunt_configuration(data, rule_dir, "timestamp_load")
 
+    @pytest.mark.parametrize(
+        ("enabled", "accepted"),
+        [
+            pytest.param(True, True, id="true"),
+            pytest.param(False, True, id="false"),
+            pytest.param("false", False, id="string-false-is-refused"),
+            pytest.param(0, False, id="int-is-refused"),
+            pytest.param(None, False, id="null-is-refused"),
+        ],
+    )
+    def test_enabled_is_a_bool_or_refused(self, rule_dir, enabled, accepted):
+        data = _base_hunt_data()
+        data["enabled"] = enabled
+        if accepted:
+            HuntValidator.validate_hunt_configuration(data, rule_dir, "timestamp_load")
+        else:
+            with pytest.raises(ValueError, match="'enabled'"):
+                HuntValidator.validate_hunt_configuration(data, rule_dir, "timestamp_load")
+
 
 class TestValidatorRuleFile:
     """Each rule is checked as the ``{name}.yaml`` the hunt runner reads."""

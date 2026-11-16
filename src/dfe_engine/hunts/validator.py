@@ -116,6 +116,11 @@ class HuntValidator:
                 "Invalid 'checkpoint_timestamp_field'. It should be a non-empty string."
             )
 
+        # A string such as "false" would read as enabled, so only a YAML bool is taken.
+        enabled = hunt_data.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"Invalid 'enabled' value: {enabled!r}. It should be true or false.")
+
         HuntValidator._validate_query(hunt_data.get("query"))
 
     @staticmethod

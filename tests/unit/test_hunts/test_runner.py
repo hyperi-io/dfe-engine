@@ -120,6 +120,9 @@ class _RecordingCoordinator:
         self.calls.append("pending_runs")
         return {}
 
+    def auto_disabled_hunts(self) -> dict[str, str]:
+        return {}
+
     def get_watermark(self, hunt_id: str) -> int | None:
         return None
 
@@ -768,3 +771,140 @@ def test_hunts_past_the_cap_take_their_turn_on_the_next_ticks(fails):
         assert len(worker.ran) == tick + 1, worker.ran
 
     assert sorted(worker.ran) == ids
+
+
+def _code(code: int) -> Exception:
+    """A driver-style error carrying a ClickHouse ``Code: NNN``."""
+    return Exception(f"Code: {code}. DB::Exception: boom")
+
+
+@pytest.mark.parametrize(
+    ("failures", "window", "hits", "want"),
+    [
+        pytest.param(
+            3, 3600, [(0, 241), (10, 241), (20, 241)], "resource_limit:241", id="k_hits_in_window"
+        ),
+        pytest.param(3, 3600, [(0, 241), (10, 241)], None, id="under_k"),
+        pytest.param(
+            3, 60, [(0, 241), (10, 241), (120, 241)], None, id="old_hits_fall_out_of_the_window"
+        ),
+        pytest.param(
+            3,
+            3600,
+            [(0, 241), (10, 201), (20, 158)],
+            "resource_limit:158",
+            id="quota_and_too_many_rows_count",
+        ),
+        pytest.param(3, 3600, [(0, 62), (10, 62), (20, 62)], None, id="syntax_errors_never_count"),
+        pytest.param(
+            3, 3600, [(0, 516), (10, 241), (20, 241)], None, id="an_auth_failure_is_not_a_hit"
+        ),
+        pytest.param(0, 3600, [(0, 241), (10, 241), (20, 241)], None, id="autodisable_off"),
+    ],
+)
+def test_limit_tripped_counts_only_resource_limits_inside_the_window(failures, window, hits, want):
+    tracker = HuntFailures(autodisable_failures=failures, autodisable_window=window)
+    reasons = [tracker.limit_tripped("h", now, _code(code)) for now, code in hits]
+    assert reasons[-1] == want
+    assert all(r is None for r in reasons[:-1])
+
+
+def test_a_tripped_hunt_starts_its_count_again():
+    tracker = HuntFailures(autodisable_failures=2, autodisable_window=3600)
+    assert tracker.limit_tripped("h", 0, _code(241)) is None
+    assert tracker.limit_tripped("h", 1, _code(241)) == "resource_limit:241"
+    assert tracker.limit_tripped("h", 2, _code(241)) is None
+    tracker.retain([])
+    assert tracker.limit_tripped("h", 3, _code(241)) is None
+
+
+class _StoppingCoordinator(_RecordingCoordinator):
+    """A coordinator whose hunt_state lists auto-disabled hunts and records new ones."""
+
+    def __init__(self, disabled: dict[str, str] | None = None, *, raises: bool = False) -> None:
+        super().__init__()
+        self.disabled = dict(disabled or {})
+        self.recorded: list[tuple[str, str, int]] = []
+        self._raises = raises
+
+    def auto_disabled_hunts(self) -> dict[str, str]:
+        if self._raises:
+            raise ConnectionError("refused")
+        return dict(self.disabled)
+
+    def record_auto_disable(self, hunt_id: str, reason: str, now: int) -> None:
+        self.recorded.append((hunt_id, reason, now))
+        self.disabled[hunt_id] = reason
+
+
+class _LimitWorker(_Worker):
+    """A worker whose every fire trips the ClickHouse memory limit."""
+
+    def __init__(self) -> None:
+        self.runs = 0
+        self.alerts: list[tuple[str, str]] = []
+
+    def run(self, spec, fire: int) -> None:
+        self.runs += 1
+        raise Exception("Code: 241. DB::Exception: Memory limit exceeded")
+
+    def alert_auto_disabled(self, spec, reason: str) -> None:
+        self.alerts.append((spec.hunt_id, reason))
+
+
+def test_an_auto_disabled_hunt_in_hunt_state_is_never_fired():
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    coord = _StoppingCoordinator({"h": "resource_limit:241"})
+    worker = _CountingWorker()
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    runner = HuntRunner(coord, worker, {"h": spec}, cap=8)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    runner.tick(600_000 + phase_offset("h", 600))
+    assert worker.runs == 0
+
+
+def test_k_resource_limit_failures_stop_the_hunt_record_it_and_alert():
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    coord = _StoppingCoordinator()
+    worker = _LimitWorker()
+    failures = HuntFailures(
+        initial_seconds=0,
+        max_seconds=0,
+        jitter=lambda w: 0.0,
+        autodisable_failures=2,
+        autodisable_window=3600,
+    )
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    runner = HuntRunner(coord, worker, {"h": spec}, cap=8, failures=failures)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    fire = 600_000 + phase_offset("h", 600)
+    runner.tick(fire)
+    runner.tick(fire + 1)
+    assert worker.runs == 2
+    assert coord.recorded == [("h", "resource_limit:241", fire + 1)]
+    assert worker.alerts == [("h", "resource_limit:241")]
+    # Stopped: the next tick fires nothing, even with the back-off at zero.
+    runner.tick(fire + 2)
+    assert worker.runs == 2
+
+
+def test_an_unreadable_hunt_state_keeps_this_runners_own_stops():
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    coord = _StoppingCoordinator()
+    worker = _LimitWorker()
+    failures = HuntFailures(
+        initial_seconds=0,
+        max_seconds=0,
+        jitter=lambda w: 0.0,
+        autodisable_failures=1,
+        autodisable_window=3600,
+    )
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    runner = HuntRunner(coord, worker, {"h": spec}, cap=8, failures=failures)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    fire = 600_000 + phase_offset("h", 600)
+    runner.tick(fire)
+    assert coord.recorded[0][0] == "h"
+    coord._raises = True
+    runner.tick(fire + 1)
+    assert worker.runs == 1

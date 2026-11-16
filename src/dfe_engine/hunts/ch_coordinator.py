@@ -63,6 +63,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from scalo.logger import logger
@@ -111,11 +112,30 @@ class Lease:
 
 @dataclass(frozen=True, slots=True)
 class HuntStateRow:
-    """Persisted UI signal for a hunt (overrun / too-aggressive)."""
+    """Persisted UI signal for a hunt: overrun count, too-aggressive, and an auto-disable.
+
+    Attributes:
+        hunt_id: The hunt.
+        overrun_count: Fires deferred because the previous one still ran.
+        too_aggressive: Whether the schedule is tighter than the hunt keeps up with.
+        auto_disabled_at: Epoch seconds the runner stopped the hunt, None while it runs.
+        auto_disabled_reason: The error category and code that tripped it, empty otherwise.
+    """
 
     hunt_id: str
     overrun_count: int
     too_aggressive: bool
+    auto_disabled_at: int | None = None
+    auto_disabled_reason: str = ""
+
+
+_STATE_COLUMNS = [
+    "hunt_id",
+    "overrun_count",
+    "too_aggressive",
+    "auto_disabled_at",
+    "auto_disabled_reason",
+]
 
 
 class ChCoordinator:
@@ -507,16 +527,68 @@ class ChCoordinator:
     def get_state(self, hunt_id: str) -> HuntStateRow | None:
         """The hunt's persisted overrun / too-aggressive signal, if any."""
         rows = self._ch.query(
-            f"SELECT overrun_count, too_aggressive FROM {self._qdb}.hunt_state "  # noqa: S608 - quoted configured database, values bound
+            "SELECT overrun_count, too_aggressive, toUnixTimestamp(auto_disabled_at), "  # noqa: S608 - quoted configured database, values bound
+            f"auto_disabled_reason FROM {self._qdb}.hunt_state "
             "WHERE hunt_id = {h:String} ORDER BY updated DESC LIMIT 1",
             parameters={"h": hunt_id},
         ).result_rows
         if not rows:
             return None
+        disabled_at = rows[0][2]
         return HuntStateRow(
             hunt_id=hunt_id,
             overrun_count=int(rows[0][0]),
             too_aggressive=bool(rows[0][1]),
+            auto_disabled_at=int(disabled_at) if disabled_at is not None else None,
+            auto_disabled_reason=str(rows[0][3] or ""),
+        )
+
+    def auto_disabled_hunts(self) -> dict[str, str]:
+        """Every hunt the runner has stopped, as ``hunt_id -> reason``, read fresh each tick.
+
+        The API clears an auto-disable by writing a row with a NULL time, so a
+        re-enabled hunt leaves this map on the next read and fires again.
+        """
+        rows = self._ch.query(
+            "SELECT hunt_id, reason FROM (SELECT hunt_id, "  # noqa: S608 - quoted configured database
+            "argMax(auto_disabled_at, updated) AS at, argMax(auto_disabled_reason, updated) AS reason "
+            f"FROM {self._qdb}.hunt_state GROUP BY hunt_id) WHERE at IS NOT NULL"
+        ).result_rows
+        return {str(r[0]): str(r[1]) for r in rows}
+
+    def _write_state(self, row: HuntStateRow) -> None:
+        """Write the hunt's whole state row, since a ReplacingMergeTree row replaces all columns."""
+        disabled_at = (
+            datetime.fromtimestamp(row.auto_disabled_at, tz=UTC)
+            if row.auto_disabled_at is not None
+            else None
+        )
+        self._ch.insert(
+            "hunt_state",
+            [
+                [
+                    row.hunt_id,
+                    row.overrun_count,
+                    1 if row.too_aggressive else 0,
+                    disabled_at,
+                    row.auto_disabled_reason,
+                ]
+            ],
+            column_names=_STATE_COLUMNS,
+            database=self._db,
+        )
+
+    def record_auto_disable(self, hunt_id: str, reason: str, now: int) -> None:
+        """Stop the hunt: stamp when and why, keeping its overrun counters."""
+        current = self.get_state(hunt_id)
+        self._write_state(
+            HuntStateRow(
+                hunt_id=hunt_id,
+                overrun_count=current.overrun_count if current else 0,
+                too_aggressive=current.too_aggressive if current else False,
+                auto_disabled_at=now,
+                auto_disabled_reason=reason,
+            )
         )
 
     # ---- runs (row count + operator run-now) --------------------------
@@ -582,9 +654,12 @@ class ChCoordinator:
         """
         current = self.get_state(hunt_id)
         count = (current.overrun_count if current else 0) + 1
-        self._ch.insert(
-            "hunt_state",
-            [[hunt_id, count, 1]],
-            column_names=["hunt_id", "overrun_count", "too_aggressive"],
-            database=self._db,
+        self._write_state(
+            HuntStateRow(
+                hunt_id=hunt_id,
+                overrun_count=count,
+                too_aggressive=True,
+                auto_disabled_at=current.auto_disabled_at if current else None,
+                auto_disabled_reason=current.auto_disabled_reason if current else "",
+            )
         )
