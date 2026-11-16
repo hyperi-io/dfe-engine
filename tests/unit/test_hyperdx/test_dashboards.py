@@ -219,8 +219,8 @@ def test_throughput_byte_tiles_never_serialise_json():
     }
 
     assert sizing == {
-        "Bytes ingested": "coalesce(length(_raw), byteSize(_json))",
-        "Top orgs by volume": "coalesce(length(_raw), byteSize(_json))",
+        "Bytes ingested (est.)": "coalesce(length(_raw), byteSize(_json))",
+        "Top orgs by volume (est. bytes)": "coalesce(length(_raw), byteSize(_json))",
     }
 
 
