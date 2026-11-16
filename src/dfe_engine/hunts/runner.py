@@ -51,7 +51,8 @@ from dfe_engine.clickhouse.errors import ErrorCategory, classify, parse_code
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
 from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.runner_metrics import HuntRunnerMetrics
-from dfe_engine.hunts.schedule import latest_fire
+from dfe_engine.hunts.schedule import latest_fire, learned_offsets
+from dfe_engine.hunts.smoothing import PhaseSmoother
 from dfe_engine.hunts.worker import (
     EmptyHuntQuery,
     HuntWorker,
@@ -247,10 +248,14 @@ class HuntRunner:
         metrics: HuntRunnerMetrics | None = None,
         failures: HuntFailures | None = None,
         phase_fraction: float = PHASE_SPREAD_FRACTION,
+        smoother: PhaseSmoother | None = None,
     ) -> None:
         self._coord = coordinator
         # hunts.phase_spread_fraction: the same value publish_schedule writes for KEDA.
         self._phase_fraction = phase_fraction
+        # With smoothing on, every tick reads the offsets KEDA scales on and the smoother
+        # runs its cycle after the fires. None is smoothing off: hash offsets, no reads.
+        self._smoother = smoother
         self._worker = worker
         self._specs = specs
         self._cap = cap
@@ -268,7 +273,9 @@ class HuntRunner:
         watermark = self._coord.get_watermark(hunt_id)
         return watermark is not None and watermark >= fire
 
-    def _fire_for(self, spec: HuntSpec, now: int, requested: dict[str, int]) -> int | None:
+    def _fire_for(
+        self, spec: HuntSpec, now: int, requested: dict[str, int], offsets: dict[str, int]
+    ) -> int | None:
         """The fire this tick should run for the hunt, or None if there is nothing.
 
         The schedule first: the latest fire at or before now, unless the watermark
@@ -276,10 +283,42 @@ class HuntRunner:
         a fire the API wrote down. Both go through the same claim, so a requested
         run cannot double-run one already in flight.
         """
-        fire = latest_fire(spec.hunt_id, spec.interval_seconds, now, self._phase_fraction)
+        fire = latest_fire(
+            spec.hunt_id,
+            spec.interval_seconds,
+            now,
+            self._phase_fraction,
+            offsets.get(spec.hunt_id),
+        )
         if not self._already_run(spec.hunt_id, fire):
             return fire
         return requested.get(spec.hunt_id)
+
+    def _learned_offsets(self) -> dict[str, int]:
+        """The offsets ``hunt_schedule`` holds for these specs, or none with smoothing off.
+
+        A failed read costs this tick the learned offsets, not its runs: the hunts
+        fire on their hash offsets, which is what KEDA counts them against until the
+        table is readable again.
+        """
+        if self._smoother is None:
+            return {}
+        try:
+            return learned_offsets(self._coord.schedule_offsets(), self._specs)
+        except Exception as exc:
+            logger.warning(
+                "hunt schedule offsets unreadable; firing on hash offsets", error=str(exc)
+            )
+            return {}
+
+    def _smooth(self, now: int) -> None:
+        """Run the smoother's cycle if one is due. A failed cycle costs nothing but the cycle."""
+        if self._smoother is None:
+            return
+        try:
+            self._smoother.maybe_cycle(now, self._specs)
+        except Exception as exc:
+            logger.warning("hunt smoothing cycle failed; offsets left as they are", error=str(exc))
 
     def _beat(self, now: int) -> None:
         """Say this runner is alive. A failed beat costs visibility. A lost tick costs runs."""
@@ -317,6 +356,7 @@ class HuntRunner:
         running = self._coord.active_count(now)
         # Read every outstanding run-now once per tick, not once per hunt.
         requested = self._coord.pending_runs(now)
+        offsets = self._learned_offsets()
         executed = 0
         started = 0
         specs = list(self._specs.values())
@@ -325,7 +365,7 @@ class HuntRunner:
             if running + started >= self._cap:
                 self._start = first + reached
                 break  # global cap protects ClickHouse, lateness surfaces as overload
-            fire = self._fire_for(spec, now, requested)
+            fire = self._fire_for(spec, now, requested, offsets)
             if fire is None:
                 continue
             if self._failures.held(spec.hunt_id, now, requested.get(spec.hunt_id)):
@@ -371,5 +411,6 @@ class HuntRunner:
                 self._failures.failed(
                     spec.hunt_id, fire, now, exc, requested=requested.get(spec.hunt_id)
                 )
+        self._smooth(now)
         self._metrics.tick_completed(time.monotonic() - tick_began)
         return executed

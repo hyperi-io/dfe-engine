@@ -15,6 +15,8 @@ applied by scalo's manager, so it is asserted where it is chosen: in ``create``.
 
 from __future__ import annotations
 
+import pytest
+
 from dfe_engine.hunts import runner_metrics as hunt_metrics
 from dfe_engine.hunts.runner_metrics import HuntRunnerMetrics
 from tests.support.recording_metrics import Observation, RecordingManager
@@ -46,6 +48,15 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("counter", "hunt_overlap_rows_reread_total"),
         ("counter", "hunt_duplicates_skipped_total"),
         ("histogram", "hunt_detection_latency_seconds"),
+        ("gauge", "hunt_smoothing_enabled"),
+        ("gauge", "hunt_smoothing_flatness"),
+        ("gauge", "hunt_smoothing_objective"),
+        ("gauge", "hunt_cost_mem_bytes"),
+        ("gauge", "hunt_cost_duration_ms"),
+        ("gauge", "hunt_phase_offset"),
+        ("counter", "hunt_phase_shift_total"),
+        ("gauge", "hunt_observed_overlap_peak"),
+        ("gauge", "hunt_observed_mem_peak_bytes"),
     ]
 
 
@@ -79,6 +90,11 @@ def test_no_backend_registers_nothing_and_records_nothing():
     metrics.clickhouse_unavailable(stage="tick", reason="connection")
     metrics.fire_failed("h", reason="not_found")
     metrics.fire_held("h")
+    metrics.smoothing_enabled(True)
+    metrics.smoothing_cycle(flatness=1.0, objective=0.0)
+    metrics.hunt_cost("h", mem_bytes=1.0, duration_ms=1.0)
+    metrics.phase_offset("h", 1)
+    metrics.phase_shift("h", 1)
 
 
 def test_a_completed_fire_counts_once_and_records_its_duration(manager):
@@ -163,6 +179,51 @@ def test_a_capped_rule_counts_once_and_adds_what_it_dropped(manager):
     assert manager.observed("hunt_detections_dropped_total") == [
         Observation("hunt_detections_dropped_total", labels, "inc", 250)
     ]
+
+
+@pytest.mark.parametrize(
+    ("call", "expected"),
+    [
+        (
+            lambda m: m.smoothing_enabled(True),
+            [Observation("hunt_smoothing_enabled", {}, "set", 1)],
+        ),
+        (
+            lambda m: m.smoothing_enabled(False),
+            [Observation("hunt_smoothing_enabled", {}, "set", 0)],
+        ),
+        (
+            lambda m: m.smoothing_cycle(flatness=1.25, objective=42.0),
+            [
+                Observation("hunt_smoothing_flatness", {}, "set", 1.25),
+                Observation("hunt_smoothing_objective", {}, "set", 42.0),
+            ],
+        ),
+        (
+            lambda m: m.hunt_cost("h", mem_bytes=2048.0, duration_ms=150.0),
+            [
+                Observation("hunt_cost_mem_bytes", {"hunt_id": "h"}, "set", 2048.0),
+                Observation("hunt_cost_duration_ms", {"hunt_id": "h"}, "set", 150.0),
+            ],
+        ),
+        (
+            lambda m: m.phase_offset("h", 90),
+            [Observation("hunt_phase_offset", {"hunt_id": "h"}, "set", 90)],
+        ),
+        (
+            lambda m: m.phase_shift("h", 120),
+            [
+                Observation("hunt_phase_shift_total", {"hunt_id": "h"}, "inc", 1),
+                Observation("hunt_phase_offset", {"hunt_id": "h"}, "set", 120),
+            ],
+        ),
+    ],
+    ids=["enabled-on", "enabled-off", "cycle", "cost", "offset", "shift"],
+)
+def test_the_smoothing_record_calls_produce_their_observations(manager, call, expected):
+    call(HuntRunnerMetrics(manager))
+
+    assert manager.observations == expected
 
 
 def test_create_asks_scalo_for_the_products_own_metric_namespace(monkeypatch):

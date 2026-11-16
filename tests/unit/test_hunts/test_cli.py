@@ -34,8 +34,17 @@ from typer.testing import CliRunner
 from dfe_engine.api import _DfeEngineApp
 from dfe_engine.clickhouse.tls import ClickHouseCaCertUnreadable
 from dfe_engine.hunts import runner_cli as cli
+from dfe_engine.hunts import schedule
+from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.lookups import LookupDatabaseError
-from dfe_engine.settings import DFESettings, HuntsSettings, SecretsSettings
+from dfe_engine.hunts.schedule import phase_offset
+from dfe_engine.hunts.smoothing import PhaseSmoother
+from dfe_engine.settings import (
+    DFESettings,
+    HuntSmoothingSettings,
+    HuntsSettings,
+    SecretsSettings,
+)
 
 runner = CliRunner()
 
@@ -199,8 +208,80 @@ class _Ran(Exception):
 
 
 class _Metrics:
+    def __init__(self) -> None:
+        self.smoothing: list[bool] = []
+
     def clickhouse_unavailable(self, *, stage: str, reason: str) -> None:
         pass
+
+    def smoothing_enabled(self, on: bool) -> None:
+        self.smoothing.append(on)
+
+
+class _ScheduleClient:
+    """A client whose hunt_schedule holds the rows given, as read_schedule reads them."""
+
+    def __init__(self, rows: list[tuple[str, int, int]]) -> None:
+        self.rows = rows
+        self.inserted: list[list] = []
+
+    def query(self, sql: str, **_kwargs):
+        # The insert settings probe reads system.settings, which holds no schedule rows.
+        rows = [(0,)] if "system.settings" in sql else [(h, i, o, 1) for h, i, o in self.rows]
+        return type("R", (), {"result_rows": rows})()
+
+    def insert(self, _table: str, rows: list[list], **_kwargs) -> None:
+        self.inserted.extend(rows)
+
+
+def _settings(smoothing: bool) -> DFESettings:
+    return DFESettings(
+        env="test", hunts=HuntsSettings(smoothing=HuntSmoothingSettings(enabled=smoothing))
+    )
+
+
+def test_smoothing_off_restores_learned_offsets_to_the_hash_and_wires_no_smoother():
+    learned = ("h", 600, phase_offset("h", 600) + 7)
+    client = _ScheduleClient([learned])
+    metrics = _Metrics()
+
+    assert cli._smoother(client, "dfe", _settings(False), metrics) is None  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    assert client.inserted == [["h", 600, phase_offset("h", 600), 1]]
+    assert metrics.smoothing == [False]
+
+
+def test_smoothing_off_with_a_failing_restore_still_starts_the_runner():
+    class _Broken:
+        def query(self, *_args, **_kwargs):
+            raise ConnectionError("refused")
+
+    assert cli._smoother(_Broken(), "dfe", _settings(False), _Metrics()) is None  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+
+
+def test_smoothing_on_wires_a_smoother_and_reports_the_gauge():
+    metrics = _Metrics()
+    smoother = cli._smoother(_ScheduleClient([]), "dfe", _settings(True), metrics)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    assert isinstance(smoother, PhaseSmoother)
+    assert metrics.smoothing == [True]
+
+
+@pytest.mark.parametrize("smoothing", [False, True], ids=["off_resets_to_hash", "on_keeps_learned"])
+def test_materialise_keeps_a_learned_offset_only_with_smoothing_on(
+    setup_calls, monkeypatch, smoothing
+):
+    learned = phase_offset("h", 600) + 7
+    client = _ScheduleClient([("h", 600, learned)])
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    monkeypatch.setattr(cli, "load_settings", lambda: _settings(smoothing))
+    monkeypatch.setattr(cli, "_build_ch", lambda _settings: (client, "dfe"))
+    monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: {"h": spec})
+    monkeypatch.setattr(schedule, "ensure_schedule_schema", lambda *_args, **_kwargs: None)
+
+    result = runner.invoke(cli.app, ["materialise"])
+
+    assert result.exit_code == 0, result.output
+    want = learned if smoothing else phase_offset("h", 600)
+    assert client.inserted == [["h", 600, want, 1]]
 
 
 @pytest.fixture
@@ -222,6 +303,7 @@ def run_events(monkeypatch) -> list[str]:
     monkeypatch.setattr(cli, "init_scalo_logger", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
     monkeypatch.setattr(cli.runner_metrics, "create", _Metrics)
+    monkeypatch.setattr(cli, "restore_hash_offsets", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(cli, "connect_when_available", lambda *_args, **_kwargs: ("ch", "coord"))
     monkeypatch.setattr(cli, "HuntWorker", lambda *_args, **_kwargs: "worker")
     monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: {})

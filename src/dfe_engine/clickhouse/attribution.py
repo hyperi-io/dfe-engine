@@ -44,6 +44,7 @@ class DfeQueryTags:
     feature: str | None = None  # the API / subsystem issuing the query
     kind: str | None = None  # query class (read / ddl / insert / reconcile / ...)
     id: str | None = None  # correlating id (hunt_id, request_id, ...)
+    run: str | None = None  # the run within id this query belongs to (a hunt's fire epoch)
     source: str | None = None  # source_file:line, when captured
     trace_id: str | None = None  # W3C trace id, when propagated
 

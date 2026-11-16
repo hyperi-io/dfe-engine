@@ -208,6 +208,151 @@ class _CountingWorker(_Worker):
         self.runs += 1
 
 
+class _Smoother:
+    """A smoother stand-in that records its cycles and can refuse them."""
+
+    def __init__(self, *, raises: bool = False) -> None:
+        self.cycles: list[int] = []
+        self._raises = raises
+
+    def maybe_cycle(self, now: int, specs: dict) -> None:
+        self.cycles.append(now)
+        if self._raises:
+            raise ConnectionError("refused")
+
+
+class _LearnedCoordinator(_WatermarkCoordinator):
+    """A coordinator whose hunt_schedule holds a learned offset for ``h`` on a 600 s interval."""
+
+    def __init__(self, *, offset: int = 500, interval: int = 600, raises: bool = False) -> None:
+        super().__init__()
+        self._row = (interval, offset)
+        self._raises = raises
+
+    def schedule_offsets(self) -> dict[str, tuple[int, int]]:
+        self.calls.append("schedule_offsets")
+        if self._raises:
+            raise ConnectionError("refused")
+        return {"h": self._row}
+
+    def move(self, offset: int) -> None:
+        """The smoother wrote a new offset for ``h``."""
+        self._row = (self._row[0], offset)
+
+
+class _FireWorker(_Worker):
+    """A worker recording the fire of every run."""
+
+    def __init__(self) -> None:
+        self.fires: list[int] = []
+
+    def run(self, spec, fire: int) -> None:
+        self.fires.append(fire)
+
+
+_B = 600_000  # an interval boundary for a 600 s hunt
+
+
+@pytest.mark.parametrize(
+    ("ticks", "want_fires"),
+    [
+        pytest.param(
+            [(_B + 300, None), (_B + 330, 360), (_B + 360, 360), (_B + 960, 360)],
+            [_B + 300, _B + 360, _B + 960],
+            id="moved_later_after_this_fire_ran_adds_one_short_window",
+        ),
+        pytest.param(
+            [(_B + 100, None), (_B + 330, 360), (_B + 360, 360), (_B + 960, 360)],
+            [_B - 240, _B + 360, _B + 960],
+            id="moved_later_before_this_fire_ran_adds_one_short_window",
+        ),
+        pytest.param(
+            [(_B + 100, None), (_B + 250, 240), (_B + 840, 240)],
+            [_B + 240, _B + 840],
+            id="moved_earlier_before_this_fire_ran_shortens_one_window",
+        ),
+        pytest.param(
+            [(_B + 300, None), (_B + 330, 240), (_B + 840, 240)],
+            [_B + 300, _B + 840],
+            id="moved_earlier_after_this_fire_ran_lengthens_one_window",
+        ),
+    ],
+)
+def test_an_offset_move_keeps_coverage_contiguous_and_never_repeats_a_fire(ticks, want_fires):
+    """Every window starts at the last watermark, so a move costs at most one short window."""
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    coord = _LearnedCoordinator(offset=300)
+    coord.watermarks["h"] = _B - 300  # the previous interval's fire is done
+    worker = _FireWorker()
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    runner = HuntRunner(coord, worker, {"h": spec}, cap=8, smoother=_Smoother())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    watermark_before: list[int] = []
+    for now, offset in ticks:
+        if offset is not None:
+            coord.move(offset)
+        before = coord.watermarks["h"]
+        ran = len(worker.fires)
+        runner.tick(now)
+        if len(worker.fires) > ran:
+            watermark_before.append(before)
+
+    assert worker.fires == want_fires
+    assert worker.fires == sorted(set(worker.fires)), "a fire repeated or went backwards"
+    # Each fire is past the watermark it started from: the window it covers is new rows.
+    assert all(f > wm for f, wm in zip(worker.fires, watermark_before, strict=True))
+    assert coord.watermarks["h"] == want_fires[-1]
+
+
+@pytest.mark.parametrize(
+    ("smoother", "coord", "want_offset"),
+    [
+        pytest.param(
+            None, _LearnedCoordinator(), phase_offset("h", 600), id="off_fires_on_the_hash"
+        ),
+        pytest.param(_Smoother(), _LearnedCoordinator(), 500, id="on_fires_on_the_learned_offset"),
+        pytest.param(
+            _Smoother(),
+            _LearnedCoordinator(interval=900),
+            phase_offset("h", 600),
+            id="on_but_the_interval_changed_falls_back_to_the_hash",
+        ),
+        pytest.param(
+            _Smoother(),
+            _LearnedCoordinator(raises=True),
+            phase_offset("h", 600),
+            id="on_but_the_table_is_unreadable_falls_back_to_the_hash",
+        ),
+    ],
+)
+def test_the_runner_fires_on_the_learned_offset_only_with_a_smoother_wired(
+    smoother, coord, want_offset
+):
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    runner = HuntRunner(coord, _CountingWorker(), {"h": spec}, cap=8, smoother=smoother)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    boundary = 600_000
+    runner.tick(boundary + 599)
+    assert coord.watermarks["h"] == boundary + want_offset
+    assert ("schedule_offsets" in coord.calls) is (smoother is not None)
+
+
+@pytest.mark.parametrize(
+    "raises", [False, True], ids=["cycle_runs_after_the_fires", "a_failed_cycle_costs_no_runs"]
+)
+def test_the_smoother_cycles_once_per_tick_after_the_fires(raises):
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    smoother = _Smoother(raises=raises)
+    coord = _LearnedCoordinator()
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    runner = HuntRunner(coord, _CountingWorker(), {"h": spec}, cap=8, smoother=smoother)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    assert runner.tick(600_500) == 1
+    assert smoother.cycles == [600_500]
+    assert coord.calls.index("release") < len(coord.calls)
+
+
 def _due_runner(
     coord, worker, *, poll_seconds: float = 15.0, metrics=None, failures=None
 ) -> tuple[HuntRunner, int]:

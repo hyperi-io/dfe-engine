@@ -78,7 +78,7 @@ from dfe_engine.clickhouse.lease import (
     write_settings,
 )
 from dfe_engine.clickhouse.quoting import quote_identifier
-from dfe_engine.hunts.schedule import due_count
+from dfe_engine.hunts.schedule import due_count, read_schedule
 from dfe_engine.schema.require import require_objects
 
 _LEASE_COLUMNS = ["hunt_id", "owner", "fire", "lease_until"]
@@ -95,6 +95,7 @@ _COORDINATION_IDS = (
     "data.hunt_schedule",
     "data.hunt_run",
     "data.hunt_runner_heartbeat",
+    "data.schema_lock",
 )
 
 
@@ -459,6 +460,14 @@ class ChCoordinator:
         scaler answer cannot disagree, because both run ``schedule.due_query``.
         """
         return due_count(self._ch, self._db)
+
+    def schedule_offsets(self) -> dict[str, tuple[int, int]]:
+        """Every enabled hunt's ``(interval_seconds, phase_offset)`` from ``hunt_schedule``.
+
+        The offsets KEDA scales on, read by the runner when smoothing is on so both
+        fire a hunt at the same second.
+        """
+        return read_schedule(self._ch, self._db)
 
     # ---- watermark (incremental resume) -------------------------------
 

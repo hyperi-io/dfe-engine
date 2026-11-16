@@ -42,6 +42,7 @@ from typing import Any
 
 import clickhouse_connect
 import typer
+from scalo.logger import logger
 
 from dfe_engine.api import init_scalo_logger
 from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
@@ -54,9 +55,16 @@ from dfe_engine.hunts.delivery import MatchNotifier
 from dfe_engine.hunts.lookups import refuse_tenant_lookups
 from dfe_engine.hunts.rule_compiler import detection_cap
 from dfe_engine.hunts.runner import HuntFailures, HuntRunner
-from dfe_engine.hunts.schedule import publish_schedule
+from dfe_engine.hunts.schedule import (
+    learned_offsets,
+    publish_schedule,
+    read_schedule,
+    restore_hash_offsets,
+)
+from dfe_engine.hunts.smoothing import PhaseSmoother
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.hunts.worker import HuntWorker
+from dfe_engine.schema.plan import LOCK_ID, object_names
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import DFESettings, load_settings
 
@@ -189,14 +197,56 @@ def materialise() -> None:
 
     Deploy-time, not the hot path: run once per hunt-config change so KEDA can
     answer "is any hunt due?" with zero workers running. Idempotent -
-    re-materialising tombstones removed hunts.
+    re-materialising tombstones removed hunts. With smoothing on, an offset the
+    smoother learned for an unchanged hunt is kept rather than reset to the hash.
     """
     init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=False)
     settings = load_settings()
     ch, db = _build_ch(settings)
     specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
-    live = publish_schedule(ch, db, specs, fraction=settings.hunts.phase_spread_fraction)
+    offsets = None
+    if settings.hunts.smoothing.enabled:
+        offsets = learned_offsets(read_schedule(ch, db), specs)
+    live = publish_schedule(
+        ch, db, specs, fraction=settings.hunts.phase_spread_fraction, offsets=offsets
+    )
     typer.echo(f"materialised {live} hunt(s) into {db}.hunt_schedule")
+
+
+def _smoother(
+    ch: Any, db: str, settings: DFESettings, obs: runner_metrics.HuntRunnerMetrics
+) -> PhaseSmoother | None:
+    """The phase smoother when ``hunts.smoothing.enabled``, else None after restoring the hash offsets.
+
+    On, the runner says so at WARN and reports it as a gauge, since it is a beta that
+    moves fire times. Off, any offset a past run learned is rewritten to the hash, so
+    the runner and KEDA agree again, and a failed rewrite is logged rather than fatal.
+    """
+    smoothing = settings.hunts.smoothing
+    fraction = settings.hunts.phase_spread_fraction
+    obs.smoothing_enabled(smoothing.enabled)
+    if not smoothing.enabled:
+        try:
+            restored = restore_hash_offsets(ch, db, fraction=fraction)
+        except Exception as exc:
+            logger.error("hunt_schedule offsets not restored to the hash", error=str(exc))
+            return None
+        if restored:
+            logger.info("hunt_schedule offsets restored to the hash", hunts=restored)
+        return None
+    logger.warning(
+        "hunt smoothing is on: a beta that drifts rate-hunt offsets to flatten ClickHouse load",
+        cycle_seconds=smoothing.cycle_seconds,
+        window_days=smoothing.window_days,
+    )
+    return PhaseSmoother(
+        ch,
+        db,
+        lock_table=object_names(LOCK_ID, data_database=db)[LOCK_ID],
+        settings=smoothing,
+        fraction=fraction,
+        metrics=obs,
+    )
 
 
 @app.command("run")
@@ -247,6 +297,8 @@ def run(
     sources = _spec_sources(settings, db)
     # Outlives each rebuild below, so a reload does not restart a failing hunt's back-off.
     failures = HuntFailures.from_settings(settings.hunts)
+    # Outlives each rebuild too, so a reload does not reset the cycle clock or the lease.
+    smoother = _smoother(ch, db, settings, obs)
 
     def _build_runner() -> HuntRunner:
         return HuntRunner(
@@ -258,6 +310,7 @@ def run(
             metrics=obs,
             failures=failures,
             phase_fraction=settings.hunts.phase_spread_fraction,
+            smoother=smoother,
         )
 
     runners = _ReloadingRunner(
