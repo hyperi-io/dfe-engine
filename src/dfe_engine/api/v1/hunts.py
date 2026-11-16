@@ -307,7 +307,12 @@ class HuntDetailResponse(_HuntConfigFields):
             "and fires nothing."
         ),
     )
-    rules: list[HuntRuleEntry] = Field(min_length=1)
+    # Empty for a YAML hunt that runs a direct query, which the API never writes.
+    rules: list[HuntRuleEntry] = Field(default_factory=list)
+    query: str | None = Field(
+        default=None,
+        description="The SQL a YAML hunt runs in place of rules, read from the deploy repo",
+    )
     # A stored hunt naming none is shown, and runs nothing.
     customers: list[str] = Field(
         default_factory=list, description="Names of the registered orgs the hunt reads"
