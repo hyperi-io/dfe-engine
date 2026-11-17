@@ -164,7 +164,7 @@ The docs site fills the table below from the dfe-infra chart renders at the stac
 | App | KEDA | Triggers by default |
 |-----|------|---------------------|
 | dfe-receiver / dfe-loader | on | CPU ~70% and scalo ScalingPressure (shim, target 70) |
-| dfe-archiver, dfe-transform-elastic / vrl / vector | on | CPU ~70%, plus ScalingPressure on the single, scale and mesh profiles |
+| dfe-archiver, dfe-transform-elastic / vrl / vector | on | CPU ~70%, plus ScalingPressure on the single and scale profiles |
 | dfe-ui | on | CPU ~70% |
 <!-- /dfe-keda-table -->
 
@@ -184,7 +184,6 @@ Replica bounds come from dfe-infra `argocd/values/common.yaml` and the tier prof
 | slim | 1 | 2 | 75 (unused, slim clears the trigger) |
 | single | 1 | 3 | 70 |
 | scale | 2 | 12 | 70 |
-| mesh | 2 | 10 | 70 |
 
 No tier scales to zero.
 

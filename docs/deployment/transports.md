@@ -1,7 +1,7 @@
 <!--
   Project:   dfe-engine
   File:      docs/deployment/transports.md
-  Purpose:   Choosing a profile and a transport. The bus providers. The mesh balancer
+  Purpose:   Choosing a profile and a transport. The bus providers
   License:   BUSL-1.1
   Copyright: (c) 2026 HYPERI PTY LIMITED
 -->
@@ -17,9 +17,8 @@ Pick the profile by what you need to survive.
 | smallest footprint, a stage may drop records when another is down | slim | one pod per stage, direct gRPC, no broker |
 | records survive a stage outage on one node | single | one broker holds them |
 | records survive outages and the stack scales out | scale | broker cluster, replicated ClickHouse, KEDA |
-| scale out without running a broker | mesh | receiver and loader pools behind per-pool listeners, no fetchers or transforms. In the charts but never run live: dfe-infra's `bootstrap.sh` stops on it ([dfe-infra#875](https://github.com/hyperi-io/dfe-infra/issues/875)) |
 
-slim and mesh run on direct, where the receiver pushes records to the loader over gRPC, and to the archiver as well when a source is archived. A source that needs a fetcher or a transform is rejected at save there, so it needs single or scale.
+slim runs on direct, where the receiver pushes records to the loader over gRPC, and to the archiver as well when a source is archived. A source that needs a fetcher or a transform is rejected at save there, so it needs single or scale.
 
 ## The bus is Kafka, the broker is a swap
 
@@ -114,127 +113,11 @@ Values in the deploy repo select the broker. `kafka.provider` chooses which oper
 
 ## Buffering without a bus
 
-On the direct transport no stage stores records, and no fetcher runs, so the receiver is the one stage that holds them. What it holds depends on the receiver's acknowledgement mode, and dfe-infra's `apps/dfe-receiver/profile-mesh.yaml` sets the figures for both.
+On the direct transport no stage stores records, and no fetcher runs, so the receiver is the one stage that holds them. What it holds depends on the receiver's acknowledgement mode.
 
 With acknowledgements on, the default, the receiver builds no buffer or spool. It holds each request until the loader confirms delivery. Once that hold expires the sender gets a 503 and retries from its copy.
 
-With acknowledgements off, the buffer and spool apply. mesh sets `buffer.memory_limit` to 3 GiB of the pod's 4Gi limit, so back-pressure starts at 2.4 GiB, and turns on `buffer.spillover` with 20 GiB of node-local spool per replica. A loader outage shorter than that is invisible to senders, and a longer one back-pressures them (503) until the loader returns. A record held there has had its 2xx, so it is lost if the pod dies, the trade for turning acknowledgements off.
+With acknowledgements off, the receiver's memory buffer and spool apply. A loader outage shorter than they hold is invisible to senders, and a longer one back-pressures them (503) until the loader returns. A record held there has had its 2xx, so it is lost if the pod dies. That is the trade for turning acknowledgements off.
 
-The knobs are the receiver's (`config.example.yaml`, `buffer:`), so a deployer tunes them in the overlay like any other dial.
+The knobs are the receiver's (dfe-receiver `config.example.yaml`, `buffer:`), so a deployer sizes them in the overlay like any other dial.
 
-## The mesh tier balances between pools with a listener per pool
-
-Status: design built, never run against a live cluster. The charts, the `mesh` profile and the engine's pool addressing are on main, and dfe-infra's `bootstrap.sh` stops on `DFE_PROFILE=mesh` ([dfe-infra#875](https://github.com/hyperi-io/dfe-infra/issues/875)).
-
-Every stage on `mesh` is a pool of replicas. A Kubernetes Service in front of a pool balances per connection, and gRPC holds long connections, so one sender would pin one pod. The profile places a listener in front of each pool. Senders address the listener and every request is balanced. One chart helper renders the same listener for every pool as Gateway API resources (a Gateway listener plus a GRPCRoute), so the balancer is a GatewayClass value: Envoy Gateway by default, because the deployment runs it for its external routes, or a cloud provider's Gateway API class, where the swap is the class name alone.
-
-On `mesh` one listener balances each pool, receivers in front and loaders behind.
-
-```mermaid
----
-config:
-  theme: base
-  look: neo
-  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
-  flowchart:
-    curve: linear
-    nodeSpacing: 40
-    rankSpacing: 64
-    padding: 18
-    wrappingWidth: 280
-    htmlLabels: true
-  elk:
-    preset: modelOrder
-  themeVariables:
-    fontSize: 15px
-    lineColor: "#64748B"
-    primaryTextColor: "#0F172A"
-    clusterBorder: "#0072B2"
-    edgeLabelBackground: "#FFFFFF"
-  themeCSS: >-
-    p{margin:0}
-    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
-    .node rect{rx:10px;ry:10px}
-    .cluster rect{rx:16px;ry:16px}
-    .node .label div{min-width:150px}
-    .node.decision .label div{min-width:0}
-    .cluster[data-look] rect{filter:none}
-    .nodeLabel{line-height:1.35}
-    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
-    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
-    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
-    .flowchart-link{stroke-width:1.75px}
-    .labelBkg{background:transparent!important}
-    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
-    span.edgeLabel p{background:transparent!important}
-    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
-    .ingest .label-icon{color:#0E8A7D}
-    .xform .label-icon{color:#7B4FB0}
-    .load .label-icon{color:#0072B2}
-    .bus .label-icon{color:#A8517F}
-    .store .label-icon{color:#00785A}
-    .ui .label-icon{color:#D9480F}
-    .ext .label-icon{color:#64748B}
----
-flowchart TB
-  accTitle: L4 Detail -- Mesh pool listeners
-  accDescr: Senders reach the receiver listener, which balances each request across the receiver pool. The receivers push to the loader listener, which balances across the loader pool, and the loaders write the ClickHouse cluster.
-
-  subgraph recv["Receive"]
-    direction LR
-    rlisten["<b>Receiver listener</b>"]
-    subgraph rpool["Receiver pool"]
-      direction TB
-      r1["<b>Receiver 1</b>"]
-      r2["<b>Receiver 2</b>"]
-    end
-    rlisten --> rpool
-  end
-
-  subgraph load["Load"]
-    direction LR
-    llisten["<b>Loader listener</b>"]
-    subgraph lpool["Loader pool"]
-      direction TB
-      l1["<b>Loader 1</b>"]
-      l2["<b>Loader 2</b>"]
-    end
-    llisten --> lpool
-  end
-
-  ch[("<b>ClickHouse cluster</b>")]
-
-  recv -->|push| load
-  load --> ch
-  class r1,r2 ingest
-  class l1,l2 load
-  class ch store
-  class rlisten,llisten part
-  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
-  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
-  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
-  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
-  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
-  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
-  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
-  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
-  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
-  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
-  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  style recv fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
-  style rpool fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
-  style load fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
-  style lpool fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
-```
-
-*Figure 2. L4 Detail -- Mesh pool listeners.* Up: [Deployment](README.md).
-
-All three transforms have a Push listener, but no transform runs on direct, so none sits in this chain - see [../data-plane/source-flow.md](../data-plane/source-flow.md).
-
-On the direct transport no stage stores records, and no fetcher runs, so the receiver is the one stage that holds them. What it holds depends on the receiver's acknowledgement mode, and dfe-infra's `argocd/values/apps/dfe-receiver/profile-mesh.yaml` sets the mesh figures below.
-
-With acknowledgements on, the default, the receiver builds no buffer or spool. It holds each request until the loader confirms delivery. Once that hold expires the sender gets a 503 and retries from the copy it kept.
-
-With acknowledgements off, the buffer and spool apply. mesh sets `buffer.memory_limit` to 3 GiB of the pod's 4Gi limit, so back-pressure starts at 2.4 GiB, and turns on `buffer.spillover` with 20 GiB of node-local spool per replica. A loader outage shorter than that is invisible to senders, and a longer one back-pressures them (503) until the loader returns. A record held there has had its 2xx, so it is lost if the pod dies. That is the trade for turning acknowledgements off.
-
-The knobs are the receiver's (dfe-receiver `config.example.yaml`, `buffer:`), so a deployer tunes them in the overlay like any other dial.

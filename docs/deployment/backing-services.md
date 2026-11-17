@@ -161,18 +161,18 @@ config:
 ---
 flowchart LR
   accTitle: L4 Detail -- Size and platform axes
-  accDescr: Size runs from dfe-docker through slim, single and scale to mesh and sets the composition. Platform runs on-prem, AWS, GCP and Azure and sets which product fills each backing service.
+  accDescr: Size runs from dfe-docker through slim and single to scale and sets the composition. Platform runs on-prem, AWS, GCP and Azure and sets which product fills each backing service.
 
   subgraph size["Size: composition"]
     direction TB
-    docker["<b>dfe-docker</b>"] ~~~ slim["<b>slim</b>"] ~~~ single["<b>single</b>"] ~~~ scale["<b>scale</b>"] ~~~ mesh["<b>mesh</b>"]
+    docker["<b>dfe-docker</b>"] ~~~ slim["<b>slim</b>"] ~~~ single["<b>single</b>"] ~~~ scale["<b>scale</b>"]
   end
   subgraph platform["Platform: which product"]
     direction TB
     onprem["<b>On-prem or Rancher</b>"] ~~~ aws["<b>AWS</b>"] ~~~ gcp["<b>GCP</b>"] ~~~ azure["<b>Azure</b>"]
   end
   size ~~~ platform
-  class docker,slim,single,scale,mesh,onprem,aws,gcp,azure part
+  class docker,slim,single,scale,onprem,aws,gcp,azure part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -190,7 +190,7 @@ flowchart LR
 
 *Figure 2. L4 Detail -- Size and platform axes.* Up: [Deployment](README.md).
 
-Size is the four dfe-infra profiles (`argocd/values/profile-slim|single|scale|mesh.yaml`)
+Size is the three dfe-infra profiles (`argocd/values/profile-slim|single|scale.yaml`)
 plus `dfe-docker`, which is not Kubernetes. It changes replica counts, single node
 against cluster and which optional apps run, never which product a row binds to.
 Platform is the swap (`argocd/values/local|rancher|aws|gcp|azure.yaml`).

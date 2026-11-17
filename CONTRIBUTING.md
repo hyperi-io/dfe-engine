@@ -157,6 +157,13 @@ System design and why it is built this way:
 | `src/dfe_engine/schema/` | ClickHouse DDL planning and apply |
 | `src/dfe_engine/source/` | Source definitions. Receiver and loader routing is COMPILED from these |
 | `src/dfe_engine/gitops/` | every mutation is a git commit, and the deploy repo is the authority |
+| `src/dfe_engine/gitcrud/` | one git-native CRUD engine for every YAML resource class, with the commit policy and RBAC bound per class |
+| `src/dfe_engine/sigma/` | Sigma rule import, conversion to ClickHouse SQL, propagation to hunts and the `_sigma` views |
+| `src/dfe_engine/kafka/` | the Kafka credential contract and topic admin |
+| `src/dfe_engine/hyperdx/` | dfe-hyperdx teams, per-source sources and dashboards |
+| `src/dfe_engine/governance/ch/` | ClickHouse roles, quota tiers and the per-org row policies, reconciled |
+| `src/dfe_engine/hunts/` | hunt and rule models, the compiler to SQL, alert delivery and the `dfe-hunt-runner` loop |
+| `src/dfe_engine/keda_shim/` | `dfe-keda-shim`: config-driven ClickHouse queries answered to KEDA's `metrics-api` scaler |
 
 ### Commands that prove a change
 

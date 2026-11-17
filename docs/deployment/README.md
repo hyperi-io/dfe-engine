@@ -12,7 +12,7 @@ The pages in this area:
 | Doc | Covers |
 |---|---|
 | [backing-services.md](backing-services.md) | per-backend swap matrix |
-| [transports.md](transports.md) | profile x transport, the Kafka provider swap, the mesh tier's Envoy balancer and receiver buffers |
+| [transports.md](transports.md) | profile x transport, the Kafka provider swap and receiver buffers |
 | [keda-scaling.md](keda-scaling.md) | CPU plus ScalingPressure via dfe-keda-shim, on by default for the ingest apps |
 | [observability-standard.md](observability-standard.md) | one OTel destination, modes, log schema |
 | [supply-chain-pinning.md](supply-chain-pinning.md) | pick-latest-per-rules then SHA-pin |
@@ -151,10 +151,10 @@ one config each). KEDA scaling is folded into each app chart - see
 
 ## Deployment tiers
 
-Four selectable tiers, smallest to largest, and `mesh` beside them. The first is
+Four selectable tiers, smallest to largest. The first is
 Docker, and the rest are Kubernetes profiles selected by the cluster secret's
 `dfe.hyperi.io/profile`. Transport
-and the balancer per tier: [transports.md](transports.md).
+per tier: [transports.md](transports.md).
 
 | Tier | Platform | Transport | Kafka | Sizing | Fits |
 |------|----------|-----------|-------|--------|-------|
@@ -162,11 +162,8 @@ and the balancer per tier: [transports.md](transports.md).
 | **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s. Smallest |
 | **single** | k8s | Kafka | **yes** (single broker) | reliability | one node of everything, with Kafka |
 | **scale** | k8s | Kafka | **yes** (multi-broker cluster) | reliability | everything clustered (ReplicatedMergeTree + dedicated Keeper) |
-| **mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | in the charts but never run live: dfe-infra's `bootstrap.sh` stops on `DFE_PROFILE=mesh` ([dfe-infra#875](https://github.com/hyperi-io/dfe-infra/issues/875)). Scale's replicas and ClickHouse cluster with no broker, see [transports.md](transports.md#buffering-without-a-bus) |
 
-A tier sets defaults, and a deployer overrides any single dial. `mesh`
-composes as `scale` below with Kafka and Kafbat off and, like slim, no
-fetchers or transforms.
+A tier sets defaults, and a deployer overrides any single dial.
 
 ## Default composition per k8s tier
 
