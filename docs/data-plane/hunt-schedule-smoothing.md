@@ -121,7 +121,7 @@ What this does not prove: the size of the benefit at PB/day, and the code 241 cl
 
 Index the rate hunts $i = 1, \dots, N$. Each has period $T_i$ (seconds) and a phase offset
 $\varphi_i \in [0, T_i)$ - the free variable we control. The **hyperperiod** is
-$H = \operatorname{lcm}(T_1, \dots, T_N)$; for the usual harmonic periods (300, 900, 3600 s) that is
+$H = \operatorname{lcm}(T_1, \dots, T_N)$. For the usual harmonic periods (300, 900, 3600 s) that is
 just 3600 s. Discretise $H$ into $B$ buckets of width $\Delta = H / B$ (e.g. $\Delta = 30$ s). Within
 $H$, hunt $i$ fires $H / T_i$ times, at bucket positions $\bigl\lfloor (\varphi_i + k T_i) / \Delta \bigr\rfloor \bmod B$ for
 $k = 0, 1, \dots$.
@@ -203,7 +203,7 @@ J     = T**2 / B + sum((P[b] - P_bar) ** 2 for b in 0 .. B-1)
 minimising J is *exactly* minimising the variance of the load curve - i.e.
 flattening it. And by Cauchy-Schwarz, $J \ge T^2/B$ with equality iff $P(b)$ is constant
 (perfectly flat). This is the same objective the two source fields use (resource
-smoothing's $\sum_t R_t^2$; valley-filling's $\ell_2$-norm minimisation).
+smoothing's $\sum_t R_t^2$, and valley-filling's $\ell_2$-norm minimisation).
 
 ### The optimiser - damped, one-at-a-time water-filling
 
@@ -228,7 +228,7 @@ per-hunt cool-down, is what makes it the gentle "drift" - and what prevents
 oscillation and avalanche.
 
 **Convergence.** Every accepted move strictly decreases $J$, and $J \ge 0$ is bounded
-below, so $J$ converges monotonically. This is coordinate descent on $J$; it reaches a
+below, so $J$ converges monotonically. This is coordinate descent on $J$, and it reaches a
 local minimum, which - as the resource-leveling heuristics find in practice - is
 where nearly all the benefit lives (the first few moves kill the worst peaks).
 
