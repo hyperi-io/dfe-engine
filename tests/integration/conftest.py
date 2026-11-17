@@ -70,10 +70,10 @@ from types import SimpleNamespace
 from typing import Any, NoReturn
 
 import pytest
+from scalo.deployment.test_support.images import mirror_image
 
 from tests.support.accounts import session_token
 from tests.support.clickhouse_cleanup import drop_database_and_policies
-from tests.support.dockerhub import dockerhub_image
 from tests.support.producer_contract import in_ci
 
 # Current ClickHouse LTS line, and the version dfe-infra actually deploys
@@ -438,7 +438,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str, keeper: bool = True)
     Keeper, the server the engine refuses.
     """
     docker = _docker_prefix(spec)
-    image = dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
+    image = mirror_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
     # keep=True shares ONE container, so it takes the suite-scoped name. A
     # throwaway is owned by the test that asked for it: the fixture is
     # function-scoped and the suite runs under xdist, so tests do not share one
@@ -710,7 +710,7 @@ def _replica_set(
     what = f"a {len(aliases)}-replica cluster"
     spec = _docker_spec(what)
     docker = _docker_prefix(spec)
-    image = dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
+    image = mirror_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
     test = request.node.nodeid
     network = _container_name(test, "net")
     names = [_container_name(test, f"clickhouse-{alias}") for alias in aliases]
@@ -844,9 +844,7 @@ def late_clickhouse(request):
         f"127.0.0.1:{port}:8123",
         "-e",
         "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1",
-        *_single_node_run_args(
-            dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
-        ),
+        *_single_node_run_args(mirror_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))),
     ]
 
     def start() -> dict:
@@ -1313,7 +1311,7 @@ def kafka_bootstrap() -> Iterator[str]:
         "-p",
         f"127.0.0.1:{port}:{port}",
         *_kafka_env(port),
-        dockerhub_image(_KAFKA_IMAGE),
+        mirror_image(_KAFKA_IMAGE),
     ]
 
     def teardown() -> None:

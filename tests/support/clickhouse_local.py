@@ -18,8 +18,8 @@ import shutil
 import subprocess
 
 import pytest
+from scalo.deployment.test_support.images import mirror_image
 
-from tests.support.dockerhub import dockerhub_image
 from tests.support.producer_contract import in_ci
 
 # renovate: datasource=docker depName=clickhouse/clickhouse-server
@@ -53,7 +53,7 @@ def clickhouse_local() -> list[str]:
         The argv prefix, to which the caller appends ``--query`` and its arguments.
     """
     if _docker_usable():
-        image = dockerhub_image(IMAGE)
+        image = mirror_image(IMAGE)
         return ["docker", "run", "--rm", "-i", "--entrypoint", "clickhouse-local", image]
     on_path = shutil.which("clickhouse-local")
     if on_path is not None:
