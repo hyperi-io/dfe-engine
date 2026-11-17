@@ -8,10 +8,10 @@
 """A CI run with no way to run clickhouse-local is a red build, never a skipped guard check."""
 
 import pytest
+import scalo.deployment.test_support.images as images
 from _pytest.outcomes import Failed, Skipped
 
 from tests.support import clickhouse_local as support
-from tests.support.dockerhub import MIRROR_ENV
 
 
 @pytest.mark.parametrize(
@@ -29,7 +29,8 @@ def test_the_command_follows_what_the_host_has(monkeypatch, docker, on_path, ci,
     monkeypatch.setattr(support.shutil, "which", lambda name: on_path)
     monkeypatch.setenv("CI", ci)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    monkeypatch.delenv(MIRROR_ENV, raising=False)
+    # The scalo cascade reads the mirror env once per process, so patch the reader instead
+    monkeypatch.setattr(images, "image_mirror", lambda: "")
 
     if isinstance(outcome, type):
         with pytest.raises(outcome):
@@ -42,8 +43,8 @@ def test_the_command_follows_what_the_host_has(monkeypatch, docker, on_path, ci,
 
 def test_the_pinned_image_is_pulled_through_the_mirror(monkeypatch):
     monkeypatch.setattr(support, "_docker_usable", lambda: True)
-    monkeypatch.setenv(MIRROR_ENV, "harbor.example:8443/dockerhub")
+    monkeypatch.setattr(images, "image_mirror", lambda: "ghcr.io/example/mirror")
 
     command = support.clickhouse_local()
 
-    assert command[-1] == f"harbor.example:8443/dockerhub/{support.IMAGE}"
+    assert command[-1] == f"ghcr.io/example/mirror/{support.IMAGE}"
