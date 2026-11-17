@@ -17,35 +17,90 @@ Two transports carry the same three stages. The bus (Kafka on the `single` and `
 On the bus, a source's records go through its landing topic, its transform and its transformed topic to the loader.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Source flow on the bus
-    accDescr: The receiver pool and the source's fetcher write the source's landing topic. The source's transform reads it and writes the transformed topic, which the loader pool reads. The archiver reads the landing topic.
+  accTitle: L4 Detail -- Source flow on the bus
+  accDescr: The receiver pool and the source's fetcher write the source's landing topic. The source's transform reads it and writes the transformed topic, which the loader pool reads. The archiver reads the landing topic.
 
-    subgraph input["Input"]
-        receiver["Receiver pool"]
-        fetcher["Fetcher<br/>one per source"]
-    end
+  subgraph input["Input"]
+    receiver["<b>Receiver pool</b>"]
+    fetcher["<b>Fetcher</b><br/><span>one per source</span>"]
+  end
 
-    land[("source_land")]
+  land[("<b>source_land</b>")]
 
-    transform["Transform<br/>one per source"]
-    archiver["Archiver"]
+  transform["<b>Transform</b><br/><span>one per source</span>"]
+  archiver["<b>Archiver</b>"]
 
-    load[("source_load")]
+  load[("<b>source_load</b>")]
 
-    loader["Loader pool"]
+  loader["<b>Loader pool</b>"]
 
-    input --> land
-    land --> transform
-    land -.-> archiver
-    transform --> load
-    load --> loader
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef async fill:#F6E6EF,stroke:#A8517F,stroke-width:1px,color:#3D1529
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class land,load async
-    class input group
+  input --> land
+  land --> transform
+  land -.-> archiver
+  transform --> load
+  load --> loader
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class receiver,fetcher ingest
+  class transform xform
+  class archiver,loader load
+  class land,load bus
+  style input fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Source flow on the bus. With no transform the loader reads `source_land` itself.* Up: [Data plane](README.md).
@@ -55,24 +110,79 @@ The loader writes the source's own table, else `main`. The dotted arrow is the o
 On direct gRPC the receiver pushes each matched record to the loader, and to the archiver when the source is archived.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Source flow on direct gRPC
-    accDescr: The receiver pool pushes each matched record to the loader pool, and to the archiver when the source is archived. The loader writes the record to ClickHouse.
+  accTitle: L4 Detail -- Source flow on direct gRPC
+  accDescr: The receiver pool pushes each matched record to the loader pool, and to the archiver when the source is archived. The loader writes the record to ClickHouse.
 
-    receiver["Receiver pool"]
+  receiver["<b>Receiver pool</b>"]
 
-    loader["Loader pool"]
-    archiver["Archiver"]
+  loader["<b>Loader pool</b>"]
+  archiver["<b>Archiver</b>"]
 
-    ch[("ClickHouse")]
+  ch[("<b>ClickHouse</b>")]
 
-    receiver -->|matched| loader
-    receiver -.->|archived| archiver
-    loader --> ch
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    class ch store
+  receiver -->|matched| loader
+  receiver -.->|archived| archiver
+  loader --> ch
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class receiver ingest
+  class loader,archiver load
+  class ch store
 ```
 
 *Figure 2. L4 Detail -- Source flow on direct gRPC. The loader and the archiver each take the push on a scalo Push listener.* Up: [Data plane](README.md).
@@ -140,6 +250,50 @@ A transform can be a pipeline you run yourself. `engine: external` deploys nothi
 A source change is compiled, committed and applied by Argo CD, and Kubernetes rolls the pods.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 sequenceDiagram
     accTitle: L4 Detail -- A source change reaching a pod
     accDescr: A caller writes a source. The engine compiles every derived config and commits it to the deploy repo. Argo CD reads the commit and applies the ConfigMap and the Deployment, and Kubernetes rolls the app pods.
