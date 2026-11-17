@@ -87,14 +87,20 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- KEDA triggers
   accDescr: metrics-server feeds the CPU trigger on every app. The scaling_pressure gauge rows in otel_metrics_gauge feed dfe-keda-shim, which serves the pressure on the ingest apps. KEDA's ScaledObject takes the higher of the two and sets the app Deployment's replicas.
 
-  ms["<b>metrics-server</b>"]
-  gauge[("<b>otel_metrics_gauge</b>")]
-  cpu["<b>CPU trigger</b><br/><span>every app</span>"]
-  shim["<b>dfe-keda-shim</b>"]
+  subgraph signals["Signals"]
+    direction LR
+    ms["<b>metrics-server</b>"]
+    gauge[("<b>otel_metrics_gauge</b>")]
+  end
+  subgraph triggers["Triggers"]
+    direction LR
+    cpu["<b>CPU trigger</b><br/><span>every app</span>"]
+    shim["<b>dfe-keda-shim</b>"]
+  end
   so["<b>ScaledObject</b>"]
   dep["<b>App Deployment</b>"]
 
@@ -103,6 +109,9 @@ flowchart LR
   cpu -->|utilisation| so
   shim -->|pressure| so
   so -->|replicas| dep
+  class gauge store
+  class so control
+  class ms,cpu,shim,dep part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -114,9 +123,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class gauge store
-  class so control
-  class ms,cpu,shim,dep part
+  style signals fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style triggers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- KEDA triggers.* Up: [Deployment](README.md).
@@ -156,7 +164,7 @@ The docs site fills the table below from the dfe-infra chart renders at the stac
 | App | KEDA | Triggers by default |
 |-----|------|---------------------|
 | dfe-receiver / dfe-loader | on | CPU ~70% and scalo ScalingPressure (shim, target 70) |
-| dfe-archiver, dfe-transform-elastic / vrl / vector | on | CPU ~70%, plus ScalingPressure on the single, scale and mesh profiles |
+| dfe-archiver, dfe-transform-elastic / vrl / vector | on | CPU ~70%, plus ScalingPressure on the single and scale profiles |
 | dfe-ui | on | CPU ~70% |
 <!-- /dfe-keda-table -->
 
@@ -176,7 +184,6 @@ Replica bounds come from dfe-infra `argocd/values/common.yaml` and the tier prof
 | slim | 1 | 2 | 75 (unused, slim clears the trigger) |
 | single | 1 | 3 | 70 |
 | scale | 2 | 12 | 70 |
-| mesh | 2 | 10 | 70 |
 
 No tier scales to zero.
 

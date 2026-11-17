@@ -10,7 +10,7 @@
 
 The hunt runner is pull-based and multi-pod. The default deployment is ONE steady pod with no ScaledObject, because the runner is a thin orchestrator and all hunt load runs in ClickHouse. One pod covers the large majority of deployments.
 
-Autoscaling is a beta, off by default (`huntRunner.autoscaling.enabled`). Leave it off. It reads the due backlog from the `hunt_schedule` table and nothing in the charts writes that table, so the backlog always reads 0. With autoscaling on, the runner never scales out, and at `minReplicaCount: 0` no hunt ever fires. To try it anyway, run `dfe-hunt-runner materialise` after every hunt-config change.
+Autoscaling is a beta, off by default (`huntRunner.autoscaling.enabled`). Leave it off. It reads the due backlog from the `hunt_schedule` table. `hunt_schedule` is written only through `publish_schedule`: by `dfe-hunt-runner materialise` at config-deploy time, and by the phase smoother when smoothing is on. The charts never run `materialise`, so with smoothing off the backlog always reads 0. With autoscaling on, the runner never scales out, and at `minReplicaCount: 0` no hunt ever fires. To try it anyway, run `dfe-hunt-runner materialise` after every hunt-config change.
 
 When on, KEDA scales the pod count on the deterministic-due backlog described below, read through the fail-safe `dfe-keda-shim`. KEDA never asks the engine.
 
@@ -61,13 +61,13 @@ Once deployed, the running system needs only ClickHouse:
 
 - Workers read hunt definitions from the gitops config, coordinate through the coordination tables and run queries against ClickHouse.
 - The shim reads `hunt_schedule` and the coordination tables from ClickHouse. It is a separate, distinctly labelled pod on the engine container image with its own entrypoint (`dfe-keda-shim`), not the live engine API.
-- `hunt_schedule` is written at config-deploy time by `dfe-hunt-runner materialise`, a one-shot, idempotent command that rewrites it from the hunt config. The charts do not run it.
+- `hunt_schedule` is written only through `publish_schedule`: by `dfe-hunt-runner materialise` at config-deploy time, and by the phase smoother when smoothing is on. `materialise` is a one-shot, idempotent command that rewrites the table from the hunt config, and the charts do not run it.
 
 If the engine pod is down, running hunt-runner pods keep firing hunts. What you lose is the ability to change configs, which needs the engine anyway. A pod that is starting is the exception: the runner and the shim each have a `wait-for-engine` init container (dfe-infra `helm/library/dfe-common/templates/_waitfor.tpl`) that holds the pod until the engine reports ready, because the engine applies the ClickHouse schema at its own start. A scale-out or a restart while the engine is down waits for it. ClickHouse is DFE's single operational store and the runner holds to that, which is also why the same runner works on a non-k8s single deploy (dfe-docker), where only ClickHouse is guaranteed present.
 
 Every worker and the shim must see the same coordination tables. On the scale tier's multi-node cluster behind a round-robin load balancer, a plain `ReplacingMergeTree` lands on one node, and workers connected to other nodes see an empty or absent table (`UNKNOWN_DATABASE`, missing leases). The schema phase therefore creates the coordination tables as `ReplicatedReplacingMergeTree` inside a Replicated database on every deployment, so lease, watermark and schedule state is shared across nodes (<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>).
 
-`schedule.publish_schedule(ch, db, specs)` is the only writer of `hunt_schedule`, and `dfe-hunt-runner materialise` is its only caller. It is idempotent and diff-aware: it tombstones hunts that vanished from config. On Kubernetes the table stays empty until an operator runs the command after each hunt-config change. A hunt added while scaled to zero then still gets a row, so KEDA can wake a worker for it.
+`schedule.publish_schedule(ch, db, specs)` is the only function that writes `hunt_schedule`. Its two callers are `dfe-hunt-runner materialise` and the phase smoother (`smoothing.py`). It is idempotent and diff-aware: it tombstones hunts that vanished from config. On Kubernetes with smoothing off, the table stays empty until an operator runs the command after each hunt-config change. A hunt added while scaled to zero then still gets a row, so KEDA can wake a worker for it.
 
 ## The ScaledObject
 
@@ -121,20 +121,30 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Hunt runner autoscaling
   accDescr: The KEDA shim reads the due hunts from ClickHouse's hunt_schedule and coordination tables and serves the due count. KEDA's metrics-api trigger reads it and sets the hunt runner Deployment's replicas. On a failure the shim serves the last good value, or holds cold.
 
   subgraph CH["ClickHouse"]
-    hs[("<b>hunt_schedule +</b><br/><span>hunt_lease/watermark/state</span>")]
+    hs[("<b>hunt_schedule</b><br/><span>and hunt_lease, watermark, state</span>")]
   end
-  shim["<b>dfe-keda-shim</b><br/><span>GET /keda/hunt-backlog</span>"]
-  ko["<b>KEDA metrics-api trigger</b><br/><span>ScaledObject: dfe-hunt-runner-scaler</span>"]
-  hr["<b>dfe-hunt-runner Deployment</b><br/><span>replicas: N</span>"]
-  hs -->|"due_query(db)"| shim
-  shim -->|"{value: due_count}"| ko
-  ko -->|"AverageValue, target = targetBacklog"| hr
-  shim -.->|"on failure: last-good cache / cold-hold"| ko
+  subgraph SHIM["Shim"]
+    direction LR
+    shim["<b>dfe-keda-shim</b><br/><span>GET /keda/hunt-backlog</span>"]
+    cache("<b>Last good value</b><br/><span>or cold_hold</span>")
+    shim -.->|on failure| cache
+  end
+  subgraph KEDA["KEDA"]
+    direction LR
+    ko["<b>metrics-api trigger</b><br/><span>dfe-hunt-runner-scaler</span>"]
+    hr["<b>dfe-hunt-runner</b><br/><span>replicas: N</span>"]
+    ko -->|AverageValue| hr
+  end
+  CH -->|due_query| SHIM
+  SHIM -->|due_count| KEDA
+  class hs store
+  class ko control
+  class shim,hr,cache part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -146,11 +156,12 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class hs store
-  class ko control
-  class shim,hr part
   style CH fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style SHIM fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style KEDA fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
+
+*Figure 1. L4 Detail -- Hunt runner autoscaling. The dotted arrow is the failure path.* Up: [L3 Components -- Hunt runner](../hunt-runner.md).
 
 With `huntRunner.autoscaling.enabled`, the Deployment's `replicas` field is omitted, because the ScaledObject owns the count, and a `dfe-hunt-runner-scaler` ScaledObject is rendered beside it:
 

@@ -173,7 +173,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Query routes
   accDescr: A client calls the query routes. A view execution goes to the ViewExecutor, which runs the view on ClickHouse. A raw query goes to a datasource adapter, which reads ClickHouse or lists S3, MinIO or a local directory.
 
@@ -181,11 +181,17 @@ flowchart LR
 
   api["<b>Query routes</b>"]
 
-  executor["<b>ViewExecutor</b>"]
-  adapters["<b>Datasource adapters</b>"]
+  subgraph handlers["Handlers"]
+    direction LR
+    executor["<b>ViewExecutor</b>"]
+    adapters["<b>Datasource adapters</b>"]
+  end
 
-  ch[("<b>ClickHouse</b>")]
-  storage[("<b>S3, MinIO or files</b>")]
+  subgraph stores["Stores"]
+    direction LR
+    ch[("<b>ClickHouse</b>")]
+    storage[("<b>S3, MinIO or files</b>")]
+  end
 
   client --> api
   api -->|view| executor
@@ -193,6 +199,9 @@ flowchart LR
   executor --> ch
   adapters --> ch
   adapters --> storage
+  class client ext
+  class ch,storage store
+  class api,executor,adapters part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -204,12 +213,11 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class client ext
-  class ch,storage store
-  class api,executor,adapters part
+  style handlers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style stores fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 2. L4 Detail -- Query routes. The dashed grey box is the caller.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 2. L4 Detail -- Query routes. The dashed grey box is the caller.* Up: [L3 Components -- API server](../api-server.md).
 
 The executor looks each view up in the `ViewCatalog`, which discovers the views from ClickHouse and caches them for 60 seconds. Every route authenticates by JWT, OIDC headers or API key first.
 
@@ -397,6 +405,7 @@ flowchart TB
   end
 
   offset ~~~ keyset
+  class o1,o2,o3,k1,k2,k3 part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -408,7 +417,6 @@ flowchart TB
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class o1,o2,o3,k1,k2,k3 part
   style offset fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style keyset fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
@@ -639,20 +647,29 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Query route authorisation
   accDescr: An authenticated request is checked for the route's scope. Without it the answer is 403. With it the executor injects org_id from the auth context and runs the query on ClickHouse.
 
-  request(["<b>Authenticated request</b>"])
-  scope{"<b>Route scope?</b>"}
-  inject["<b>Inject org_id</b>"]
-  deny(["<b>403</b>"])
-  run(["<b>Run on ClickHouse</b>"])
+  subgraph check["Check"]
+    direction LR
+    request(["<b>Authenticated request</b>"])
+    scope{"<b>Route scope?</b>"}
+    deny(["<b>403</b>"])
+  end
+  subgraph runq["Run"]
+    direction LR
+    inject["<b>Inject org_id</b>"]
+    run(["<b>Run on ClickHouse</b>"])
+  end
 
   request --> scope
-  scope -->|yes| inject
+  check -->|yes| runq
   scope -.->|no| deny
   inject --> run
+  class scope decision
+  class deny error
+  class request,inject,run part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -664,9 +681,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class scope decision
-  class deny error
-  class request,inject,run part
+  style check fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style runq fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 4. L4 Detail -- Query route authorisation. The dotted arrow is the refusal.* Up: [Data plane](README.md).

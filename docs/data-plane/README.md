@@ -54,7 +54,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- What a source definition compiles into
   accDescr: The engine compiles one source definition into the receiver's routing rules, the loader's table routing and the table with its standard views. The hunt runner and the query API read the table and its views.
 
@@ -62,19 +62,27 @@ flowchart LR
 
   engine["<b>dfe-engine</b><br/><span>compilers</span>"]
 
-  receiver["<b>Receiver rules</b>"]
-  loader["<b>Loader table routing</b>"]
-  views[("<b>Table and standard views</b>")]
+  subgraph compiled["Compiled"]
+    direction LR
+    receiver["<b>Receiver rules</b>"]
+    loader["<b>Loader table routing</b>"]
+    views[("<b>Table</b><br/><span>and standard views</span>")]
+  end
 
-  hunts["<b>Hunt runner</b>"]
-  query["<b>Query API</b>"]
+  subgraph readers["Readers"]
+    direction LR
+    hunts["<b>Hunt runner</b>"]
+    query["<b>Query API</b>"]
+  end
 
   source --> engine
   engine --> receiver
   engine --> loader
   engine --> views
-  views --> hunts
-  views --> query
+  views --> readers
+  class views store
+  class engine control
+  class source,receiver,loader,hunts,query part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -86,12 +94,11 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class views store
-  class engine control
-  class source,receiver,loader,hunts,query part
+  style compiled fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style readers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- What a source definition compiles into.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 1. L4 Detail -- What a source definition compiles into.* Up: [L3 Components -- API server](../api-server.md).
 
 ## Documents in this area
 

@@ -12,7 +12,7 @@ A source names where its records come in, whether they are transformed, and wher
 
 ## The flow on each transport
 
-Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`, `mesh`) stores nothing between stages, so the receiver's own buffer is the only slack.
+Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`) stores nothing between stages, so the receiver's own buffer is the only slack.
 
 On the bus, a source's records go through its landing topic, its transform and its transformed topic to the loader.
 
@@ -62,19 +62,24 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Source flow on the bus
   accDescr: The receiver pool and the source's fetcher write the source's landing topic. The source's transform reads it and writes the transformed topic, which the loader pool reads. The archiver reads the landing topic.
 
   subgraph input["Input"]
+    direction LR
     receiver["<b>Receiver pool</b>"]
     fetcher["<b>Fetcher</b><br/><span>one per source</span>"]
+    receiver ~~~ fetcher
   end
 
   land[("<b>source_land</b>")]
 
-  transform["<b>Transform</b><br/><span>one per source</span>"]
-  archiver["<b>Archiver</b>"]
+  subgraph landreaders["Read the landing topic"]
+    direction LR
+    transform["<b>Transform</b><br/><span>one per source</span>"]
+    archiver["<b>Archiver</b>"]
+  end
 
   load[("<b>source_load</b>")]
 
@@ -85,6 +90,10 @@ flowchart LR
   land -.-> archiver
   transform --> load
   load --> loader
+  class receiver,fetcher ingest
+  class transform xform
+  class archiver,loader load
+  class land,load bus
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -96,11 +105,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class receiver,fetcher ingest
-  class transform xform
-  class archiver,loader load
-  class land,load bus
   style input fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style landreaders fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Source flow on the bus. With no transform the loader reads `source_land` itself.* Up: [Data plane](README.md).
@@ -169,6 +175,9 @@ flowchart LR
   receiver -->|matched| loader
   receiver -.->|archived| archiver
   loader --> ch
+  class receiver ingest
+  class loader,archiver load
+  class ch store
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -180,14 +189,11 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class receiver ingest
-  class loader,archiver load
-  class ch store
 ```
 
 *Figure 2. L4 Detail -- Source flow on direct gRPC. The loader and the archiver each take the push on a scalo Push listener.* Up: [Data plane](README.md).
 
-Direct runs the receiver to loader path alone (figure 2). A fetcher or a transform is one app per source, and addressing a pool of those over gRPC needs the mesh, which is not GA. On a direct deployment a source that needs one is rejected at save and left out of the compile. `GET /api/v1/system/deployment` reports `transports.per_source_apps: false` there, and each `GET /api/v1/sources/catalogue` entry has `runnable`, `runnable_reason` and `runnable_intakes` from the same resolver as the save.
+Direct runs the receiver to loader path alone (figure 2). A fetcher or a transform is one app per source, and direct gRPC has no way to address a pool of those. On a direct deployment a source that needs one is rejected at save and left out of the compile. `GET /api/v1/system/deployment` reports `transports.per_source_apps: false` there, and each `GET /api/v1/sources/catalogue` entry has `runnable`, `runnable_reason` and `runnable_intakes` from the same resolver as the save.
 
 The archiver keeps the record as it arrived, before any transform. On the bus it reads the landing topic. On direct the receiver sends the record to it beside the loader. `archive: true` is rejected at save, naming the profile, where apps.yaml does not offer dfe-archiver in the profile, or does not run it by default (`default_in`) and no archiver instance is deployed. A source stored with it before still reads and compiles.
 
@@ -204,7 +210,6 @@ A source declares `transport: bus` or `transport: direct`. Left unset, it takes 
 | slim | direct | gRPC | one replica. The KEDA ceiling of two would pin senders to pods |
 | single | bus | Kafka topics on one broker | consumer groups |
 | scale | bus | Kafka topics on a broker cluster | consumer groups |
-| mesh (in the charts, refused by dfe-infra's bootstrap) | direct | gRPC | a listener per stage pool, see [../deployment/transports.md](../deployment/transports.md) |
 
 The source records bus or direct and nothing more. Which bus (Kafka) and which direct protocol (gRPC) are deployment facts, so a second bus provider joins behind the same `transport: bus` value with no change to the source model.
 
@@ -241,7 +246,7 @@ Every compiled block lands in the deploy repo under `values/`, Argo CD applies i
 
 The receiver's destinations are a named set: the loader and the archiver are destinations, and a rule sends a matched record to one by name. The fetcher has the same named set as `output.routes` over its default destination.
 
-A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl, dfe-transform-vector and dfe-transform-elastic run a Push listener beside their bus consumer, but a transform is one deployment per source, so none runs on a direct deployment until the mesh is GA. dfe-transform-elastic's `source.name` selects one of the compiled-in transforms its contract lists.
+A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl, dfe-transform-vector and dfe-transform-elastic run a Push listener beside their bus consumer, but a transform is one deployment per source, so none runs on a direct deployment. dfe-transform-elastic's `source.name` selects one of the compiled-in transforms its contract lists.
 
 A transform can be a pipeline you run yourself. `engine: external` deploys nothing, and your pipeline reads `_land` in `dfe-external-<source>` and writes `_load` ([external-pipelines.md](external-pipelines.md)).
 
@@ -320,7 +325,7 @@ Every app rolls on every config change, so nothing depends on which app can relo
 
 ## What the deployment is, and what a source is doing
 
-`GET /api/v1/system/deployment` answers what this deployment is: the profile the deployer set as `DFE_ENGINE_PROFILE`, the one transport it carries a source on, whether the stage pools sit behind mesh listeners, whether compiled routing reaches the running apps (`applies_routing`), and the pinned versions of the stack, the engine, dfe-ui and each app. The stack comes from the deploy repo's pins, else the published stack whose image digests match `DFE_ENGINE_STACK_IMAGES`, else the `DFE_ENGINE_STACK_VERSION` label, and `source` says which (`deploy-repo`, `registry`, `deployment`, `engine`). `DFE_ENGINE_STACK_RESOLVE=false` skips the registry read on an air-gapped site, and `DFE_ENGINE_STACK_MANIFEST_REPOSITORY` points it at a mirror. `GET /api/v1/system/version` reads the same function, so the footer and the deployment card agree.
+`GET /api/v1/system/deployment` answers what this deployment is: the profile the deployer set as `DFE_ENGINE_PROFILE`, the one transport it carries a source on, whether compiled routing reaches the running apps (`applies_routing`), and the pinned versions of the stack, the engine, dfe-ui and each app. The stack comes from the deploy repo's pins, else the published stack whose image digests match `DFE_ENGINE_STACK_IMAGES`, else the `DFE_ENGINE_STACK_VERSION` label, and `source` says which (`deploy-repo`, `registry`, `deployment`, `engine`). `DFE_ENGINE_STACK_RESOLVE=false` skips the registry read on an air-gapped site, and `DFE_ENGINE_STACK_MANIFEST_REPOSITORY` points it at a mirror. `GET /api/v1/system/version` reads the same function, so the footer and the deployment card agree.
 
 `GET /api/v1/sources/{name}/signals` answers what one source is doing: `records_per_min` and `last_seen` over five minutes, read from the loader's `loader_messages_by_table_total` counter in the otel database, plus `landed_in_default`. The counter is per table, so `landed_in_default` says the number covers the whole shared landing table, as it does for a fetcher pushing to the main topic. A reading with no series behind it is null and the route still answers 200, because a zero would claim a measurement nobody took.
 

@@ -52,34 +52,37 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Identity resolution chain
   accDescr: OIDC headers, a password login and a bearer JWT each bind an account, and the account's groups resolve. An API key resolves the groups the key lists. The groups give the roles, grants and orgs, and the authorisation check allows or denies the action.
 
-  hdr["<b>OIDC headers</b>"]
-  login["<b>Password login</b>"]
-  jwt["<b>Bearer JWT</b>"]
-  key["<b>API key</b>"]
-
-  acct["<b>Account groups</b>"]
-  keyg["<b>Key groups</b>"]
-
-  res["<b>Roles, grants and orgs</b>"]
-
-  authz{"<b>Action allowed?</b>"}
-
-  allow(["<b>Allowed</b>"])
-  deny(["<b>Denied</b>"])
-
-  hdr --> acct
-  login --> acct
-  jwt --> acct
-  key --> keyg
-  acct --> res
-  keyg --> res
-  res --> authz
-  authz -->|yes| allow
-  authz -.->|no| deny
+  subgraph CREDS["Who is asking"]
+    direction LR
+    hdr["<b>OIDC headers</b>"]
+    login["<b>Password login</b>"]
+    jwt["<b>Bearer JWT</b>"]
+    key["<b>API key</b>"]
+    acct["<b>Account groups</b>"]
+    keyg["<b>Key groups</b>"]
+    hdr --> acct
+    login --> acct
+    jwt --> acct
+    key --> keyg
+  end
+  subgraph DECIDE["What they may do"]
+    direction LR
+    res["<b>Roles, grants and orgs</b>"]
+    authz{"<b>Action allowed?</b>"}
+    allow(["<b>Allowed</b>"])
+    deny(["<b>Denied</b>"])
+    res --> authz
+    authz -->|yes| allow
+    authz -.->|no| deny
+  end
+  CREDS --> DECIDE
+  class authz decision
+  class deny error
+  class hdr,login,jwt,key,acct,keyg,res,allow part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -91,9 +94,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class authz decision
-  class deny error
-  class hdr,login,jwt,key,acct,keyg,res,allow part
+  style CREDS fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style DECIDE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Identity resolution chain. The dotted arrow is the refusal.* Up: [rbac.md](rbac.md).
