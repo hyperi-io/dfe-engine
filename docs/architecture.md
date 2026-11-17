@@ -298,7 +298,7 @@ flowchart LR
   hunt and rule directories, so on Kubernetes they are how a hunt reaches the pod
   that runs it. Provider-agnostic: GitHub / GitLab external git, or the
   in-cluster Forgejo fallback (see [deployment/README.md](deployment/README.md)).
-- dfe-infra is the pinned deployment vehicle. Never written by the engine.
+- dfe-infra holds the charts and pinned versions that deploy the stack. The engine never writes to it.
 
 ## First principles (invariants)
 
