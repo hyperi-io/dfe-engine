@@ -117,50 +117,6 @@ Every mutation ends in one commit through `GitopsRepo`, which uses dulwich rathe
 A Tier 1 var write is checked for the grant and the protected-var policy, then committed, against its `If-Match` base when the caller sends one.
 
 ```mermaid
----
-config:
-  theme: base
-  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
-  themeVariables:
-    fontSize: 15px
-    lineColor: "#64748B"
-    primaryTextColor: "#0F172A"
-    clusterBorder: "#0072B2"
-    edgeLabelBackground: "#FFFFFF"
-    primaryColor: "#FFFFFF"
-    primaryBorderColor: "#334155"
-    secondaryColor: "#F8FAFC"
-    tertiaryColor: "#FFFFFF"
-    textColor: "#0F172A"
-    actorBkg: "#FFFFFF"
-    actorBorder: "#334155"
-    actorTextColor: "#0F172A"
-    actorLineColor: "#94A3B8"
-    signalColor: "#64748B"
-    signalTextColor: "#0F172A"
-    sequenceNumberColor: "#FFFFFF"
-    labelBoxBkgColor: "#FFFFFF"
-    labelBoxBorderColor: "#64748B"
-    labelTextColor: "#0F172A"
-    loopTextColor: "#0F172A"
-    noteBkgColor: "#FFFFFF"
-    noteBorderColor: "#94A3B8"
-    noteTextColor: "#0F172A"
-    transitionColor: "#64748B"
-    transitionLabelColor: "#0F172A"
-    stateLabelColor: "#0F172A"
-    stateBkg: "#FFFFFF"
-    labelBackgroundColor: "#FFFFFF"
-    compositeBackground: "#FFFFFF"
-    attributeBackgroundColorOdd: "#FFFFFF"
-    attributeBackgroundColorEven: "#F8FAFC"
-  themeCSS: >-
-    p{margin:0}
-    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
-    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
-    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
-    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
----
 sequenceDiagram
     accTitle: L4 Detail -- Writing a helm var
     accDescr: The Helm vars router checks the caller's grant, validates the write and the protected-var policy, then GitCrud sets the key against the If-Match base and GitopsRepo commits. Argo CD reconciles the commit.
@@ -193,50 +149,6 @@ An `ActionDef` (`src/dfe_engine/governance/`) is a name, the permission needed t
 An action invoke checks the caller's grant and every change, then writes them all in one commit.
 
 ```mermaid
----
-config:
-  theme: base
-  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
-  themeVariables:
-    fontSize: 15px
-    lineColor: "#64748B"
-    primaryTextColor: "#0F172A"
-    clusterBorder: "#0072B2"
-    edgeLabelBackground: "#FFFFFF"
-    primaryColor: "#FFFFFF"
-    primaryBorderColor: "#334155"
-    secondaryColor: "#F8FAFC"
-    tertiaryColor: "#FFFFFF"
-    textColor: "#0F172A"
-    actorBkg: "#FFFFFF"
-    actorBorder: "#334155"
-    actorTextColor: "#0F172A"
-    actorLineColor: "#94A3B8"
-    signalColor: "#64748B"
-    signalTextColor: "#0F172A"
-    sequenceNumberColor: "#FFFFFF"
-    labelBoxBkgColor: "#FFFFFF"
-    labelBoxBorderColor: "#64748B"
-    labelTextColor: "#0F172A"
-    loopTextColor: "#0F172A"
-    noteBkgColor: "#FFFFFF"
-    noteBorderColor: "#94A3B8"
-    noteTextColor: "#0F172A"
-    transitionColor: "#64748B"
-    transitionLabelColor: "#0F172A"
-    stateLabelColor: "#0F172A"
-    stateBkg: "#FFFFFF"
-    labelBackgroundColor: "#FFFFFF"
-    compositeBackground: "#FFFFFF"
-    attributeBackgroundColorOdd: "#FFFFFF"
-    attributeBackgroundColorEven: "#F8FAFC"
-  themeCSS: >-
-    p{margin:0}
-    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
-    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
-    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
-    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
----
 sequenceDiagram
     accTitle: L4 Detail -- Invoking an action
     accDescr: The governance router loads the action and checks the caller holds that action's required_action. ActionStore checks every change against the protected-var policy and writes them all in one commit through GitCrud.
@@ -464,50 +376,6 @@ To claim, a worker reads the hunt free, inserts a lease row and a marker for its
 A fire goes from due to running to done, and an expired lease sends it back to due.
 
 ```mermaid
----
-config:
-  theme: base
-  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
-  themeVariables:
-    fontSize: 15px
-    lineColor: "#64748B"
-    primaryTextColor: "#0F172A"
-    clusterBorder: "#0072B2"
-    edgeLabelBackground: "#FFFFFF"
-    primaryColor: "#FFFFFF"
-    primaryBorderColor: "#334155"
-    secondaryColor: "#F8FAFC"
-    tertiaryColor: "#FFFFFF"
-    textColor: "#0F172A"
-    actorBkg: "#FFFFFF"
-    actorBorder: "#334155"
-    actorTextColor: "#0F172A"
-    actorLineColor: "#94A3B8"
-    signalColor: "#64748B"
-    signalTextColor: "#0F172A"
-    sequenceNumberColor: "#FFFFFF"
-    labelBoxBkgColor: "#FFFFFF"
-    labelBoxBorderColor: "#64748B"
-    labelTextColor: "#0F172A"
-    loopTextColor: "#0F172A"
-    noteBkgColor: "#FFFFFF"
-    noteBorderColor: "#94A3B8"
-    noteTextColor: "#0F172A"
-    transitionColor: "#64748B"
-    transitionLabelColor: "#0F172A"
-    stateLabelColor: "#0F172A"
-    stateBkg: "#FFFFFF"
-    labelBackgroundColor: "#FFFFFF"
-    compositeBackground: "#FFFFFF"
-    attributeBackgroundColorOdd: "#FFFFFF"
-    attributeBackgroundColorEven: "#F8FAFC"
-  themeCSS: >-
-    p{margin:0}
-    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
-    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
-    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
-    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
----
 stateDiagram-v2
     direction LR
     accTitle: L4 Detail -- Hunt fire lifecycle
@@ -528,50 +396,6 @@ Each run is incremental and crash-safe. Every statement holds a `{window}` place
 Three ReplacingMergeTree tables in the effective data database, keyed by `hunt_id`, coordinate the runners. `hunt_run` (one row per fire) and `hunt_runner_heartbeat` (one row per runner) sit beside them.
 
 ```mermaid
----
-config:
-  theme: base
-  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
-  themeVariables:
-    fontSize: 15px
-    lineColor: "#64748B"
-    primaryTextColor: "#0F172A"
-    clusterBorder: "#0072B2"
-    edgeLabelBackground: "#FFFFFF"
-    primaryColor: "#FFFFFF"
-    primaryBorderColor: "#334155"
-    secondaryColor: "#F8FAFC"
-    tertiaryColor: "#FFFFFF"
-    textColor: "#0F172A"
-    actorBkg: "#FFFFFF"
-    actorBorder: "#334155"
-    actorTextColor: "#0F172A"
-    actorLineColor: "#94A3B8"
-    signalColor: "#64748B"
-    signalTextColor: "#0F172A"
-    sequenceNumberColor: "#FFFFFF"
-    labelBoxBkgColor: "#FFFFFF"
-    labelBoxBorderColor: "#64748B"
-    labelTextColor: "#0F172A"
-    loopTextColor: "#0F172A"
-    noteBkgColor: "#FFFFFF"
-    noteBorderColor: "#94A3B8"
-    noteTextColor: "#0F172A"
-    transitionColor: "#64748B"
-    transitionLabelColor: "#0F172A"
-    stateLabelColor: "#0F172A"
-    stateBkg: "#FFFFFF"
-    labelBackgroundColor: "#FFFFFF"
-    compositeBackground: "#FFFFFF"
-    attributeBackgroundColorOdd: "#FFFFFF"
-    attributeBackgroundColorEven: "#F8FAFC"
-  themeCSS: >-
-    p{margin:0}
-    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
-    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
-    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
-    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
----
 erDiagram
     accTitle: L4 Detail -- Hunt coordination tables
     accDescr: hunt_lease holds the owner and lease expiry of each hunt's current fire, hunt_watermark how far each hunt has run, and hunt_state its overrun count and too_aggressive flag. All three are keyed by hunt_id.
