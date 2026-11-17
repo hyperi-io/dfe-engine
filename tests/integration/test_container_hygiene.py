@@ -20,6 +20,7 @@ import shutil
 import subprocess
 
 import pytest
+from scalo.deployment.test_support.images import mirror_image
 
 from tests.integration.conftest import (
     _container_labels,
@@ -30,7 +31,6 @@ from tests.integration.conftest import (
     _spin_ch_on_docker,
     _truthy,
 )
-from tests.support.dockerhub import dockerhub_image
 
 # The probe image, tag and digest apart so one Renovate regex covers them.
 # renovate: datasource=docker depName=busybox
@@ -209,7 +209,7 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
                 *_container_labels("busybox"),
                 "--volume",
                 "/probe",
-                dockerhub_image(_BUSYBOX_IMAGE),
+                mirror_image(_BUSYBOX_IMAGE),
                 "sleep",
                 "120",
             ],
