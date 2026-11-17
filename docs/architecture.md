@@ -24,32 +24,87 @@ operator changes into git commits Argo CD syncs into the cluster, and applies th
 ClickHouse DDL itself. Operators call the engine through dfe-ui and the CLI, and the engine commits to the deploy repo that Argo CD syncs.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L2 Services -- DFE
-    accDescr: Operators call dfe-engine through dfe-ui and the dfe CLI. The engine commits config to the deploy repo and applies DDL to ClickHouse. Argo CD syncs the deploy repo into the runtime services.
+  accTitle: L2 Services -- DFE
+  accDescr: Operators call dfe-engine through dfe-ui and the dfe CLI. The engine commits config to the deploy repo and applies DDL to ClickHouse. Argo CD syncs the deploy repo into the runtime services.
 
-    subgraph clients["Clients"]
-        ui["dfe-ui"]
-        cli["dfe CLI"]
-    end
+  subgraph clients["Clients"]
+    ui["<b>dfe-ui</b>"]
+    cli["<b>dfe CLI</b>"]
+  end
 
-    engine[["dfe-engine"]]
-    repo[("Deploy repo")]
-    ch[("ClickHouse")]
-    argo["Argo CD"]
-    runtime["Runtime<br/>services"]
+  engine[["<b>dfe-engine</b>"]]
+  repo[("<b>Deploy repo</b>")]
+  ch[("<b>ClickHouse</b>")]
+  argo["<b>Argo CD</b>"]
+  runtime["<b>Runtime services</b>"]
 
-    clients -->|calls| engine
-    engine -->|commits| repo
-    engine -->|DDL| ch
-    repo --> argo
-    argo -->|helm| runtime
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class repo,ch store
-    class clients group
+  clients -->|calls| engine
+  engine -->|commits| repo
+  engine -->|DDL| ch
+  repo --> argo
+  argo -->|helm| runtime
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class ch store
+  class ui ui
+  class cli,engine,repo,argo control
+  class runtime part
+  style clients fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L2 Services -- DFE.* Up: top of dfe-engine. Down: [L3 Components -- dfe-engine](#inside-the-engine).
@@ -70,41 +125,94 @@ Argo CD also reads dfe-infra's charts. The runtime services write to ClickHouse,
 An event goes from the receiver through Kafka to the loader and the archiver.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Event path
-    accDescr: Log shippers send events to dfe-receiver, which routes them to Kafka topics. dfe-loader writes them to ClickHouse and dfe-archiver writes them to object storage.
+  accTitle: L4 Detail -- Event path
+  accDescr: Log shippers send events to dfe-receiver, which routes them to Kafka topics. dfe-loader writes them to ClickHouse and dfe-archiver writes them to object storage.
 
-    shippers["Log shippers"]
-    receiver["dfe-receiver"]
-    topics[("Kafka topics")]
+  shippers["<b>Log shippers</b>"]
+  receiver["<b>dfe-receiver</b>"]
+  topics[("<b>Kafka topics</b>")]
 
-    subgraph readers["Topic readers"]
-        loader["dfe-loader"]
-        archiver["dfe-archiver"]
-    end
+  subgraph readers["Topic readers"]
+    loader["<b>dfe-loader</b>"]
+    archiver["<b>dfe-archiver</b>"]
+  end
 
-    subgraph stores["Stores"]
-        ch[("ClickHouse")]
-        bucket[("Object storage")]
-    end
+  subgraph stores["Stores"]
+    ch[("<b>ClickHouse</b>")]
+    bucket[("<b>Object storage</b>")]
+  end
 
-    shippers -->|events| receiver
-    receiver -->|routed| topics
-    topics --> readers
-    readers --> stores
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef async fill:#F6E6EF,stroke:#A8517F,stroke-width:1px,color:#3D1529
-    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class shippers ext
-    class topics async
-    class ch,bucket store
-    class readers,stores group
+  shippers -->|events| receiver
+  receiver -->|routed| topics
+  topics --> readers
+  readers --> stores
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class shippers ext
+  class receiver ingest
+  class loader,archiver load
+  class topics bus
+  class ch,bucket store
+  style readers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style stores fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 6. L4 Detail -- Event path. The dashed box is external.* Up: [L2 Services -- DFE](#where-the-engine-sits-in-the-suite).
+*Figure 6. L4 Detail -- Event path. The dashed grey box is outside DFE.* Up: [L2 Services -- DFE](#where-the-engine-sits-in-the-suite).
 
 The loader writes to ClickHouse and the archiver to object storage. With no broker, the receiver pushes to them over gRPC instead. The hunt runner, dfe-hyperdx and the query API read ClickHouse.
 
@@ -123,24 +231,79 @@ services, never authors Argo Applications, and never claims a commit is live
 (an org-specific approval gate may sit between commit and sync). One committed values file becomes one Argo Application and its pods.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Instance deploy path
-    accDescr: dfe-engine commits an instance values file to the deploy repo. dfe-infra's ApplicationSet makes one Argo Application per values file, which renders the app's chart into service pods.
+  accTitle: L4 Detail -- Instance deploy path
+  accDescr: dfe-engine commits an instance values file to the deploy repo. dfe-infra's ApplicationSet makes one Argo Application per values file, which renders the app's chart into service pods.
 
-    engine[["dfe-engine"]]
-    values[("Instance<br/>values file")]
-    appset["ApplicationSet"]
-    app["Argo Application"]
-    pods["Service pods"]
+  engine[["<b>dfe-engine</b>"]]
+  values[("<b>Instance values file</b>")]
+  appset["<b>ApplicationSet</b>"]
+  app["<b>Argo Application</b>"]
+  pods["<b>Service pods</b>"]
 
-    engine -->|commit| values
-    values -->|matched| appset
-    appset --> app
-    app -->|helm| pods
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
-    class values core
+  engine -->|commit| values
+  values -->|matched| appset
+  appset --> app
+  app -->|helm| pods
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class values store
+  class engine,appset,app control
+  class pods part
 ```
 
 *Figure 2. L4 Detail -- Instance deploy path.* Up: [L2 Services -- DFE](#where-the-engine-sits-in-the-suite).
@@ -162,32 +325,84 @@ binding, and the field-map bindings together, and every runtime stage reads
 what the engine compiles from it. One definition compiles to the receiver's rules, the loader's table map, the table and its Sigma view.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- One source definition, compiled
-    accDescr: A source definition goes to dfe-engine, which compiles the receiver's rules, the loader's table map, the source's table and its Sigma view from it.
+  accTitle: L4 Detail -- One source definition, compiled
+  accDescr: A source definition goes to dfe-engine, which compiles the receiver's rules, the loader's table map, the source's table and its Sigma view from it.
 
-    src["Source definition"]
-    engine[["dfe-engine"]]
+  src["<b>Source definition</b>"]
+  engine[["<b>dfe-engine</b>"]]
 
-    subgraph out["Compiled from it"]
-        direction LR
-        rules["Receiver<br/>rules"]
-        tablemap["Loader<br/>table map"]
-        table[("Source<br/>table")]
-        view[("Sigma<br/>view")]
-        rules ~~~ tablemap ~~~ table ~~~ view
-    end
+  subgraph out["Compiled from it"]
+    direction LR
+    rules["<b>Receiver rules</b>"]
+    tablemap["<b>Loader table map</b>"]
+    table[("<b>Source table</b>")]
+    view[("<b>Sigma view</b>")]
+    rules ~~~ tablemap ~~~ table ~~~ view
+  end
 
-    src -->|definition| engine
-    engine --> out
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class src core
-    class table,view store
-    class out group
+  src -->|definition| engine
+  engine --> out
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class table,view store
+  class engine control
+  class src,rules,tablemap part
+  style out fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 3. L4 Detail -- One source definition, compiled.* Up: [L3 Components -- dfe-engine](#inside-the-engine).
@@ -208,28 +423,79 @@ and `schema` groups are break-glass paths that work with no engine. The API neve
 reaches past git to the cluster. Both clients reach the engine through its API, and the API reaches the cluster through git.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Control layers
-    accDescr: dfe-ui covers the common tasks and the dfe CLI every listed operation, both through the engine API. The API covers every control function and works through the charts and YAML in git.
+  accTitle: L4 Detail -- Control layers
+  accDescr: dfe-ui covers the common tasks and the dfe CLI every listed operation, both through the engine API. The API covers every control function and works through the charts and YAML in git.
 
-    subgraph clients["Clients"]
-        ui["dfe-ui<br/>common tasks"]
-        cli["dfe CLI<br/>every operation"]
-    end
+  subgraph clients["Clients"]
+    ui["<b>dfe-ui</b><br/><span>common tasks</span>"]
+    cli["<b>dfe CLI</b><br/><span>every operation</span>"]
+  end
 
-    api["Engine API<br/>every control function"]
-    git[("Charts and<br/>YAML in git")]
+  api["<b>Engine API</b><br/><span>every control function</span>"]
+  git[("<b>Charts and YAML in git</b>")]
 
-    clients -->|API calls| api
-    api -->|commits| git
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class api core
-    class git store
-    class clients group
+  clients -->|API calls| api
+  api -->|commits| git
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class ui ui
+  class cli,api,git control
+  style clients fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 4. L4 Detail -- Control layers.* Up: [L2 Services -- DFE](#where-the-engine-sits-in-the-suite).
@@ -239,37 +505,92 @@ flowchart LR
 Inside the engine, the API server drives the registries and compilers, which commit through the gitops writer or apply DDL through the provisioners.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L3 Components -- dfe-engine
-    accDescr: Clients call the API server. It reads and writes the config registries and runs the compilers. The gitops writer commits registry changes and compiled overlays to the deploy repo, and the provisioners apply compiled DDL to ClickHouse.
+  accTitle: L3 Components -- dfe-engine
+  accDescr: Clients call the API server. It reads and writes the config registries and runs the compilers. The gitops writer commits registry changes and compiled overlays to the deploy repo, and the provisioners apply compiled DDL to ClickHouse.
 
-    clients["Clients"]
+  clients["<b>Clients</b>"]
 
-    subgraph engine["dfe-engine"]
-        api["API server"]
-        registries["Config registries"]
-        compilers["Compilers"]
-        writer["GitOps writer"]
-        provisioners["Provisioners"]
-    end
+  subgraph engine["dfe-engine"]
+    api["<b>API server</b>"]
+    registries["<b>Config registries</b>"]
+    compilers["<b>Compilers</b>"]
+    writer["<b>GitOps writer</b>"]
+    provisioners["<b>Provisioners</b>"]
+  end
 
-    repo[("Deploy repo")]
-    ch[("ClickHouse")]
+  repo[("<b>Deploy repo</b>")]
+  ch[("<b>ClickHouse</b>")]
 
-    clients -->|calls| api
-    api --> registries
-    api --> compilers
-    registries --> writer
-    compilers --> writer
-    compilers --> provisioners
-    writer -->|commits| repo
-    provisioners -->|DDL| ch
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class repo,ch store
-    class engine group
+  clients -->|calls| api
+  api --> registries
+  api --> compilers
+  registries --> writer
+  compilers --> writer
+  compilers --> provisioners
+  writer -->|commits| repo
+  provisioners -->|DDL| ch
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class ch store
+  class clients ui
+  class repo control
+  class api,registries,compilers,writer,provisioners part
+  style engine fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 5. L3 Components -- dfe-engine.* Up: [L2 Services -- DFE](#where-the-engine-sits-in-the-suite).

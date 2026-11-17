@@ -28,6 +28,50 @@ A label-based query interface over ClickHouse parameterised views, with multi-te
 The route checks `query:execute` and fetches the view through the executor. The executor then keeps the declared parameters, injects `org_id` and runs the view on ClickHouse.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 sequenceDiagram
     accTitle: L4 Detail -- View execution
     accDescr: The client posts to a view's execute route. The API asks the executor for the view, which reads it from the catalog. The API then calls execute, and the executor keeps the declared parameters, injects org_id and runs the view on ClickHouse. The rows return to the executor, the result to the API and JSON to the client.
@@ -84,35 +128,88 @@ A view runs as `dfe_query_reader` (`query_views.restricted_user`), which holds `
 A view execution runs on ClickHouse, and a raw query goes through a datasource adapter to ClickHouse or object storage.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Query routes
-    accDescr: A client calls the query routes. A view execution goes to the ViewExecutor, which runs the view on ClickHouse. A raw query goes to a datasource adapter, which reads ClickHouse or lists S3, MinIO or a local directory.
+  accTitle: L4 Detail -- Query routes
+  accDescr: A client calls the query routes. A view execution goes to the ViewExecutor, which runs the view on ClickHouse. A raw query goes to a datasource adapter, which reads ClickHouse or lists S3, MinIO or a local directory.
 
-    client["HTTP client"]
+  client["<b>HTTP client</b>"]
 
-    api["Query routes"]
+  api["<b>Query routes</b>"]
 
-    executor["ViewExecutor"]
-    adapters["Datasource<br/>adapters"]
+  executor["<b>ViewExecutor</b>"]
+  adapters["<b>Datasource adapters</b>"]
 
-    ch[("ClickHouse")]
-    storage[("S3, MinIO<br/>or files")]
+  ch[("<b>ClickHouse</b>")]
+  storage[("<b>S3, MinIO or files</b>")]
 
-    client --> api
-    api -->|view| executor
-    api -->|raw| adapters
-    executor --> ch
-    adapters --> ch
-    adapters --> storage
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
-    class client ext
-    class ch,storage store
+  client --> api
+  api -->|view| executor
+  api -->|raw| adapters
+  executor --> ch
+  adapters --> ch
+  adapters --> storage
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class client ext
+  class ch,storage store
+  class api,executor,adapters part
 ```
 
-*Figure 2. L4 Detail -- Query routes. The dashed box is the caller.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 2. L4 Detail -- Query routes. The dashed grey box is the caller.* Up: [L3 Components -- dfe-engine](../architecture.md).
 
 The executor looks each view up in the `ViewCatalog`, which discovers the views from ClickHouse and caches them for 60 seconds. Every route authenticates by JWT, OIDC headers or API key first.
 
@@ -240,25 +337,80 @@ interface QueryMetadata {
 The API pages two ways. Offset paging sends a growing offset, and keyset paging sends the last `order_by` value as the next `after_key`.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart TB
-    accTitle: L4 Detail -- Offset and keyset paging
-    accDescr: Offset paging sends offset 0, then 100, then 200. Keyset paging sends no after_key for the first page, then the last order_by value of each page as the next page's after_key.
+  accTitle: L4 Detail -- Offset and keyset paging
+  accDescr: Offset paging sends offset 0, then 100, then 200. Keyset paging sends no after_key for the first page, then the last order_by value of each page as the next page's after_key.
 
-    subgraph offset["Offset"]
-        direction LR
-        o1["Page 1<br/>offset 0"] --> o2["Page 2<br/>offset 100"] --> o3["Page 3<br/>offset 200"]
-    end
+  subgraph offset["Offset"]
+    direction LR
+    o1["<b>Page 1</b><br/><span>offset 0</span>"] --> o2["<b>Page 2</b><br/><span>offset 100</span>"] --> o3["<b>Page 3</b><br/><span>offset 200</span>"]
+  end
 
-    subgraph keyset["Keyset"]
-        direction LR
-        k1["Page 1<br/>no after_key"] --> k2["Page 2<br/>after_key ts1"] --> k3["Page 3<br/>after_key ts2"]
-    end
+  subgraph keyset["Keyset"]
+    direction LR
+    k1["<b>Page 1</b><br/><span>no after_key</span>"] --> k2["<b>Page 2</b><br/><span>after_key ts1</span>"] --> k3["<b>Page 3</b><br/><span>after_key ts2</span>"]
+  end
 
-    offset ~~~ keyset
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class offset,keyset group
+  offset ~~~ keyset
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class o1,o2,o3,k1,k2,k3 part
+  style offset fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style keyset fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 3. L4 Detail -- Offset and keyset paging. ts1 and ts2 are the last `order_by` values of pages 1 and 2.* Up: [Data plane](README.md).
@@ -442,26 +594,79 @@ there is no per-query role list:
 Every query route answers 403 without the route's scope, and otherwise injects `org_id` and runs the query.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Query route authorisation
-    accDescr: An authenticated request is checked for the route's scope. Without it the answer is 403. With it the executor injects org_id from the auth context and runs the query on ClickHouse.
+  accTitle: L4 Detail -- Query route authorisation
+  accDescr: An authenticated request is checked for the route's scope. Without it the answer is 403. With it the executor injects org_id from the auth context and runs the query on ClickHouse.
 
-    request(["Authenticated<br/>request"])
-    scope{"Route<br/>scope?"}
-    inject["Inject org_id"]
-    deny(["403"])
-    run(["Run on ClickHouse"])
+  request(["<b>Authenticated request</b>"])
+  scope{"<b>Route scope?</b>"}
+  inject["<b>Inject org_id</b>"]
+  deny(["<b>403</b>"])
+  run(["<b>Run on ClickHouse</b>"])
 
-    request --> scope
-    scope -->|yes| inject
-    scope -.->|no| deny
-    inject --> run
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef decision fill:#FCF1D6,stroke:#9A6700,stroke-width:1px,color:#3D2A00
-    classDef error fill:#FBE3D6,stroke:#C2410C,stroke-width:1px,color:#4A1A05
-    class scope decision
-    class deny error
+  request --> scope
+  scope -->|yes| inject
+  scope -.->|no| deny
+  inject --> run
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class scope decision
+  class deny error
+  class request,inject,run part
 ```
 
 *Figure 4. L4 Detail -- Query route authorisation. The dotted arrow is the refusal.* Up: [Data plane](README.md).
