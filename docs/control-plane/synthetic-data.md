@@ -52,15 +52,21 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Synthetic data paths
   accDescr: dfe-schemas meta packs feed the schema event factory, and sampler rows or lines feed the sample event factory, which scrubs identities. Both feed a Poisson-paced stream that posts events to dfe-receiver's ingest endpoint.
 
-  packs[("<b>dfe-schemas</b><br/><span>meta packs</span>")]
-  sample[("<b>Sampler rows or lines</b>")]
+  subgraph inputs["Inputs"]
+    direction LR
+    packs[("<b>dfe-schemas</b><br/><span>meta packs</span>")]
+    sample[("<b>Sampler rows or lines</b>")]
+  end
 
-  schemaf["<b>SchemaEventFactory</b>"]
-  samplef["<b>SampleEventFactory</b><br/><span>identity scrub</span>"]
+  subgraph factories["Factories"]
+    direction LR
+    schemaf["<b>SchemaEventFactory</b>"]
+    samplef["<b>SampleEventFactory</b><br/><span>identity scrub</span>"]
+  end
 
   stream["<b>Poisson-paced stream</b>"]
 
@@ -71,6 +77,9 @@ flowchart LR
   schemaf --> stream
   samplef --> stream
   stream --> receiver
+  class receiver ingest
+  class packs,sample store
+  class schemaf,samplef,stream part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -82,9 +91,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class receiver ingest
-  class packs,sample store
-  class schemaf,samplef,stream part
+  style inputs fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style factories fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Synthetic data paths. dfe-receiver is outside the engine.* Up: [The DFE control-plane layer](README.md).

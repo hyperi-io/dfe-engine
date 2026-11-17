@@ -68,7 +68,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Data evolution stages
   accDescr: In stage 0 dfe-receiver or dfe-fetcher lands data in the main table as _json. Promoting fields gives the source a meta schema in stage 1. In stage 2 the source gets a routing condition and its own topic and table, with an optional transform.
 
@@ -79,13 +79,16 @@ flowchart LR
     meta["<b>Meta schema</b>"]
   end
   subgraph s2["2 DFE source"]
+    direction LR
     route["<b>Routing condition</b>"]
     own[("<b>Own topic and table</b>")]
+    route --> own
   end
 
-  main -.->|promote| meta
-  meta -.->|own source| route
-  route --> own
+  s0 -.->|promote| s1
+  s1 -.->|own source| s2
+  class main,own store
+  class meta,route part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -97,14 +100,12 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class main,own store
-  class meta,route part
   style s0 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style s1 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style s2 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Data evolution stages. Dotted arrows are optional steps, and dfe-receiver or dfe-fetcher fills the main table.* Up: [DFE architecture](architecture.md). Down: [L4 Detail -- How a table gets built](#how-a-table-gets-built), [L4 Detail -- What a transform does](#what-a-transform-is-actually-for).
+*Figure 1. L4 Detail -- Data evolution stages. Dotted arrows are optional steps, and dfe-receiver or dfe-fetcher fills the main table.* Up: [L2 Services -- dfe-engine](architecture.md). Down: [L4 Detail -- How a table gets built](#how-a-table-gets-built), [L4 Detail -- What a transform does](#what-a-transform-is-actually-for).
 
 Nothing forces you down the stages. A source can sit in stage 0 forever, and stage 3 below drops `_json` from a source you know fully.
 
@@ -207,6 +208,8 @@ flowchart LR
   meta -->|select fields| derived
   derived --> table
   header --> table
+  class table store
+  class meta,derived,header part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -218,8 +221,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class table store
-  class meta,derived,header part
 ```
 
 *Figure 2. L4 Detail -- How a table gets built.* Up: [L4 Detail -- Data evolution stages](#the-path).
@@ -341,6 +342,8 @@ flowchart LR
 
   raw -->|record| xform
   xform -->|columns| cols
+  class xform xform
+  class raw,cols store
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -352,8 +355,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class xform xform
-  class raw,cols store
 ```
 
 *Figure 3. L4 Detail -- What a transform does.* Up: [L4 Detail -- Data evolution stages](#the-path).

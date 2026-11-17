@@ -53,7 +53,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Telemetry path
   accDescr: DFE apps push OTLP to the collector gateway, which scrapes their metrics as well, and their stdout reaches it through the collector daemonset. The gateway's ClickHouse exporter writes the otel tables in the DFE database. Observe and the engine's KEDA shim read those tables.
 
@@ -72,6 +72,9 @@ flowchart LR
   collector -->|exporter| otel
   otel --> observe
   otel --> shim
+  class otel store
+  class observe ui
+  class apps,ds,gw,shim part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -83,9 +86,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class otel store
-  class observe ui
-  class apps,ds,gw,shim part
   style collector fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 

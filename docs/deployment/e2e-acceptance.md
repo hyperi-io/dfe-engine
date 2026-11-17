@@ -59,7 +59,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Acceptance scenarios
   accDescr: A local dev hybrid is not sufficient for acceptance. The full Kubernetes deploy reads its config and credentials from the deployment's private config and secrets backend, and the standalone docker run feeds what it learns back to dfe-docker. Both must pass.
 
@@ -67,6 +67,7 @@ flowchart LR
   hybrid["<b>Local dev hybrid</b>"]
 
   subgraph accept["Acceptance, both must pass"]
+    direction LR
     k8s["<b>Clustered k8s</b><br/><span>dfe-infra deploy</span>"]
     docker["<b>Single-host docker</b>"]
   end
@@ -76,6 +77,8 @@ flowchart LR
   cfg -->|config, creds| k8s
   hybrid -.->|not sufficient| accept
   docker -->|feedback| dfedocker
+  class cfg store
+  class hybrid,k8s,docker,dfedocker part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -87,8 +90,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class cfg store
-  class hybrid,k8s,docker,dfedocker part
   style accept fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 

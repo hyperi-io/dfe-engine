@@ -120,24 +120,36 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Group sync decision
   accDescr: A remote group linked to a stored group through this provider updates that group. One with an id linked to another provider is skipped as provider_mismatch. Otherwise a free name creates a linked group, and a name already held is skipped as name_taken.
 
-  linked{"<b>Linked here?</b>"}
-  other{"<b>Id linked elsewhere?</b>"}
-  update(["<b>Update description</b>"])
-  free{"<b>Name free?</b>"}
-  mismatch(["<b>Skip provider_mismatch</b>"])
-  create(["<b>Create, linked</b>"])
-  taken(["<b>Skip name_taken</b>"])
+  subgraph q1["Linked here"]
+    direction LR
+    linked{"<b>Linked here?</b>"}
+    update(["<b>Update description</b>"])
+  end
+  subgraph q2["Linked elsewhere"]
+    direction LR
+    other{"<b>Id linked elsewhere?</b>"}
+    mismatch(["<b>Skip provider_mismatch</b>"])
+  end
+  subgraph q3["Name free"]
+    direction LR
+    free{"<b>Name free?</b>"}
+    create(["<b>Create, linked</b>"])
+    taken(["<b>Skip name_taken</b>"])
+  end
 
-  linked -->|no| other
+  q1 -->|no| q2
   linked -->|yes| update
-  other -->|no| free
+  q2 -->|no| q3
   other -.->|yes| mismatch
   free -->|yes| create
   free -.->|no| taken
+  class linked,other,free decision
+  class mismatch,taken error
+  class update,create part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -149,9 +161,9 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class linked,other,free decision
-  class mismatch,taken error
-  class update,create part
+  style q1 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style q2 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style q3 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 2. L4 Detail -- Group sync decision. Dotted arrows end in a skip.* Up: [rbac.md](rbac.md).

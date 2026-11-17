@@ -709,18 +709,25 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Elastic template conversion
   accDescr: An Elastic index template goes to the template converter, which maps Elastic types to primitives and analyzers to use cases. It writes a source meta schema in YAML, which a source definition then names.
 
-  template["<b>Elastic index template</b>"]
-  converter["<b>Template converter</b>"]
-  schema["<b>Source meta schema YAML</b>"]
-  source["<b>Source definition</b>"]
-
-  template --> converter
-  converter --> schema
-  schema --> source
+  subgraph CONVERT["Convert"]
+    direction LR
+    template["<b>Elastic index template</b>"]
+    converter["<b>Template converter</b>"]
+    template --> converter
+  end
+  subgraph USE["Use"]
+    direction LR
+    schema["<b>Source meta schema</b><br/><span>YAML</span>"]
+    source["<b>Source definition</b>"]
+    schema --> source
+  end
+  CONVERT -->|writes| USE
+  class template ext
+  class converter,schema,source part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -732,8 +739,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class template ext
-  class converter,schema,source part
+  style CONVERT fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style USE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Elastic template conversion. The dashed box comes from outside DFE.* Up: [Data plane](README.md).

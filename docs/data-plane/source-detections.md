@@ -119,18 +119,25 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Rule to detection table
   accDescr: A hunt groups rules and carries the schedule. The hunt runner runs each rule over the hunt's window and writes every matched row to the detection table.
 
-  rules["<b>Rules</b>"]
-  hunt["<b>Hunt</b>"]
-  runner["<b>Hunt runner</b>"]
-  detection[("<b>detection table</b>")]
-
-  rules --> hunt
-  hunt --> runner
-  runner -->|matched rows| detection
+  subgraph DEFINE["Define"]
+    direction LR
+    rules["<b>Rules</b>"]
+    hunt["<b>Hunt</b>"]
+    rules --> hunt
+  end
+  subgraph RUN["Run"]
+    direction LR
+    runner["<b>Hunt runner</b>"]
+    detection[("<b>detection table</b>")]
+    runner -->|matched rows| detection
+  end
+  DEFINE --> RUN
+  class detection store
+  class rules,hunt,runner part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -142,8 +149,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class detection store
-  class rules,hunt,runner part
+  style DEFINE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style RUN fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Rule to detection table.* Up: [Data plane](README.md).
