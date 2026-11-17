@@ -17,50 +17,6 @@ Google puts no groups in its sign-in token. So DFE asks for a read-only groups s
 DFE signs in with Google by code exchange, then reads the user's groups from the Cloud Identity API with the user's token.
 
 ```mermaid
----
-config:
-  theme: base
-  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
-  themeVariables:
-    fontSize: 15px
-    lineColor: "#64748B"
-    primaryTextColor: "#0F172A"
-    clusterBorder: "#0072B2"
-    edgeLabelBackground: "#FFFFFF"
-    primaryColor: "#FFFFFF"
-    primaryBorderColor: "#334155"
-    secondaryColor: "#F8FAFC"
-    tertiaryColor: "#FFFFFF"
-    textColor: "#0F172A"
-    actorBkg: "#FFFFFF"
-    actorBorder: "#334155"
-    actorTextColor: "#0F172A"
-    actorLineColor: "#94A3B8"
-    signalColor: "#64748B"
-    signalTextColor: "#0F172A"
-    sequenceNumberColor: "#FFFFFF"
-    labelBoxBkgColor: "#FFFFFF"
-    labelBoxBorderColor: "#64748B"
-    labelTextColor: "#0F172A"
-    loopTextColor: "#0F172A"
-    noteBkgColor: "#FFFFFF"
-    noteBorderColor: "#94A3B8"
-    noteTextColor: "#0F172A"
-    transitionColor: "#64748B"
-    transitionLabelColor: "#0F172A"
-    stateLabelColor: "#0F172A"
-    stateBkg: "#FFFFFF"
-    labelBackgroundColor: "#FFFFFF"
-    compositeBackground: "#FFFFFF"
-    attributeBackgroundColorOdd: "#FFFFFF"
-    attributeBackgroundColorEven: "#F8FAFC"
-  themeCSS: >-
-    p{margin:0}
-    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
-    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
-    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
-    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
----
 sequenceDiagram
     accTitle: L4 Detail -- Google sign-in
     accDescr: The browser opens DFE sign-in and DFE redirects to Google with the Cloud Identity groups scope. DFE exchanges the code for an ID token and the user's access token, then searches the user's groups in the Cloud Identity API with that token.
