@@ -56,7 +56,7 @@ The image ships the dfe-schemas trees at `/app/schemas-seed`, copies them into `
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md): what the engine is, its invariants and why it is built this way.
+- [docs/architecture.md](docs/architecture.md): what the engine is, its parts and why it is built this way.
 - [docs/control-plane/](docs/control-plane/README.md): the API, auth, RBAC and governed gitops.
 - [docs/data-plane/](docs/data-plane/README.md): sources, schemas, DDL, the query API and hunts.
 - [docs/deployment/](docs/deployment/README.md): the chart, the image and the deployment contract.

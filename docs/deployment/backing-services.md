@@ -87,6 +87,8 @@ flowchart LR
 
   cfg -->|selects| eng
   eng -->|talks to| be
+  class be store
+  class cfg,eng control
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -98,8 +100,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class be store
-  class cfg,eng control
 ```
 
 *Figure 1. L4 Detail -- Backing-service binding.* Up: [Deployment](README.md).
@@ -159,19 +159,20 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart TB
+flowchart LR
   accTitle: L4 Detail -- Size and platform axes
   accDescr: Size runs from dfe-docker through slim, single and scale to mesh and sets the composition. Platform runs on-prem, AWS, GCP and Azure and sets which product fills each backing service.
 
   subgraph size["Size: composition"]
-    direction LR
+    direction TB
     docker["<b>dfe-docker</b>"] ~~~ slim["<b>slim</b>"] ~~~ single["<b>single</b>"] ~~~ scale["<b>scale</b>"] ~~~ mesh["<b>mesh</b>"]
   end
   subgraph platform["Platform: which product"]
-    direction LR
+    direction TB
     onprem["<b>On-prem or Rancher</b>"] ~~~ aws["<b>AWS</b>"] ~~~ gcp["<b>GCP</b>"] ~~~ azure["<b>Azure</b>"]
   end
   size ~~~ platform
+  class docker,slim,single,scale,mesh,onprem,aws,gcp,azure part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -183,7 +184,6 @@ flowchart TB
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class docker,slim,single,scale,mesh,onprem,aws,gcp,azure part
   style size fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style platform fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
@@ -290,6 +290,10 @@ flowchart LR
   choice -->|openbao, vault| bao
   choice -->|aws| sm
   choice -.->|gcp, azure| refused
+  class file,bao,sm store
+  class choice decision
+  class refused error
+  class eng control
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -301,10 +305,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class file,bao,sm store
-  class choice decision
-  class refused error
-  class eng control
 ```
 
 *Figure 3. L4 Detail -- Secrets provider choice. The dotted arrow is the refusal.* Up: [Deployment](README.md).
@@ -405,6 +405,10 @@ flowchart LR
     ch ~~~ core ~~~ observe
     broker ~~~ persource ~~~ secrets
   end
+  class broker bus
+  class ch,secrets store
+  class observe ui
+  class core,persource part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -416,10 +420,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class broker bus
-  class ch,secrets store
-  class observe ui
-  class core,persource part
   style docker fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 

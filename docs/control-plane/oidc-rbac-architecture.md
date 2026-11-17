@@ -89,18 +89,27 @@ flowchart LR
   accTitle: L4 Detail -- OIDC sign-in layers
   accDescr: The external IdP authenticates the user and hands the engine an id_token. The engine's relying party validates it and re-mints an engine token. The provider adapter turns the raw group references into group ids, the group files map them to roles and org ids, and those feed the control plane and the data plane.
 
-  idp["<b>External IdP</b>"]
-  rp["<b>Relying party</b>"]
-  adapt["<b>Provider adapter</b>"]
-  files[("<b>Group files</b>")]
-  ctrl["<b>Control plane</b><br/><span>roles to actions</span>"]
-  data["<b>Data plane</b><br/><span>orgs to rows</span>"]
-
-  idp -->|id_token| rp
-  rp -->|groups| adapt
-  adapt -->|ids| files
-  files --> ctrl
-  files --> data
+  subgraph SIGNIN["Sign-in"]
+    direction TB
+    idp["<b>External IdP</b>"]
+    rp["<b>Relying party</b>"]
+    adapt["<b>Provider adapter</b>"]
+    idp -->|id_token| rp
+    rp -->|groups| adapt
+  end
+  subgraph RESOLVE["Roles and orgs"]
+    direction TB
+    files[("<b>Group files</b>")]
+    ctrl["<b>Control plane</b><br/><span>roles to actions</span>"]
+    data["<b>Data plane</b><br/><span>orgs to rows</span>"]
+    files --> ctrl
+    files --> data
+  end
+  SIGNIN -->|ids| RESOLVE
+  class idp ext
+  class files store
+  class ctrl control
+  class rp,adapt,data part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -112,10 +121,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class idp ext
-  class files store
-  class ctrl control
-  class rp,adapt,data part
+  style SIGNIN fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style RESOLVE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- OIDC sign-in layers. The provider adapter is the one layer that knows the provider.* Up: [rbac.md](rbac.md).

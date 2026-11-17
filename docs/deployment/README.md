@@ -68,23 +68,27 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart TB
+flowchart LR
   accTitle: L4 Detail -- Deployment layers
   accDescr: Layer 0 brings a StorageClass, cert-manager and External Secrets, Argo CD and the cluster operators such as KEDA. Layer 1 deploys ClickHouse, an optional Kafka, the DocumentDB store and the OTel collector. Layer 2 deploys the DFE apps from the engine's overlay values.
 
   subgraph l0["Layer 0 platform"]
-    direction LR
+    direction TB
     storage["<b>StorageClass</b>"] --> certs["<b>cert-manager, ESO</b>"] --> argo["<b>Argo CD</b>"] --> ops["<b>Operators</b>"]
   end
   subgraph l1["Layer 1 backing services"]
-    direction LR
+    direction TB
     ch[("<b>ClickHouse</b>")] ~~~ kafka[("<b>Kafka</b>")] ~~~ docdb[("<b>DocumentDB</b>")] ~~~ otel["<b>OTel collector</b>"]
   end
   subgraph l2["Layer 2 apps"]
-    direction LR
+    direction TB
     overlay[("<b>Overlay values</b>")] --> apps["<b>DFE apps</b>"]
   end
   l0 --> l1 --> l2
+  class kafka bus
+  class ch,docdb,overlay store
+  class argo control
+  class storage,certs,ops,otel,apps part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -96,16 +100,12 @@ flowchart TB
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class kafka bus
-  class ch,docdb,overlay store
-  class argo control
-  class storage,certs,ops,otel,apps part
   style l0 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style l1 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style l2 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Deployment layers. Read each layer left to right, then down.* Up: [DFE architecture](../architecture.md).
+*Figure 1. L4 Detail -- Deployment layers. Read each layer top to bottom, then the next layer to the right.* Up: [L2 Services -- dfe-engine](../architecture.md).
 
 Layer 0 is the platform baseline. The deployment assumes a bare cluster and nothing more. `bootstrap/bootstrap.sh` (in
 dfe-infra) lays down the baseline with a **detect-or-install** probe for every

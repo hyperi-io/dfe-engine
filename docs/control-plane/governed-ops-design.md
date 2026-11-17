@@ -53,15 +53,18 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Governed write path
   accDescr: dfe local, the Helm vars router, the backing services router and governance actions all write through GitCrud. GitCrud builds the message under the commit policy and commits through GitopsRepo, and Argo CD reconciles the commit.
 
   subgraph callers["Callers"]
+    direction LR
     local["<b>dfe local</b>"]
     helm["<b>Helm vars router</b>"]
     backing["<b>Backing services router</b>"]
     actions["<b>Governance actions</b>"]
+    local ~~~ helm
+    backing ~~~ actions
   end
 
   gitcrud["<b>GitCrud</b>"]
@@ -75,6 +78,8 @@ flowchart LR
   gitcrud -->|message| policy
   gitcrud -->|commit| repo
   repo --> argo
+  class argo control
+  class local,helm,backing,actions,gitcrud,policy,repo part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -86,12 +91,10 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class argo control
-  class local,helm,backing,actions,gitcrud,policy,repo part
   style callers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Governed write path. Argo CD is outside the engine.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 1. L4 Detail -- Governed write path. Argo CD is outside the engine.* Up: [L3 Components -- API server](../api-server.md).
 
 Tier 1 is raw var CRUD over the overlay files (`/api/v1/helm`), admin-grade because it can set anything. Tier 2 is curated actions (`/api/v1/governance`), each behind a permission of its name, so an operator can run `receiver-surge` without the keys to edit any var. RBAC binds to a resource class, an action or an operation, never to a field.
 
@@ -179,7 +182,7 @@ sequenceDiagram
     repo-->>argo: New commit
 ```
 
-*Figure 2. L4 Detail -- Writing a helm var. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 2. L4 Detail -- Writing a helm var. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- API server](../api-server.md).
 
 The full path is `PUT /api/v1/helm/files/{name}/vars/{path}`, for example `receiver-default-values` and `keda.maxReplicaCount`. A production `DFE_ENGINE_ENV` in team mode routes the write to a review branch instead of `main`. Validation, the protected-var check and the commit live in the engine, so the CLI and the API take the same path.
 
@@ -254,7 +257,7 @@ sequenceDiagram
     crud-->>op: Diff and commit SHA
 ```
 
-*Figure 3. L4 Detail -- Invoking an action. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 3. L4 Detail -- Invoking an action. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- API server](../api-server.md).
 
 A `ProtectedPolicy` is a list of locked `cls:name:path` globs that Tier 1 respects too, unless the caller holds the override grant. A set or revert at a parent, or a set below a locked scalar, is rejected like a write to the var itself, and a whole-document write is gated on the leaves it adds, changes or removes. Three policies ship: `baseline` locks image references, `storage-layout` locks the data-layer modes, the storage model, the `objectStore`, `tieredBlock` and `tieredObject` dial blocks and the disk size and class, and `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud.
 
@@ -336,6 +339,8 @@ flowchart LR
   user -->|tier| tier
   user -->|tenant| tenant
   user -->|pinned| setting
+  class user,tier,tenant,setting store
+  class group part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -347,11 +352,9 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class user,tier,tenant,setting store
-  class group part
 ```
 
-*Figure 4. L4 Detail -- ClickHouse identity.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 4. L4 Detail -- ClickHouse identity.* Up: [L3 Components -- API server](../api-server.md).
 
 A group binding ties an RBAC group's ClickHouse user to one tier and at most one org. A tier is grants, a settings profile and a quota (`dfe_<tier>_role`, `_profile`, `_quota`). The tenant axis is one shared role plus a restrictive row policy on each `_org_id` table, reading the caller's `SQL_current_tenant_id`, which an org-tied user holds read-only, so a `SETTINGS` override in a query is rejected. The catalogue of tiers and service roles is data in dfe-schemas (`roles/clickhouse.yaml`), editable through the `ch_tiers` and `ch_service_roles` classes, and `ChRbacReconciler` renders it into idempotent DDL and runs it. The hunt runner connects as the `dfe_hunt_runner` service role, with grants and no quota (`src/dfe_engine/hunts/connect.py`), and the catalogue's `hunt_tier_*` tiers set per-query memory and time limits and an hourly quota for a group bound to one.
 
@@ -407,13 +410,14 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Hunt claim and run
   accDescr: When a fire is due, runner workers race to claim it in hunt_lease. The winner runs the window query, writes matched rows to the results table and advances hunt_watermark, which sets the next window.
 
   due(["<b>Fire due</b>"])
 
   subgraph workers["Runner workers"]
+    direction LR
     w1["<b>Worker</b>"]
     w2["<b>Worker</b>"]
   end
@@ -422,8 +426,11 @@ flowchart LR
 
   run["<b>Run the window query</b>"]
 
-  results[("<b>Results table</b>")]
-  watermark[("<b>hunt_watermark</b>")]
+  subgraph written["Written by the run"]
+    direction LR
+    results[("<b>Results table</b>")]
+    watermark[("<b>hunt_watermark</b>")]
+  end
 
   due --> workers
   workers -->|claim| lease
@@ -431,6 +438,8 @@ flowchart LR
   run --> results
   run --> watermark
   watermark -.->|next window| workers
+  class lease,results,watermark store
+  class due,w1,w2,run part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -442,9 +451,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class lease,results,watermark store
-  class due,w1,w2,run part
   style workers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style written fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 5. L4 Detail -- Hunt claim and run. The dotted arrow is the next run reading the watermark.* Up: [The DFE control-plane layer](README.md).
@@ -659,6 +667,7 @@ flowchart LR
   surv --> chsafe
   surv --> nodouble
   nodouble --> crash
+  class surv,rbac,chsafe,nodouble,crash part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -670,7 +679,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class surv,rbac,chsafe,nodouble,crash part
 ```
 
 *Figure 8. L4 Detail -- What governed ops rests on.* Up: [The DFE control-plane layer](README.md).

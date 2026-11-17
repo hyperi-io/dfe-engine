@@ -60,7 +60,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Token check at the edge
   accDescr: The browser calls the edge proxy, which routes API paths to dfe-engine, the rest to dfe-ui, and the embed to dfe-hyperdx. The engine publishes its JWKS, and dfe-hyperdx verifies the dfe_token cookie against it.
 
@@ -68,6 +68,7 @@ flowchart LR
   proxy["<b>Edge proxy</b>"]
 
   subgraph apps["Apps"]
+    direction LR
     engine["<b>dfe-engine</b>"]
     ui["<b>dfe-ui</b>"]
     hyperdx["<b>dfe-hyperdx</b>"]
@@ -81,6 +82,11 @@ flowchart LR
   proxy -->|embed| hyperdx
   engine -->|publishes| jwks
   hyperdx -.->|verifies| jwks
+  class browser ext
+  class jwks store
+  class ui,hyperdx ui
+  class engine control
+  class proxy part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -92,15 +98,10 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class browser ext
-  class jwks store
-  class ui,hyperdx ui
-  class engine control
-  class proxy part
   style apps fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Token check at the edge. The dotted arrow is a read.* Up: [DFE architecture](architecture.md).
+*Figure 1. L4 Detail -- Token check at the edge. The dotted arrow is a read.* Up: [L2 Services -- dfe-engine](architecture.md).
 
 - Local login: `POST /api/v1/auth/login`, and the engine signs the JWT (`src/dfe_engine/api/v1/auth.py`).
 - External OIDC: the engine is the relying party. `/api/v1/auth/oidc/{provider}/login` redirects to the IdP, and the callback validates the IdP's token and mints an engine token (`src/dfe_engine/api/v1/oidc_login.py`). The IdP's token stays on the engine-to-IdP leg.

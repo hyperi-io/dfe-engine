@@ -79,18 +79,20 @@ flowchart LR
   single[("<b>One broker</b><br/><span>StatefulSet</span>")]
 
   subgraph deployed["Operator-deployed"]
-    direction LR
+    direction TB
     strimzi[("<b>Strimzi</b><br/><span>default</span>")] ~~~ redpanda[("<b>Redpanda</b><br/><span>licence gate</span>")]
   end
 
   subgraph supplied["Supplied broker"]
-    direction LR
+    direction TB
     msk[("<b>MSK</b><br/><span>provisioned</span>")] ~~~ confluent[("<b>Confluent Cloud</b>")] ~~~ rpcloud[("<b>Redpanda Cloud</b>")]
   end
 
   mode -->|single| single
   mode -->|cluster| deployed
   mode -->|external| supplied
+  class single,strimzi,redpanda,msk,confluent,rpcloud bus
+  class mode decision
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -102,8 +104,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class single,strimzi,redpanda,msk,confluent,rpcloud bus
-  class mode decision
   style deployed fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style supplied fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
@@ -176,30 +176,40 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Mesh pool listeners
   accDescr: Senders reach the receiver listener, which balances each request across the receiver pool. The receivers push to the loader listener, which balances across the loader pool, and the loaders write the ClickHouse cluster.
 
-  rlisten["<b>Receiver listener</b>"]
-
-  subgraph rpool["Receiver pool"]
-    r1["<b>Receiver 1</b>"]
-    r2["<b>Receiver 2</b>"]
+  subgraph recv["Receive"]
+    direction LR
+    rlisten["<b>Receiver listener</b>"]
+    subgraph rpool["Receiver pool"]
+      direction TB
+      r1["<b>Receiver 1</b>"]
+      r2["<b>Receiver 2</b>"]
+    end
+    rlisten --> rpool
   end
 
-  llisten["<b>Loader listener</b>"]
-
-  subgraph lpool["Loader pool"]
-    l1["<b>Loader 1</b>"]
-    l2["<b>Loader 2</b>"]
+  subgraph load["Load"]
+    direction LR
+    llisten["<b>Loader listener</b>"]
+    subgraph lpool["Loader pool"]
+      direction TB
+      l1["<b>Loader 1</b>"]
+      l2["<b>Loader 2</b>"]
+    end
+    llisten --> lpool
   end
 
   ch[("<b>ClickHouse cluster</b>")]
 
-  rlisten --> rpool
-  rpool --> llisten
-  llisten --> lpool
-  lpool --> ch
+  recv -->|push| load
+  load --> ch
+  class r1,r2 ingest
+  class l1,l2 load
+  class ch store
+  class rlisten,llisten part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -211,11 +221,9 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class r1,r2 ingest
-  class l1,l2 load
-  class ch store
-  class rlisten,llisten part
+  style recv fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style rpool fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style load fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style lpool fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 

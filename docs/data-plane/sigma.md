@@ -66,19 +66,36 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Sigma detection pipeline
   accDescr: Providers pull rules from SigmaHQ git, a local directory and the Valhalla API, and normalise them into the catalogue. The operator selects rules, and propagation generates DFE rules and hunts, which the hunt runner runs against each source's Sigma view.
 
-  GIT[("<b>SigmaHQ git</b>")] --> P["<b>providers</b>"]
-  LOCAL[("<b>local dir</b>")] --> P
-  VAL[("<b>Valhalla API</b>")] --> P
-  P -->|normalise + upsert| CAT[("<b>catalogue</b><br/><span>id-keyed gitcrud</span>")]
-  CAT -->|operator selects| SEL["<b>selection</b>"]
-  SEL -->|propagate| RULES["<b>DFE rules + hunts</b>"]
-  RULES --> HR["<b>hunt runner</b>"]
-  SRC["<b>source _json</b>"] --> VIEW["<b>{source}_sigma view</b>"]
-  HR --> VIEW
+  subgraph COLLECT["Collect"]
+    direction LR
+    GIT[("<b>SigmaHQ git</b>")] --> P["<b>providers</b>"]
+    LOCAL[("<b>local dir</b>")] --> P
+    VAL[("<b>Valhalla API</b>")] --> P
+  end
+  subgraph CATALOGUE["Catalogue"]
+    CAT[("<b>catalogue</b><br/><span>id-keyed gitcrud</span>")]
+  end
+  subgraph SELECT["Select"]
+    direction LR
+    SEL["<b>selection</b>"]
+    RULES["<b>DFE rules + hunts</b>"]
+    SEL -->|propagate| RULES
+  end
+  subgraph RUN["Run"]
+    direction LR
+    HR["<b>hunt runner</b>"] --> VIEW["<b>{source}_sigma view</b>"]
+    SRC["<b>source _json</b>"] --> VIEW
+  end
+  COLLECT -->|normalise + upsert| CATALOGUE
+  CATALOGUE -->|operator selects| SELECT
+  SELECT --> RUN
+  class GIT,VAL ext
+  class LOCAL,CAT,SRC,VIEW store
+  class P,SEL,RULES,HR part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -90,10 +107,13 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class GIT,VAL ext
-  class LOCAL,CAT,SRC,VIEW store
-  class P,SEL,RULES,HR part
+  style COLLECT fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style CATALOGUE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style SELECT fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style RUN fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
+
+*Figure 1. L4 Detail -- Sigma detection pipeline. Dashed grey boxes are outside DFE.* Up: [Data plane](README.md).
 
 ## Providers - pull external feeds
 

@@ -121,20 +121,30 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Hunt runner autoscaling
   accDescr: The KEDA shim reads the due hunts from ClickHouse's hunt_schedule and coordination tables and serves the due count. KEDA's metrics-api trigger reads it and sets the hunt runner Deployment's replicas. On a failure the shim serves the last good value, or holds cold.
 
   subgraph CH["ClickHouse"]
-    hs[("<b>hunt_schedule +</b><br/><span>hunt_lease/watermark/state</span>")]
+    hs[("<b>hunt_schedule</b><br/><span>and hunt_lease, watermark, state</span>")]
   end
-  shim["<b>dfe-keda-shim</b><br/><span>GET /keda/hunt-backlog</span>"]
-  ko["<b>KEDA metrics-api trigger</b><br/><span>ScaledObject: dfe-hunt-runner-scaler</span>"]
-  hr["<b>dfe-hunt-runner Deployment</b><br/><span>replicas: N</span>"]
-  hs -->|"due_query(db)"| shim
-  shim -->|"{value: due_count}"| ko
-  ko -->|"AverageValue, target = targetBacklog"| hr
-  shim -.->|"on failure: last-good cache / cold-hold"| ko
+  subgraph SHIM["Shim"]
+    direction LR
+    shim["<b>dfe-keda-shim</b><br/><span>GET /keda/hunt-backlog</span>"]
+    cache("<b>Last good value</b><br/><span>or cold_hold</span>")
+    shim -.->|on failure| cache
+  end
+  subgraph KEDA["KEDA"]
+    direction LR
+    ko["<b>metrics-api trigger</b><br/><span>dfe-hunt-runner-scaler</span>"]
+    hr["<b>dfe-hunt-runner</b><br/><span>replicas: N</span>"]
+    ko -->|AverageValue| hr
+  end
+  CH -->|due_query| SHIM
+  SHIM -->|due_count| KEDA
+  class hs store
+  class ko control
+  class shim,hr,cache part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -146,11 +156,12 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class hs store
-  class ko control
-  class shim,hr part
   style CH fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style SHIM fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style KEDA fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
+
+*Figure 1. L4 Detail -- Hunt runner autoscaling. The dotted arrow is the failure path.* Up: [L3 Components -- Hunt runner](../hunt-runner.md).
 
 With `huntRunner.autoscaling.enabled`, the Deployment's `replicas` field is omitted, because the ScaledObject owns the count, and a `dfe-hunt-runner-scaler` ScaledObject is rendered beside it:
 

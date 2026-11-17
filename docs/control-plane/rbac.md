@@ -70,14 +70,17 @@ flowchart LR
 
   resolve(["<b>AuthContext</b><br/><span>groups to roles</span>"])
 
-  which -->|trusted headers| hdr
-  which -->|API key| key
+  which -->|headers| hdr
+  which -->|key| key
   which -->|bearer| tok
   which -->|auth off| root
   which -.->|none| reject
   hdr --> resolve
   key --> resolve
   tok --> resolve
+  class which decision
+  class reject error
+  class hdr,key,tok,root,resolve part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -89,9 +92,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class which decision
-  class reject error
-  class hdr,key,tok,root,resolve part
 ```
 
 *Figure 1. L4 Detail -- Four authentication paths. The dotted arrow is the refusal, and `auth off` needs a dev `DFE_ENGINE_ENV`.* Up: [Control plane](README.md).
@@ -206,6 +206,8 @@ flowchart LR
 
   files -->|hashes, roles| api
   sec -->|keys, passwords| api
+  class acc,grp,keys,roles,sec store
+  class api control
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -217,8 +219,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class acc,grp,keys,roles,sec store
-  class api control
   style files fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
@@ -373,6 +373,7 @@ flowchart LR
   end
 
   ctrl ~~~ dataplane
+  class admin,infra_admin,infra_viewer,data_analyst,data_analyst_viewer,dfe_operator,data_viewer,org_viewer part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -384,7 +385,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class admin,infra_admin,infra_viewer,data_analyst,data_analyst_viewer,dfe_operator,data_viewer,org_viewer part
   style ctrl fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style dataplane fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
@@ -681,7 +681,7 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- OIDC provider sync
   accDescr: The group sync reads a provider from the provider registry, calls the provider's adapter, which lists groups from Google, Entra ID or Okta, and writes groups to the GroupStore. It records the sync's time and status back on the provider.
 
@@ -691,18 +691,24 @@ flowchart LR
 
   adapt["<b>Provider adapter</b>"]
   gstore[("<b>GroupStore</b>")]
+  regstat[("<b>Provider status</b><br/><span>in the provider registry</span>")]
 
   subgraph idps["Directory APIs"]
+    direction LR
     google["<b>Google</b>"]
     entra["<b>Entra ID</b>"]
     okta["<b>Okta</b>"]
+    google ~~~ entra ~~~ okta
   end
 
   reg --> sync
   sync --> adapt
   sync --> gstore
   adapt -->|list groups| idps
-  sync -.->|status| reg
+  sync -.->|status| regstat
+  class google,entra,okta ext
+  class reg,gstore,regstat store
+  class sync,adapt part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -714,9 +720,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class google,entra,okta ext
-  class reg,gstore store
-  class sync,adapt part
   style idps fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
@@ -859,27 +862,36 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Who reads as whom
   accDescr: A caller without query execute is refused. A caller with a platform grant reads as the platform reader, which sees every org. Any other caller that resolves to exactly one registered org reads as that org's pinned user, and the rest are refused with no_single_org.
 
-  exec{"<b>query:execute?</b>"}
+  subgraph q1["Execute"]
+    direction LR
+    exec{"<b>query:execute?</b>"}
+    forbid(["<b>403 forbidden</b>"])
+  end
+  subgraph q2["Platform"]
+    direction LR
+    plat{"<b>Platform grant?</b>"}
+    reader(["<b>Platform reader</b>"])
+  end
+  subgraph q3["One org"]
+    direction LR
+    one{"<b>Exactly one org?</b>"}
+    pinned(["<b>Org's pinned user</b>"])
+    nosingle(["<b>403 no_single_org</b>"])
+  end
 
-  plat{"<b>Platform grant?</b>"}
-  forbid(["<b>403 forbidden</b>"])
-
-  one{"<b>Exactly one org?</b>"}
-  reader(["<b>Platform reader</b>"])
-
-  pinned(["<b>Org's pinned user</b>"])
-  nosingle(["<b>403 no_single_org</b>"])
-
-  exec -->|yes| plat
+  q1 -->|yes| q2
   exec -.->|no| forbid
-  plat -->|no| one
+  q2 -->|no| q3
   plat -->|yes| reader
   one -->|yes| pinned
   one -.->|no| nosingle
+  class reader,pinned store
+  class exec,plat,one decision
+  class forbid,nosingle error
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -891,9 +903,9 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class reader,pinned store
-  class exec,plat,one decision
-  class forbid,nosingle error
+  style q1 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style q2 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style q3 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 6. L4 Detail -- Who reads as whom. Green ends are ClickHouse users, orange are refusals.* Up: [Control plane](README.md).
@@ -1181,6 +1193,7 @@ flowchart LR
   end
 
   auth ~~~ oidc ~~~ outside
+  class engine,roles_mod,accounts,groups,oidc_reg,oidc_sync,adapters,deps,chrbac,orgreg part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -1192,7 +1205,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class engine,roles_mod,accounts,groups,oidc_reg,oidc_sync,adapters,deps,chrbac,orgreg part
   style auth fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style oidc fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
   style outside fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4

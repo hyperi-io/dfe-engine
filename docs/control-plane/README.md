@@ -52,12 +52,15 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Control-plane repos
   accDescr: dfe-ui calls the engine API and dfe-schemas ships the schema trees the engine reads. The engine commits config to the deploy repo, which Argo CD syncs from dfe-infra's ApplicationSets.
 
-  ui["<b>dfe-ui</b>"]
-  schemas["<b>dfe-schemas</b>"]
+  subgraph inputs["Inputs"]
+    direction LR
+    ui["<b>dfe-ui</b>"]
+    schemas["<b>dfe-schemas</b>"]
+  end
 
   engine["<b>dfe-engine</b>"]
 
@@ -69,6 +72,9 @@ flowchart LR
   schemas -->|schema trees| engine
   engine -->|commits| deploy
   deploy --> infra
+  class schemas store
+  class ui ui
+  class engine,deploy,infra control
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -80,12 +86,10 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class schemas store
-  class ui ui
-  class engine,deploy,infra control
+  style inputs fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Control-plane repos.* Up: [DFE architecture](../architecture.md).
+*Figure 1. L4 Detail -- Control-plane repos.* Up: [L2 Services -- dfe-engine](../architecture.md).
 
 | Repo | Role in the layer |
 |---|---|
@@ -155,17 +159,23 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Control-plane sources of truth
   accDescr: The engine reads the dfe-schemas trees and the RBAC roles, and commits overlays and config to the deploy repo. Argo CD syncs the deploy repo together with the charts and dfe-infra values.
 
-  schemas[("<b>dfe-schemas</b>")]
-  rbac[("<b>RBAC roles</b>")]
+  subgraph engreads["Read by the engine"]
+    direction LR
+    schemas[("<b>dfe-schemas</b>")]
+    rbac[("<b>RBAC roles</b>")]
+  end
 
   engine["<b>dfe-engine</b>"]
 
-  deploy[("<b>Deploy repo</b>")]
-  charts[("<b>Charts and dfe-infra values</b>")]
+  subgraph argoreads["Read by Argo CD"]
+    direction LR
+    deploy[("<b>Deploy repo</b>")]
+    charts[("<b>Charts and dfe-infra values</b>")]
+  end
 
   argo["<b>Argo CD</b>"]
 
@@ -175,6 +185,8 @@ flowchart LR
   engine ~~~ charts
   deploy --> argo
   charts --> argo
+  class schemas,rbac store
+  class engine,deploy,charts,argo control
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -186,11 +198,11 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class schemas,rbac store
-  class engine,deploy,charts,argo control
+  style engreads fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style argoreads fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 2. L4 Detail -- Control-plane sources of truth.* Up: [DFE architecture](../architecture.md).
+*Figure 2. L4 Detail -- Control-plane sources of truth.* Up: [L2 Services -- dfe-engine](../architecture.md).
 
 To change one, go through its writer: edit the routes and regenerate the spec, commit to dfe-schemas, turn the engine's dials, or edit roles through the API. Never hand-edit a generated artefact such as `openapi.json` or a compiled overlay.
 
@@ -244,24 +256,34 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- openapi.json and its consumers
   accDescr: The FastAPI routes generate openapi.json and feed the dfe CLI and Swagger UI directly. dfe-ui types and the Prism mock read the committed file.
 
   routes["<b>FastAPI routes</b>"]
 
-  spec[("<b>openapi.json</b>")]
-  cli["<b>dfe CLI</b>"]
-  swagger["<b>Swagger UI</b>"]
+  subgraph fromroutes["From the routes"]
+    direction LR
+    spec[("<b>openapi.json</b>")]
+    cli["<b>dfe CLI</b>"]
+    swagger["<b>Swagger UI</b>"]
+  end
 
-  ui["<b>dfe-ui types</b>"]
-  mock["<b>Prism mock</b>"]
+  subgraph fromspec["From openapi.json"]
+    direction LR
+    ui["<b>dfe-ui types</b>"]
+    mock["<b>Prism mock</b>"]
+  end
 
   routes -->|generate| spec
   routes -->|app factory| cli
   routes -->|served| swagger
   spec -->|sync PR| ui
   spec -->|mounted| mock
+  class spec store
+  class ui ui
+  class cli control
+  class routes,swagger,mock part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -273,13 +295,11 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class spec store
-  class ui ui
-  class cli control
-  class routes,swagger,mock part
+  style fromroutes fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style fromspec fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 3. L4 Detail -- openapi.json and its consumers.* Up: [DFE architecture](../architecture.md).
+*Figure 3. L4 Detail -- openapi.json and its consumers.* Up: [L2 Services -- dfe-engine](../architecture.md).
 
 - The `dfe` CLI builds its whole command tree at runtime from the installed engine's app factory, so an endpoint becomes a command with no CLI code. An endpoint opts out with `x-scalo.cli.hidden`.
 - dfe-ui copies both specs into its `@repo/dfe-engine-types` package through a PR the [sync workflow](type-safety-sync.md) opens, and generates its types from them.

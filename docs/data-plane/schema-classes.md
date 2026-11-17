@@ -72,29 +72,30 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Schema build
   accDescr: SchemaBuilderV2 loads the header profile's columns and the source's schema columns, composes them, and validates them against the TypeRegistry. DDLGenerator writes the CREATE TABLE and ViewGenerator the standard views, and both go into the SchemaBuildResult.
 
-  profile["<b>Header profile</b>"]
-  schema["<b>Source schema</b><br/><span>meta, derived, additional</span>"]
-
-  compose["<b>SchemaLoader</b><br/><span>compose</span>"]
-
-  validate["<b>Validate against TypeRegistry</b>"]
-
-  ddl["<b>DDLGenerator</b><br/><span>CREATE TABLE</span>"]
-  views["<b>ViewGenerator</b><br/><span>standard views</span>"]
-
-  result["<b>SchemaBuildResult</b>"]
-
-  profile --> compose
-  schema --> compose
-  compose --> validate
-  validate --> ddl
-  validate --> views
-  ddl --> result
-  views --> result
+  subgraph LOAD["Load and validate"]
+    direction LR
+    profile["<b>Header profile</b>"]
+    schema["<b>Source schema</b><br/><span>meta, derived, additional</span>"]
+    compose["<b>SchemaLoader</b><br/><span>compose</span>"]
+    validate["<b>Validate</b><br/><span>against TypeRegistry</span>"]
+    profile --> compose
+    schema --> compose
+    compose --> validate
+  end
+  subgraph GEN["Generate"]
+    direction LR
+    ddl["<b>DDLGenerator</b><br/><span>CREATE TABLE</span>"]
+    views["<b>ViewGenerator</b><br/><span>standard views</span>"]
+    result["<b>SchemaBuildResult</b>"]
+    ddl --> result
+    views --> result
+  end
+  LOAD --> GEN
+  class profile,schema,compose,validate,ddl,views,result part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -106,7 +107,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class profile,schema,compose,validate,ddl,views,result part
+  style LOAD fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style GEN fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Schema build. Validation errors go into the result and do not stop the build.* Up: [Data plane](README.md).

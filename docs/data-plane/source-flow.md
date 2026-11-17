@@ -62,19 +62,24 @@ config:
     .ui .label-icon{color:#D9480F}
     .ext .label-icon{color:#64748B}
 ---
-flowchart LR
+flowchart TB
   accTitle: L4 Detail -- Source flow on the bus
   accDescr: The receiver pool and the source's fetcher write the source's landing topic. The source's transform reads it and writes the transformed topic, which the loader pool reads. The archiver reads the landing topic.
 
   subgraph input["Input"]
+    direction LR
     receiver["<b>Receiver pool</b>"]
     fetcher["<b>Fetcher</b><br/><span>one per source</span>"]
+    receiver ~~~ fetcher
   end
 
   land[("<b>source_land</b>")]
 
-  transform["<b>Transform</b><br/><span>one per source</span>"]
-  archiver["<b>Archiver</b>"]
+  subgraph landreaders["Read the landing topic"]
+    direction LR
+    transform["<b>Transform</b><br/><span>one per source</span>"]
+    archiver["<b>Archiver</b>"]
+  end
 
   load[("<b>source_load</b>")]
 
@@ -85,6 +90,10 @@ flowchart LR
   land -.-> archiver
   transform --> load
   load --> loader
+  class receiver,fetcher ingest
+  class transform xform
+  class archiver,loader load
+  class land,load bus
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -96,11 +105,8 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class receiver,fetcher ingest
-  class transform xform
-  class archiver,loader load
-  class land,load bus
   style input fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style landreaders fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 1. L4 Detail -- Source flow on the bus. With no transform the loader reads `source_land` itself.* Up: [Data plane](README.md).
@@ -169,6 +175,9 @@ flowchart LR
   receiver -->|matched| loader
   receiver -.->|archived| archiver
   loader --> ch
+  class receiver ingest
+  class loader,archiver load
+  class ch store
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -180,9 +189,6 @@ flowchart LR
   classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
   classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
-  class receiver ingest
-  class loader,archiver load
-  class ch store
 ```
 
 *Figure 2. L4 Detail -- Source flow on direct gRPC. The loader and the archiver each take the push on a scalo Push listener.* Up: [Data plane](README.md).
