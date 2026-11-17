@@ -11,34 +11,87 @@
 `get_current_user()` (`src/dfe_engine/api/deps.py`) tries the credentials in a fixed order and stops at the first one present.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Four authentication paths
-    accDescr: A request is checked for trusted OIDC headers, then an API key, then a bearer token. Each resolves its groups to roles in the AuthContext. A request with none gets the root context when auth is off in a dev environment, and a 401 otherwise.
+  accTitle: L4 Detail -- Four authentication paths
+  accDescr: A request is checked for trusted OIDC headers, then an API key, then a bearer token. Each resolves its groups to roles in the AuthContext. A request with none gets the root context when auth is off in a dev environment, and a 401 otherwise.
 
-    which{"Which credential?"}
+  which{"<b>Which credential?</b>"}
 
-    hdr["Header identity"]
-    key["Key verify<br/>SHA-384"]
-    tok["Token verify<br/>bind account"]
-    root(["Root AuthContext<br/>admin"])
-    reject(["401"])
+  hdr["<b>Header identity</b>"]
+  key["<b>Key verify</b><br/><span>SHA-384</span>"]
+  tok["<b>Token verify</b><br/><span>bind account</span>"]
+  root(["<b>Root AuthContext</b><br/><span>admin</span>"])
+  reject(["<b>401</b>"])
 
-    resolve(["AuthContext<br/>groups to roles"])
+  resolve(["<b>AuthContext</b><br/><span>groups to roles</span>"])
 
-    which -->|trusted headers| hdr
-    which -->|API key| key
-    which -->|bearer| tok
-    which -->|auth off| root
-    which -.->|none| reject
-    hdr --> resolve
-    key --> resolve
-    tok --> resolve
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef decision fill:#FCF1D6,stroke:#9A6700,stroke-width:1px,color:#3D2A00
-    classDef error fill:#FBE3D6,stroke:#C2410C,stroke-width:1px,color:#4A1A05
-    class which decision
-    class reject error
+  which -->|trusted headers| hdr
+  which -->|API key| key
+  which -->|bearer| tok
+  which -->|auth off| root
+  which -.->|none| reject
+  hdr --> resolve
+  key --> resolve
+  tok --> resolve
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class which decision
+  class reject error
+  class hdr,key,tok,root,resolve part
 ```
 
 *Figure 1. L4 Detail -- Four authentication paths. The dotted arrow is the refusal, and `auth off` needs a dev `DFE_ENGINE_ENV`.* Up: [Control plane](README.md).
@@ -90,30 +143,83 @@ forge OIDC headers and impersonate any user.
 The auth files hold accounts, groups, keys and roles, and the secrets backend holds the signing key and ClickHouse passwords.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Credential storage
-    accDescr: The auth files hold accounts, groups, API keys and the role definitions, and the engine reads them to verify passwords and keys and to resolve roles. The secrets backend holds the JWT signing key and the ClickHouse passwords.
+  accTitle: L4 Detail -- Credential storage
+  accDescr: The auth files hold accounts, groups, API keys and the role definitions, and the engine reads them to verify passwords and keys and to resolve roles. The secrets backend holds the JWT signing key and the ClickHouse passwords.
 
-    subgraph files["Auth files"]
-        direction TB
-        acc[("accounts/")]
-        grp[("groups/")]
-        keys[("api-keys/")]
-        roles[("rbac/roles.yaml")]
-    end
+  subgraph files["Auth files"]
+    direction TB
+    acc[("<b>accounts/</b>")]
+    grp[("<b>groups/</b>")]
+    keys[("<b>api-keys/</b>")]
+    roles[("<b>rbac/roles.yaml</b>")]
+  end
 
-    sec[("Secrets backend")]
+  sec[("<b>Secrets backend</b>")]
 
-    api["dfe-engine API"]
+  api["<b>dfe-engine API</b>"]
 
-    files -->|hashes, roles| api
-    sec -->|keys, passwords| api
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class acc,grp,keys,roles,sec store
-    class files group
+  files -->|hashes, roles| api
+  sec -->|keys, passwords| api
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class acc,grp,keys,roles,sec store
+  class api control
+  style files fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 2. L4 Detail -- Credential storage.* Up: [Control plane](README.md).
@@ -201,31 +307,86 @@ The API turns down edits to a built-in role, and every boot rewrites each built-
 The 8 built-in roles form a flat set with no inheritance, split across the two planes of [rbac-vocabulary.md](rbac-vocabulary.md).
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Built-in roles
-    accDescr: Six built-in roles grant control-plane actions: admin, infra_admin, infra_viewer, data_analyst, data_analyst_viewer and dfe_operator. Two grant data-plane reads: data_viewer and the scoped org_viewer.
+  accTitle: L4 Detail -- Built-in roles
+  accDescr: Six built-in roles grant control-plane actions: admin, infra_admin, infra_viewer, data_analyst, data_analyst_viewer and dfe_operator. Two grant data-plane reads: data_viewer and the scoped org_viewer.
 
-    subgraph ctrl["Control plane"]
-        direction TB
-        admin["admin"]
-        infra_admin["infra_admin"]
-        infra_viewer["infra_viewer"]
-        data_analyst["data_analyst"]
-        data_analyst_viewer["data_analyst_viewer"]
-        dfe_operator["dfe_operator"]
-    end
+  subgraph ctrl["Control plane"]
+    direction TB
+    admin["<b>admin</b>"]
+    infra_admin["<b>infra_admin</b>"]
+    infra_viewer["<b>infra_viewer</b>"]
+    data_analyst["<b>data_analyst</b>"]
+    data_analyst_viewer["<b>data_analyst_viewer</b>"]
+    dfe_operator["<b>dfe_operator</b>"]
+  end
 
-    subgraph dataplane["Data plane"]
-        direction TB
-        data_viewer["data_viewer"]
-        org_viewer["org_viewer"]
-    end
+  subgraph dataplane["Data plane"]
+    direction TB
+    data_viewer["<b>data_viewer</b>"]
+    org_viewer["<b>org_viewer</b>"]
+  end
 
-    ctrl ~~~ dataplane
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class ctrl,dataplane group
+  ctrl ~~~ dataplane
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class admin,infra_admin,infra_viewer,data_analyst,data_analyst_viewer,dfe_operator,data_viewer,org_viewer part
+  style ctrl fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style dataplane fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 3. L4 Detail -- Built-in roles. `org_viewer` is the one scoped role.* Up: [Control plane](README.md).
@@ -326,6 +487,50 @@ which the error handler converts to HTTP 403.
 Three YAML-backed stores hold accounts, groups and API keys, and the local login provider reads the first two.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 classDiagram
     accTitle: L4 Detail -- Auth stores
     accDescr: AccountStore, GroupStore and APIKeyStore are YAML-backed stores with one file per entity. LocalAuthProvider verifies a password through AccountStore and resolves roles through GroupStore.
@@ -431,39 +636,91 @@ Moved to [rbac-sign-in.md](rbac-sign-in.md#35-first-login-the-two-seeded-account
 A group sync reads the provider from the registry, lists its groups through the adapter and writes them to the group store.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- OIDC provider sync
-    accDescr: The group sync reads a provider from the provider registry, calls the provider's adapter, which lists groups from Google, Entra ID or Okta, and writes groups to the GroupStore. It records the sync's time and status back on the provider.
+  accTitle: L4 Detail -- OIDC provider sync
+  accDescr: The group sync reads a provider from the provider registry, calls the provider's adapter, which lists groups from Google, Entra ID or Okta, and writes groups to the GroupStore. It records the sync's time and status back on the provider.
 
-    reg[("Provider registry")]
+  reg[("<b>Provider registry</b>")]
 
-    sync["Group sync"]
+  sync["<b>Group sync</b>"]
 
-    adapt["Provider adapter"]
-    gstore[("GroupStore")]
+  adapt["<b>Provider adapter</b>"]
+  gstore[("<b>GroupStore</b>")]
 
-    subgraph idps["Directory APIs"]
-        google["Google"]
-        entra["Entra ID"]
-        okta["Okta"]
-    end
+  subgraph idps["Directory APIs"]
+    google["<b>Google</b>"]
+    entra["<b>Entra ID</b>"]
+    okta["<b>Okta</b>"]
+  end
 
-    reg --> sync
-    sync --> adapt
-    sync --> gstore
-    adapt -->|list groups| idps
-    sync -.->|status| reg
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class reg,gstore store
-    class google,entra,okta ext
-    class idps group
+  reg --> sync
+  sync --> adapt
+  sync --> gstore
+  adapt -->|list groups| idps
+  sync -.->|status| reg
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class google,entra,okta ext
+  class reg,gstore store
+  class sync,adapt part
+  style idps fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 5. L4 Detail -- OIDC provider sync. Dashed boxes are external, and the dotted arrow writes the sync's status back.* Up: [Control plane](README.md).
+*Figure 5. L4 Detail -- OIDC provider sync. Dashed grey boxes are external, and the dotted arrow writes the sync's status back.* Up: [Control plane](README.md).
 
 `get_adapter()` picks the adapter by provider type. A `generic` provider has no directory API, so it never syncs. Each provider resolves groups in one of three modes:
 
@@ -557,35 +814,86 @@ It replaces each tier, service and tenant role's privileges with the ones config
 `GET /api/v1/hyperdx/connection` (`src/dfe_engine/api/v1/hyperdx.py`) picks the ClickHouse user a caller reads as.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Who reads as whom
-    accDescr: A caller without query execute is refused. A caller with a platform grant reads as the platform reader, which sees every org. Any other caller that resolves to exactly one registered org reads as that org's pinned user, and the rest are refused with no_single_org.
+  accTitle: L4 Detail -- Who reads as whom
+  accDescr: A caller without query execute is refused. A caller with a platform grant reads as the platform reader, which sees every org. Any other caller that resolves to exactly one registered org reads as that org's pinned user, and the rest are refused with no_single_org.
 
-    exec{"query:execute?"}
+  exec{"<b>query:execute?</b>"}
 
-    plat{"Platform grant?"}
-    forbid(["403 forbidden"])
+  plat{"<b>Platform grant?</b>"}
+  forbid(["<b>403 forbidden</b>"])
 
-    one{"Exactly one org?"}
-    reader(["Platform reader"])
+  one{"<b>Exactly one org?</b>"}
+  reader(["<b>Platform reader</b>"])
 
-    pinned(["Org's pinned user"])
-    nosingle(["403 no_single_org"])
+  pinned(["<b>Org's pinned user</b>"])
+  nosingle(["<b>403 no_single_org</b>"])
 
-    exec -->|yes| plat
-    exec -.->|no| forbid
-    plat -->|no| one
-    plat -->|yes| reader
-    one -->|yes| pinned
-    one -.->|no| nosingle
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef decision fill:#FCF1D6,stroke:#9A6700,stroke-width:1px,color:#3D2A00
-    classDef error fill:#FBE3D6,stroke:#C2410C,stroke-width:1px,color:#4A1A05
-    class exec,plat,one decision
-    class reader,pinned store
-    class forbid,nosingle error
+  exec -->|yes| plat
+  exec -.->|no| forbid
+  plat -->|no| one
+  plat -->|yes| reader
+  one -->|yes| pinned
+  one -.->|no| nosingle
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class reader,pinned store
+  class exec,plat,one decision
+  class forbid,nosingle error
 ```
 
 *Figure 6. L4 Detail -- Who reads as whom. Green ends are ClickHouse users, orange are refusals.* Up: [Control plane](README.md).
@@ -613,6 +921,50 @@ YAML-backed CRUD via `OrgRegistry`, one file per org in `orgs/` under `DFE_CONFI
 `POST /api/v1/orgs` stores the org's tenant ids in its hunts, creates the org, then reconciles ClickHouse RBAC and asks dfe-hyperdx for a team (`src/dfe_engine/api/v1/orgs.py`, `src/dfe_engine/orgs/lifecycle.py`).
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 sequenceDiagram
     accTitle: L4 Detail -- Org creation
     accDescr: The orgs API stores the org's tenant ids in every hunt naming it, then creates the org in the registry. The registry's change requests a ClickHouse RBAC reconcile, and the API asks dfe-hyperdx for its team, where a failure is logged and the org stands.
@@ -760,34 +1112,90 @@ A login with a directory lookup still running at the deadline is handled as a di
 The auth package holds authorisation, roles and the stores, and its oidc package the provider registry, sync and adapters.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Auth modules
-    accDescr: The auth package holds the authorisation engine, roles, and the account and group stores. Its oidc package holds the provider registry, the group sync and the adapters. The API dependencies, the ClickHouse RBAC reconciler and the org registry sit outside it.
+  accTitle: L4 Detail -- Auth modules
+  accDescr: The auth package holds the authorisation engine, roles, and the account and group stores. Its oidc package holds the provider registry, the group sync and the adapters. The API dependencies, the ClickHouse RBAC reconciler and the org registry sit outside it.
 
-    subgraph auth["auth/"]
-        engine["engine.py"]
-        roles_mod["roles.py"]
-        accounts["accounts.py"]
-        groups["groups.py"]
-    end
+  subgraph auth["auth/"]
+    engine["<b>engine.py</b>"]
+    roles_mod["<b>roles.py</b>"]
+    accounts["<b>accounts.py</b>"]
+    groups["<b>groups.py</b>"]
+  end
 
-    subgraph oidc["auth/oidc/"]
-        oidc_reg["registry.py"]
-        oidc_sync["sync.py"]
-        adapters["adapters/"]
-    end
+  subgraph oidc["auth/oidc/"]
+    oidc_reg["<b>registry.py</b>"]
+    oidc_sync["<b>sync.py</b>"]
+    adapters["<b>adapters/</b>"]
+  end
 
-    subgraph outside["Outside auth/"]
-        deps["api/deps.py"]
-        chrbac["governance/ch/"]
-        orgreg["orgs/registry.py"]
-    end
+  subgraph outside["Outside auth/"]
+    deps["<b>api/deps.py</b>"]
+    chrbac["<b>governance/ch/</b>"]
+    orgreg["<b>orgs/registry.py</b>"]
+  end
 
-    auth ~~~ oidc ~~~ outside
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class auth,oidc,outside group
+  auth ~~~ oidc ~~~ outside
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class engine,roles_mod,accounts,groups,oidc_reg,oidc_sync,adapters,deps,chrbac,orgreg part
+  style auth fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style oidc fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
+  style outside fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 8. L4 Detail -- Auth modules.* Up: [Control plane](README.md).

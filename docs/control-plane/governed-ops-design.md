@@ -8,39 +8,90 @@ How DFE is operated, and how detection runs. Everything you can change in DFE (d
 Every caller writes through GitCrud, which commits under the commit policy for Argo CD to reconcile.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Governed write path
-    accDescr: dfe local, the Helm vars router, the backing services router and governance actions all write through GitCrud. GitCrud builds the message under the commit policy and commits through GitopsRepo, and Argo CD reconciles the commit.
+  accTitle: L4 Detail -- Governed write path
+  accDescr: dfe local, the Helm vars router, the backing services router and governance actions all write through GitCrud. GitCrud builds the message under the commit policy and commits through GitopsRepo, and Argo CD reconciles the commit.
 
-    subgraph callers["Callers"]
-        local["dfe local"]
-        helm["Helm vars router"]
-        backing["Backing services<br/>router"]
-        actions["Governance actions"]
-    end
+  subgraph callers["Callers"]
+    local["<b>dfe local</b>"]
+    helm["<b>Helm vars router</b>"]
+    backing["<b>Backing services router</b>"]
+    actions["<b>Governance actions</b>"]
+  end
 
-    gitcrud["GitCrud"]
+  gitcrud["<b>GitCrud</b>"]
 
-    policy["Commit policy"]
-    repo["GitopsRepo<br/>dulwich"]
+  policy["<b>Commit policy</b>"]
+  repo["<b>GitopsRepo</b><br/><span>dulwich</span>"]
 
-    argo["Argo CD"]
+  argo["<b>Argo CD</b>"]
 
-    callers -->|writes| gitcrud
-    gitcrud -->|message| policy
-    gitcrud -->|commit| repo
-    repo --> argo
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
-    classDef ext fill:#EEF0F2,stroke:#6B7280,stroke-width:1px,stroke-dasharray:4 3,color:#1F2937
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class gitcrud core
-    class argo ext
-    class callers group
+  callers -->|writes| gitcrud
+  gitcrud -->|message| policy
+  gitcrud -->|commit| repo
+  repo --> argo
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class argo control
+  class local,helm,backing,actions,gitcrud,policy,repo part
+  style callers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Governed write path. The dashed box is outside the engine.* Up: [L3 Components -- dfe-engine](../architecture.md).
+*Figure 1. L4 Detail -- Governed write path. Argo CD is outside the engine.* Up: [L3 Components -- dfe-engine](../architecture.md).
 
 Tier 1 is raw var CRUD over the overlay files (`/api/v1/helm`), admin-grade because it can set anything. Tier 2 is curated actions (`/api/v1/governance`), each behind a permission of its name, so an operator can run `receiver-surge` without the keys to edit any var. RBAC binds to a resource class, an action or an operation, never to a field.
 
@@ -63,6 +114,50 @@ Every mutation ends in one commit through `GitopsRepo`, which uses dulwich rathe
 A Tier 1 var write is checked for the grant and the protected-var policy, then committed, against its `If-Match` base when the caller sends one.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 sequenceDiagram
     accTitle: L4 Detail -- Writing a helm var
     accDescr: The Helm vars router checks the caller's grant, validates the write and the protected-var policy, then GitCrud sets the key against the If-Match base and GitopsRepo commits. Argo CD reconciles the commit.
@@ -95,6 +190,50 @@ An `ActionDef` (`src/dfe_engine/governance/`) is a name, the permission needed t
 An action invoke checks the caller's grant and every change, then writes them all in one commit.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 sequenceDiagram
     accTitle: L4 Detail -- Invoking an action
     accDescr: The governance router loads the action and checks the caller holds that action's required_action. ActionStore checks every change against the protected-var policy and writes them all in one commit through GitCrud.
@@ -136,26 +275,80 @@ The engine packages a standard library of dials in `src/dfe_engine/governance/re
 Each RBAC group binds to one ClickHouse user holding a tier role, the tenant role and, for an org, a pinned tenant setting.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- ClickHouse identity
-    accDescr: An RBAC group binds to one ClickHouse user. The user holds a tier role, the tenant role and, for an org-tied user, a read-only SQL_current_tenant_id setting that the tenant row policies read.
+  accTitle: L4 Detail -- ClickHouse identity
+  accDescr: An RBAC group binds to one ClickHouse user. The user holds a tier role, the tenant role and, for an org-tied user, a read-only SQL_current_tenant_id setting that the tenant row policies read.
 
-    group["RBAC group"]
+  group["<b>RBAC group</b>"]
 
-    user["ClickHouse user"]
+  user["<b>ClickHouse user</b>"]
 
-    tier["Tier role<br/>grants, profile, quota"]
-    tenant["Tenant role<br/>row policies"]
-    setting["SQL_current_tenant_id<br/>read-only"]
+  tier["<b>Tier role</b><br/><span>grants, profile, quota</span>"]
+  tenant["<b>Tenant role</b><br/><span>row policies</span>"]
+  setting["<b>SQL_current_tenant_id</b><br/><span>read-only</span>"]
 
-    group -->|binds| user
-    user -->|tier| tier
-    user -->|tenant| tenant
-    user -->|pinned| setting
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef core fill:#DCEBF7,stroke:#0072B2,stroke-width:2px,color:#0B2A3F
-    class user core
+  group -->|binds| user
+  user -->|tier| tier
+  user -->|tenant| tenant
+  user -->|pinned| setting
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class user,tier,tenant,setting store
+  class group part
 ```
 
 *Figure 4. L4 Detail -- ClickHouse identity.* Up: [L3 Components -- dfe-engine](../architecture.md).
@@ -169,36 +362,89 @@ A group binding ties an RBAC group's ClickHouse user to one tier and at most one
 One worker wins each fire's claim, runs the window and advances the watermark.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- Hunt claim and run
-    accDescr: When a fire is due, runner workers race to claim it in hunt_lease. The winner runs the window query, writes matched rows to the results table and advances hunt_watermark, which sets the next window.
+  accTitle: L4 Detail -- Hunt claim and run
+  accDescr: When a fire is due, runner workers race to claim it in hunt_lease. The winner runs the window query, writes matched rows to the results table and advances hunt_watermark, which sets the next window.
 
-    due(["Fire due"])
+  due(["<b>Fire due</b>"])
 
-    subgraph workers["Runner workers"]
-        w1["Worker"]
-        w2["Worker"]
-    end
+  subgraph workers["Runner workers"]
+    w1["<b>Worker</b>"]
+    w2["<b>Worker</b>"]
+  end
 
-    lease[("hunt_lease")]
+  lease[("<b>hunt_lease</b>")]
 
-    run["Run the<br/>window query"]
+  run["<b>Run the window query</b>"]
 
-    results[("Results table")]
-    watermark[("hunt_watermark")]
+  results[("<b>Results table</b>")]
+  watermark[("<b>hunt_watermark</b>")]
 
-    due --> workers
-    workers -->|claim| lease
-    lease --> run
-    run --> results
-    run --> watermark
-    watermark -.->|next window| workers
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
-    classDef store fill:#DDF3EC,stroke:#00785A,stroke-width:1px,color:#0B3327
-    classDef group fill:none,stroke:#64748B,stroke-width:1px,stroke-dasharray:2 4
-    class lease,results,watermark store
-    class workers group
+  due --> workers
+  workers -->|claim| lease
+  lease --> run
+  run --> results
+  run --> watermark
+  watermark -.->|next window| workers
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class lease,results,watermark store
+  class due,w1,w2,run part
+  style workers fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
 *Figure 5. L4 Detail -- Hunt claim and run. The dotted arrow is the next run reading the watermark.* Up: [The DFE control-plane layer](README.md).
@@ -210,6 +456,50 @@ To claim, a worker reads the hunt free, inserts a lease row and a marker for its
 A fire goes from due to running to done, and an expired lease sends it back to due.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 stateDiagram-v2
     direction LR
     accTitle: L4 Detail -- Hunt fire lifecycle
@@ -230,6 +520,50 @@ Each run is incremental and crash-safe. Every statement holds a `{window}` place
 Three ReplacingMergeTree tables in the effective data database, keyed by `hunt_id`, coordinate the runners. `hunt_run` (one row per fire) and `hunt_runner_heartbeat` (one row per runner) sit beside them.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+    primaryColor: "#FFFFFF"
+    primaryBorderColor: "#334155"
+    secondaryColor: "#F8FAFC"
+    tertiaryColor: "#FFFFFF"
+    textColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#334155"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#94A3B8"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    sequenceNumberColor: "#FFFFFF"
+    labelBoxBkgColor: "#FFFFFF"
+    labelBoxBorderColor: "#64748B"
+    labelTextColor: "#0F172A"
+    loopTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+    transitionColor: "#64748B"
+    transitionLabelColor: "#0F172A"
+    stateLabelColor: "#0F172A"
+    stateBkg: "#FFFFFF"
+    labelBackgroundColor: "#FFFFFF"
+    compositeBackground: "#FFFFFF"
+    attributeBackgroundColorOdd: "#FFFFFF"
+    attributeBackgroundColorEven: "#F8FAFC"
+  themeCSS: >-
+    p{margin:0}
+    .node rect,.node polygon,.outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))!important}
+    .messageText,.loopText,.loopText tspan,.labelText,.labelText tspan{stroke:#FFFFFF!important;stroke-width:3px!important;paint-order:stroke;stroke-linejoin:round}
+    .edgeLabel,.edgeLabel p,.labelBkg{background:#FFFFFF!important}
+    .edgeLabel span{background:#FFFFFF!important;color:#1E293B}
+---
 erDiagram
     accTitle: L4 Detail -- Hunt coordination tables
     accDescr: hunt_lease holds the owner and lease expiry of each hunt's current fire, hunt_watermark how far each hunt has run, and hunt_state its overrun count and too_aggressive flag. All three are keyed by hunt_id.
@@ -264,24 +598,79 @@ erDiagram
 The repo as source of truth underpins RBAC, the ClickHouse safety boundary and no double-run.
 
 ```mermaid
+---
+config:
+  theme: base
+  look: neo
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 64
+    padding: 18
+    wrappingWidth: 280
+    htmlLabels: true
+  elk:
+    preset: modelOrder
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    clusterBorder: "#0072B2"
+    edgeLabelBackground: "#FFFFFF"
+  themeCSS: >-
+    p{margin:0}
+    .node[data-look] rect,.node[data-look] path,.node[data-look] polygon,.node[data-look] .outer-path{filter:drop-shadow(0 1px 2px rgba(15,23,42,.10)) drop-shadow(0 6px 14px rgba(15,23,42,.10))}
+    .node rect{rx:10px;ry:10px}
+    .cluster rect{rx:16px;ry:16px}
+    .node .label div{min-width:150px}
+    .node.decision .label div{min-width:0}
+    .cluster[data-look] rect{filter:none}
+    .nodeLabel{line-height:1.35}
+    .nodeLabel b{font-weight:600;font-size:15px;letter-spacing:-0.01em}
+    .nodeLabel span{font-size:12.5px;font-weight:400;color:#334155}
+    .cluster-label span.nodeLabel{display:inline-block;background:#FFFFFF;color:#0B2A3F;border:1.5px solid #0072B2;border-radius:999px;padding:2px 12px;font-size:11.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase}
+    .flowchart-link{stroke-width:1.75px}
+    .labelBkg{background:transparent!important}
+    span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
+    span.edgeLabel p{background:transparent!important}
+    .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .ingest .label-icon{color:#0E8A7D}
+    .xform .label-icon{color:#7B4FB0}
+    .load .label-icon{color:#0072B2}
+    .bus .label-icon{color:#A8517F}
+    .store .label-icon{color:#00785A}
+    .ui .label-icon{color:#D9480F}
+    .ext .label-icon{color:#64748B}
+---
 flowchart LR
-    accTitle: L4 Detail -- What governed ops rests on
-    accDescr: The repo as source of truth and authority underpins RBAC at the class, action and operation level, ClickHouse as the safety boundary, and no double-run. A worker dying between its writes and the watermark repeats the window, and rule detections dedupe it.
+  accTitle: L4 Detail -- What governed ops rests on
+  accDescr: The repo as source of truth and authority underpins RBAC at the class, action and operation level, ClickHouse as the safety boundary, and no double-run. A worker dying between its writes and the watermark repeats the window, and rule detections dedupe it.
 
-    surv["Repo is the<br/>source of truth"]
+  surv["<b>Repo is the source of truth</b>"]
 
-    rbac["RBAC per class,<br/>action, operation"]
-    chsafe["ClickHouse quotas<br/>and limits"]
-    nodouble["No double-run"]
+  rbac["<b>RBAC per class, action, operation</b>"]
+  chsafe["<b>ClickHouse quotas and limits</b>"]
+  nodouble["<b>No double-run</b>"]
 
-    crash["Watermark after<br/>the writes"]
+  crash["<b>Watermark after the writes</b>"]
 
-    surv --> rbac
-    surv --> chsafe
-    surv --> nodouble
-    nodouble --> crash
-
-    classDef default fill:#F8FAFC,stroke:#64748B,stroke-width:1px,color:#0F172A
+  surv --> rbac
+  surv --> chsafe
+  surv --> nodouble
+  nodouble --> crash
+  classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
+  classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
+  classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
+  classDef load fill:#FFFFFF,stroke:#0072B2,stroke-width:3px,color:#0F172A
+  classDef bus fill:#FFFFFF,stroke:#A8517F,stroke-width:3px,color:#0F172A
+  classDef store fill:#FFFFFF,stroke:#00785A,stroke-width:3px,color:#0F172A
+  classDef ui fill:#FFFFFF,stroke:#D9480F,stroke-width:3px,color:#0F172A
+  classDef decision fill:#FFFFFF,stroke:#9A6700,stroke-width:3px,color:#0F172A
+  classDef error fill:#FFFFFF,stroke:#C2410C,stroke-width:3px,color:#0F172A
+  classDef control fill:#FFFFFF,stroke:#334155,stroke-width:3px,color:#0F172A
+  classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
+  class surv,rbac,chsafe,nodouble,crash part
 ```
 
 *Figure 8. L4 Detail -- What governed ops rests on.* Up: [The DFE control-plane layer](README.md).
