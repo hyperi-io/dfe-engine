@@ -120,4 +120,3 @@ With acknowledgements on, the default, the receiver builds no buffer or spool. I
 With acknowledgements off, the receiver's memory buffer and spool apply. A loader outage shorter than they hold is invisible to senders, and a longer one back-pressures them (503) until the loader returns. A record held there has had its 2xx, so it is lost if the pod dies. That is the trade for turning acknowledgements off.
 
 The knobs are the receiver's (dfe-receiver `config.example.yaml`, `buffer:`), so a deployer sizes them in the overlay like any other dial.
-
