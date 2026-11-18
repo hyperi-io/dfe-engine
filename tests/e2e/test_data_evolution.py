@@ -88,7 +88,7 @@ MATCH_VALUE = SOURCE
 # own current, so the suite carries no version number to go stale.
 META_SCHEMA = "meta/syslog"
 
-# The pre-supplied schema step 1.1 reads, and the table step 2.7's transform
+# The pre-supplied schema step 1.1 reads, and the table step 2.8's transform
 # fills.
 SHIPPED_SCHEMA = "meta/beats/filebeat"
 
@@ -96,10 +96,7 @@ SHIPPED_SCHEMA = "meta/beats/filebeat"
 # corpus modules, so it is the column that says a syslog line was parsed.
 PARSED_COLUMN = "source_ip"
 
-# Step 2.7's own source. Named without the catalogue entry's underscore for the
-# DNS-1123 reason above. dfe-transform-elastic carries the entry name separately
-# in `transform.variant`, so the two never have to agree.
-TRANSFORM_SOURCE = "ciscoios"
+# The corpus module step 2.8 posts.
 TRANSFORM_MODULE = "cisco_ios"
 
 # Step 1.2. A custom schema of its own, because a `core` one exports as a
@@ -198,11 +195,6 @@ def _alter(ch_client, statement: str) -> None:
     ClickHouse refuses ON CLUSTER on a table inside a Replicated database (code 80).
     """
     ch_client.command(statement)
-
-
-def _transform_engine(cfg: E2EConfig) -> str:
-    """The engine name for the transform app the deployment runs."""
-    return (cfg.transform or "dfe-transform-vrl").removeprefix("dfe-transform-")
 
 
 def _nested(field: str, value: Any) -> dict:
@@ -522,52 +514,13 @@ def narrowed(engine: EngineAPI, e2e: E2EConfig, ch_client):
 
 @pytest.fixture(scope="module")
 def cisco_samples() -> list[corpus.Sample]:
-    """Step 2.7's input, or the skip that says the corpus is not here."""
+    """Step 2.8's input, or the skip that says the corpus is not here."""
     if not corpus.available():
         pytest.skip(f"filebeat corpus not present at {corpus.CORPUS}")
     found = corpus.samples(modules=(TRANSFORM_MODULE,), limit=10)
     if not found:
         pytest.skip(f"the filebeat corpus carries no {TRANSFORM_MODULE} samples")
     return found
-
-
-@pytest.fixture(scope="module")
-def transformed_table(
-    engine: EngineAPI, e2e: E2EConfig, ch_client, cisco_samples: list[corpus.Sample]
-):
-    """Step 2.7's source: its own table, with a transform in front of it.
-
-    Two things a deploy does NOT do, and 2.7 cannot do for itself: start the
-    per-source transform instance, and make the receiver pick up routing for a
-    transform-bearing source - which it needs a restart for, while the API
-    reports ``restart_required: []``.
-    """
-    require(e2e, "receiver_url", "ch_host")
-    _delete(engine, TRANSFORM_SOURCE)
-    drop_table(ch_client, e2e.ch_db, TRANSFORM_SOURCE)
-    created = engine.call(
-        "POST",
-        "/sources",
-        {
-            "source": TRANSFORM_SOURCE,
-            "display_name": "Data evolution acceptance - transformed",
-            "description": "A syslog line in `message` parsed into typed columns.",
-            # The corpus wrapper stamps `_source`, and a source declaring this
-            # match compiles to exactly that rule at the receiver.
-            "match": {"field": "_source", "operator": "equals", "value": TRANSFORM_SOURCE},
-            "header": HEADER,
-            "schema": {"meta_schema": SHIPPED_SCHEMA},
-            "transform": {"engine": _transform_engine(e2e)},
-        },
-    )
-    assert created.status_code == 201, (
-        f"the deployment refused the transformed source: {created.status_code} {created.text}"
-    )
-    deployed = _deploy(engine, TRANSFORM_SOURCE)
-    assert deployed["applied"], f"the transformed source did not deploy: {deployed}"
-    yield f"{e2e.ch_db}.{TRANSFORM_SOURCE}"
-    _delete(engine, TRANSFORM_SOURCE)
-    drop_table(ch_client, e2e.ch_db, TRANSFORM_SOURCE)
 
 
 # --- Stage 0, it just works -------------------------------------------------
@@ -1065,46 +1018,6 @@ class TestStage2:
             "it started at"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "dfe-engine#1173: the source links no VRL program, so its transform instance "
-            "idles, and a deploy does not start that instance"
-        ),
-    )
-    def test_2_7_a_transform_turns_a_text_line_into_typed_columns(
-        self, e2e, ch_client, transformed_table: str, cisco_samples: list[corpus.Sample]
-    ) -> None:
-        """A syslog line in ``message`` becomes indexed columns.
-
-        The input is the synthetic corpus in ``filebeat_cases.yaml``.
-
-        Counted before and after rather than matched on a marker: the event's
-        identity is spent producing typed columns, and the transform stores the
-        parsed body rather than the line that carried it.
-        """
-        require(e2e, "receiver_url", "ch_host")
-        # The zero values are excluded because a non-nullable column carries one
-        # on every row, which would count an untransformed row as a parsed one.
-        parsed = f"toString({PARSED_COLUMN}) NOT IN ('', '::', '0.0.0.0')"
-        before = count_rows(ch_client, transformed_table, where=parsed)
-        post_events(
-            e2e, corpus.wrap_all(cisco_samples, source=TRANSFORM_SOURCE, run=uuid.uuid4().hex)
-        )
-
-        gained = poll_until(
-            lambda: count_rows(ch_client, transformed_table, where=parsed) - before,
-            timeout=LANDING_DEADLINE,
-            desc=(
-                f"a row in {transformed_table} carrying {PARSED_COLUMN}, which the corpus line "
-                "has only inside its text and only the transform pulls out - check the "
-                "per-source transform instance is running and the receiver has been restarted "
-                "onto this source's routing before reading a timeout as the product's fault"
-            ),
-        )
-        assert gained > 0
-
 
 class TestStage3:
     """Population of `_json` and `_raw` stops, and starts again.
@@ -1257,9 +1170,10 @@ class TestStage3:
 class TestStage2Swap:
     """Step 2.8 -- the transform is swapped and the same columns still fill.
 
-    2.7 proves ONE transform turns a Cisco IOS line into typed columns. 2.8 asks
-    whether a different engine on the same corpus produces the same answer, which
-    is what makes the transform a swappable part rather than the schema's owner.
+    A transform turns a Cisco IOS line into typed columns, and this step asserts that
+    on the deployment's own transform-bearing source. Whichever engine that
+    source runs, the same corpus has to fill the same columns, which is what makes
+    the transform a swappable part rather than the schema's owner.
     """
 
     def test_2_8_a_second_transform_fills_the_same_columns(
