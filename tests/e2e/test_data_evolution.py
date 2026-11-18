@@ -171,14 +171,12 @@ def _row(ch_client, sql: str, parameters: dict[str, Any] | None = None) -> tuple
 
 
 def _deploy(engine: EngineAPI, name: str) -> dict[str, Any]:
-    """Deploy the source's CURRENT version, named explicitly.
+    """Deploy the source with no version named, which takes its ``current`` version.
 
-    A bare deploy takes ``deployed_version``, so after a promote has created a
-    new version a bare call re-deploys the old one, answers 200 and changes
-    nothing.
+    After a promote has created a new version a bare call must apply that one, so
+    this is the path the promote-then-fill step exercises.
     """
-    current = str(engine.json("GET", f"/sources/{name}")["current"])
-    return engine.json("POST", f"/sources/{name}/deploy?version={current}")
+    return engine.json("POST", f"/sources/{name}/deploy")
 
 
 def _delete(engine: EngineAPI, name: str) -> None:
