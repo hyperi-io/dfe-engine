@@ -48,7 +48,9 @@ from dfe_engine.api.deps import (
     is_action_allowed,
     live_role_config,
     provider_bindings,
+    reads_every_org,
     require_action,
+    require_platform_action,
 )
 from dfe_engine.auth import AuthorizationError, RoleConfig, Scope
 from dfe_engine.auth.audit import audit_group_change, audit_permission_denied
@@ -217,7 +219,7 @@ def _refuse_link_below_system_scope(request: Request, user) -> None:
     Raises:
         AuthorizationError: 403 before any other group is looked at.
     """
-    if is_action_allowed(request, user, scopes_dict["group_write"]):
+    if reads_every_org(request, user, scopes_dict["group_write"]):
         return
     reason = (
         "linking a group to an identity provider needs group:write system-wide, "
@@ -472,7 +474,7 @@ async def create_group(
     account_store: AccountStore = request.app.state.account_store
     # Names are unique across every org, so a caller that cannot see every group learns only this.
     unavailable = ProblemError(409, f"Group name '{body.name}' is not available", code="conflict")
-    sees_every_group = is_action_allowed(request, user, scopes_dict["group_read"])
+    sees_every_group = reads_every_org(request, user, scopes_dict["group_read"])
     try:
         _refuse_identifier_collision(
             groups=store.list(), name=body.name, source_id=body.source_id, target=body.name
@@ -749,7 +751,7 @@ async def delete_group(
 
 @router.get(
     "/{name}/attributes",
-    dependencies=[Depends(require_action(scopes_dict["group_attributes_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_attributes_read"]))],
 )
 async def get_group_attributes(
     name: str,
@@ -790,7 +792,7 @@ async def put_group_attributes(
 
 @router.get(
     "/{name}/sensitive-attributes",
-    dependencies=[Depends(require_action(scopes_dict["group_attributes_read_sensitive"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_attributes_read_sensitive"]))],
 )
 async def get_group_sensitive_attributes(
     name: str,

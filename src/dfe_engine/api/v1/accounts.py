@@ -48,6 +48,7 @@ from dfe_engine.api.deps import (
     provider_bindings,
     refuse_unknown_orgs,
     require_action,
+    require_platform_action,
     secrets_store,
 )
 from dfe_engine.api.v1.account_groups import check_group_changes
@@ -577,7 +578,7 @@ AccountsList = Annotated[
 @router.get(
     "",
     response_model=Page[AccountResponse],
-    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_read"]))],
 )
 async def list_accounts(
     user: CurrentUser,
@@ -683,7 +684,7 @@ async def update_current_user_account(
 @router.get(
     "/{username}",
     response_model=AccountResponse,
-    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_read"]))],
 )
 async def get_account(
     username: str,
@@ -987,7 +988,7 @@ async def rotate_password(
     "/{username}/git-status",
     openapi_extra=scalo_extra(verb="git-status"),
     response_model=AccountGitState,
-    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_read"]))],
 )
 async def account_git_status(
     username: str,
@@ -1098,7 +1099,7 @@ async def delete_account(
 
 @router.get(
     "/{username}/attributes",
-    dependencies=[Depends(require_action(scopes_dict["account_attributes_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_attributes_read"]))],
 )
 async def get_account_attributes(
     username: str,
@@ -1135,7 +1136,9 @@ async def put_account_attributes(
 
 @router.get(
     "/{username}/sensitive-attributes",
-    dependencies=[Depends(require_action(scopes_dict["account_attributes_read_sensitive"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["account_attributes_read_sensitive"]))
+    ],
 )
 async def get_account_sensitive_attributes(
     username: str,
