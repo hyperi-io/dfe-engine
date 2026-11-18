@@ -15,7 +15,9 @@ reports rows from an org the author cannot see.
 from types import SimpleNamespace
 
 import pytest
+from common.hunt_files import plant_hunt
 
+from dfe_engine.api.deps import get_hunt_config_registry
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 
 ORGS = "/api/v1/orgs"
@@ -56,10 +58,13 @@ def acme_hunt(client, admin_headers) -> None:
     """``windows_hunt`` runs ``certutil`` over acme, whose rows carry ``acme-1``."""
     org = client.post(ORGS, json={"name": "acme", "org_ids": ["acme-1"]}, headers=admin_headers)
     assert org.status_code == 201, org.text
-    hunt = client.post(
-        HUNTS, json={"name": "windows_hunt", **_HUNT, "customers": ["acme"]}, headers=admin_headers
+    plant_hunt(
+        get_hunt_config_registry(),
+        "windows_hunt",
+        ["certutil"],
+        source="dfe.main",
+        customers={"acme": ["acme-1"]},
     )
-    assert hunt.status_code == 201, hunt.text
 
 
 def _rule(name: str, **extra) -> dict:

@@ -6,6 +6,7 @@ wider gitcrud resource-name contract instead, so a hand-written file with a ``.`
 name keeps running. Every path built from a name must resolve inside the rules directory.
 """
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
@@ -41,3 +42,26 @@ def rule_file(directory: str | Path, name: str, suffix: str) -> Path:
     if not path.resolve().is_relative_to(base.resolve()):
         raise RuleNameError(f"rule name {name!r} resolves outside the rules directory")
     return path
+
+
+def missing_rules(directory: str | Path, names: Iterable[str]) -> list[str]:
+    """The rule names with no ``{name}.yaml`` under ``directory``, each once, in order.
+
+    A name no file can carry counts as missing, since the runner cannot read it either.
+
+    Args:
+        directory: The rules directory.
+        names: The rule names a hunt carries.
+
+    Returns:
+        The names without a rule file.
+    """
+    missing: list[str] = []
+    for name in dict.fromkeys(names):
+        try:
+            present = rule_file(directory, name, ".yaml").is_file()
+        except RuleNameError:
+            present = False
+        if not present:
+            missing.append(name)
+    return missing

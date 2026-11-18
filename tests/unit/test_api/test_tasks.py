@@ -11,8 +11,10 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
+from common.hunt_files import store_rule_file
 
 
 class TestTasksRouter:
@@ -37,6 +39,17 @@ class TestTasksRouter:
 @pytest.mark.usefixtures("customer_orgs")
 class TestHuntsRouter:
     """GET/POST /api/v1/hunts endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def _stored_rules(self, client, api_settings):
+        for name in (
+            "alpha_rule",
+            "beta_rule",
+            "win_account_a_common_activities",
+            "other_rule",
+            "r",
+        ):
+            store_rule_file(Path(api_settings.hunts.rules_dir), name)
 
     def test_status_no_engine(self, client, admin_headers):
         """Returns running=False when hunt engine is not configured."""

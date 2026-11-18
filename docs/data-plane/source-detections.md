@@ -55,6 +55,8 @@ A field is a column of the source table when the table has one by that name, oth
 
 `GET /api/v1/hunts?rule=<name>` lists the hunts with exactly that name in `rules`.
 
+A hunt can only name a stored rule: `POST /api/v1/hunts` answers 422 `unknown_rule` for one that is not, and so does a `PUT` that adds one. A hunt whose rule file is deleted afterwards stays editable, and its list row and detail carry `missing_rules` and an `error` saying the runner cannot fire it.
+
 ## Hunts
 
 A hunt groups rules, names the customers the rules read for, and holds the

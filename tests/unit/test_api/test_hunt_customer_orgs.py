@@ -21,6 +21,8 @@ from dfe_engine.hunts.rule_registry import RuleRegistry
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.yaml_utils import yaml_load
 
+pytestmark = pytest.mark.usefixtures("certutil_rule")
+
 HUNTS = "/api/v1/hunts"
 _HUNT = {
     "name": "windows_hunt",

