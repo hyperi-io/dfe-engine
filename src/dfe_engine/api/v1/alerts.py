@@ -35,7 +35,12 @@ from scalo.api import (
 )
 
 from dfe_engine.api.conventions import apply_search
-from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
+from dfe_engine.api.deps import (
+    AlertDestRegistry,
+    CurrentUser,
+    require_action,
+    require_platform_action,
+)
 from dfe_engine.api.review import apply_review_headers
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
@@ -107,7 +112,7 @@ DestinationsList = Annotated[
 @router.get(
     "/destinations",
     response_model=Page[AlertDestinationSummary],
-    dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["alert_read"]))],
 )
 def list_destinations(
     user: CurrentUser,
@@ -206,7 +211,7 @@ def create_destination(
 @router.get(
     "/destinations/{name}",
     response_model=AlertDestination,
-    dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["alert_read"]))],
 )
 def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Get an alert destination by name."""
