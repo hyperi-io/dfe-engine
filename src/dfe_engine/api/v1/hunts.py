@@ -39,6 +39,7 @@ from dfe_engine.api.deps import (
     refuse_unknown_orgs,
     registered_orgs,
     require_action,
+    require_platform_action,
 )
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
@@ -626,7 +627,7 @@ HuntsList = Annotated[
 @router.get(
     "",
     response_model=Page[HuntSummary],
-    dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["hunt_read"]))],
 )
 def list_hunts(
     registry: HuntConfigReg,
@@ -711,7 +712,7 @@ def create_hunt(
 @router.get(
     "/{name}",
     response_model=HuntDetailResponse,
-    dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["hunt_read"]))],
 )
 def get_hunt(
     name: str,

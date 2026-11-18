@@ -42,6 +42,16 @@ TENANT_PERMISSIONS = [
     "account:read",
 ]
 
+UNHELD_PERMISSIONS = [
+    "account:read",
+    "account:attributes:read",
+    "account:attributes:read_sensitive",
+    "group:attributes:read",
+    "group:attributes:read_sensitive",
+    "alert:read",
+    "hunt:read",
+]
+
 
 @pytest.fixture(autouse=True)
 def _reset_schema_flag():
@@ -219,3 +229,102 @@ class TestApiKeysAndScim:
     )
     def test_the_same_read_still_passes_for_an_admin(self, client, admin_headers, path):
         assert client.get(path, headers=admin_headers).status_code == 200
+
+
+class TestBuiltInOrgViewer:
+    """The built-in fenced role keeps the system-scope reads its handlers hold to its orgs."""
+
+    @pytest.fixture
+    def viewer(self, app, api_settings, orgs) -> TestClient:
+        return caller_in_group(
+            app, api_settings, "viewer-acme", roles=["org_viewer"], org_ids=["acme"]
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            pytest.param("/api/v1/sources", id="sources"),
+            pytest.param("/api/v1/samples", id="samples"),
+        ],
+    )
+    def test_a_held_read_still_answers(self, viewer, path):
+        assert viewer.get(path).status_code == 200
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            pytest.param("/api/v1/auth/accounts", id="accounts"),
+            pytest.param("/api/v1/hunts", id="hunts"),
+            pytest.param("/api/v1/orgs/beta", id="another-org"),
+        ],
+    )
+    def test_a_read_it_does_not_hold_is_refused(self, viewer, path):
+        _refused(viewer.get(path))
+
+
+# Each read gated on a system-scope role check that no handler holds to the caller's orgs.
+UNHELD_READS = [
+    pytest.param("/api/v1/auth/accounts", id="accounts-list"),
+    pytest.param("/api/v1/auth/accounts/admin", id="account"),
+    pytest.param("/api/v1/auth/accounts/admin/git-status", id="account-git-status"),
+    pytest.param("/api/v1/auth/accounts/admin/attributes", id="account-attributes"),
+    pytest.param("/api/v1/auth/accounts/admin/sensitive-attributes", id="account-sensitive"),
+    pytest.param("/api/v1/auth/groups/acme-team/attributes", id="group-attributes"),
+    pytest.param("/api/v1/auth/groups/acme-team/sensitive-attributes", id="group-sensitive"),
+    pytest.param("/api/v1/alerts/destinations", id="alert-destinations"),
+    pytest.param("/api/v1/alerts/destinations/oncall", id="alert-destination"),
+    pytest.param("/api/v1/hunts", id="hunts"),
+    pytest.param("/api/v1/hunts/windows_hunt", id="hunt"),
+]
+
+
+class TestUnheldSystemReads:
+    @pytest.fixture
+    def reader(self, app, api_settings, orgs) -> TestClient:
+        define_role(app, "tenant_reader", UNHELD_PERMISSIONS, scoped=True)
+        return caller_in_group(
+            app, api_settings, "reader-acme", roles=["tenant_reader"], org_ids=["acme"]
+        )
+
+    @pytest.mark.parametrize("path", UNHELD_READS)
+    def test_a_system_bound_scoped_role_is_refused(self, reader, path):
+        _refused(reader.get(path))
+
+    @pytest.mark.parametrize("path", UNHELD_READS)
+    def test_an_admin_is_not_refused(self, client, admin_headers, path):
+        assert client.get(path, headers=admin_headers).status_code != 403
+
+
+class TestSystemGroupWrite:
+    def test_a_system_scope_group_it_creates_reaches_no_org(
+        self, tenant, app, client, admin_headers
+    ):
+        """The scope check passes at system scope, and the group names no org to join."""
+        created = tenant.post(
+            GROUPS, json={"name": "sys-grp", "roles": ["tenant"], "scope": "system"}
+        )
+
+        assert created.status_code == 201, created.text
+        group = app.state.group_store.get("sys-grp")
+        assert group is not None
+        assert group.org_markers == ()
+        joined = tenant.post(f"{GROUPS}/sys-grp/members", json={"username": "tenant-by-name"})
+        assert joined.status_code == 200, joined.text
+        assert {org["name"] for org in tenant.get(ORGS).json()["items"]} == {"acme"}
+        assert tenant.get(f"{ORGS}/beta").status_code == 403
+
+
+class TestGroupNameOracle:
+    body = {"name": "beta-team", "roles": ["tenant"], "scope": "org:acme"}
+
+    def test_a_fenced_writer_is_not_told_another_orgs_group_exists(self, tenant):
+        resp = tenant.post(GROUPS, json=self.body)
+
+        assert resp.status_code == 409, resp.text
+        assert "not available" in resp.json()["detail"]
+
+    def test_an_admin_is_told(self, client, admin_headers, orgs):
+        resp = client.post(GROUPS, json=self.body, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert "already exists" in resp.json()["detail"]
