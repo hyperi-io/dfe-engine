@@ -11,11 +11,13 @@ The preview runs the save's own checks and writes nothing, and a hunt list filte
 by the rule it runs.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from common.hunt_files import plant_hunt, store_rule_file
 
-from dfe_engine.api.deps import get_rule_registry
+from dfe_engine.api.deps import get_hunt_config_registry, get_rule_registry
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
 
@@ -422,15 +424,13 @@ class TestPreview:
     ):
         org = client.post(ORGS, json={"name": "acme", "org_ids": ["acme-1"]}, headers=admin_headers)
         assert org.status_code == 201, org.text
-        hunt = {
-            "name": "windows_hunt",
-            "cron": "*/5 * * * *",
-            "rules": ["bob_attempts"],
-            "global_source_table_name": "dfe.windows-audit",
-            "global_target_table_name": "dfe.detection",
-            "customers": ["acme"],
-        }
-        assert client.post(HUNTS, json=hunt, headers=admin_headers).status_code == 201
+        plant_hunt(
+            get_hunt_config_registry(),
+            "windows_hunt",
+            ["bob_attempts"],
+            source="dfe.windows-audit",
+            customers={"acme": ["acme-1"]},
+        )
 
         def counted(**extra) -> int:
             clickhouse.previews.clear()
@@ -447,15 +447,13 @@ class TestPreview:
     def test_an_edit_counts_the_hunt_the_stored_rule_names(self, client, admin_headers, clickhouse):
         org = client.post(ORGS, json={"name": "acme", "org_ids": ["acme-1"]}, headers=admin_headers)
         assert org.status_code == 201, org.text
-        hunt = {
-            "name": "windows_hunt",
-            "cron": "*/5 * * * *",
-            "rules": ["another_rule"],
-            "global_source_table_name": "dfe.windows-audit",
-            "global_target_table_name": "dfe.detection",
-            "customers": ["acme"],
-        }
-        assert client.post(HUNTS, json=hunt, headers=admin_headers).status_code == 201
+        plant_hunt(
+            get_hunt_config_registry(),
+            "windows_hunt",
+            ["another_rule"],
+            source="dfe.windows-audit",
+            customers={"acme": ["acme-1"]},
+        )
         _created(client, admin_headers, hunt_name="windows_hunt")
         clickhouse.previews.clear()
 
@@ -476,7 +474,9 @@ class TestPreview:
 
 class TestHuntsByRule:
     @pytest.fixture
-    def hunts(self, client, admin_headers) -> None:
+    def hunts(self, client, admin_headers, api_settings) -> None:
+        for rule in ("alpha", "beta", "alpha_two"):
+            store_rule_file(Path(api_settings.hunts.rules_dir), rule)
         org = client.post(ORGS, json={"name": "acme", "org_ids": ["acme-1"]}, headers=admin_headers)
         assert org.status_code == 201, org.text
         base = {

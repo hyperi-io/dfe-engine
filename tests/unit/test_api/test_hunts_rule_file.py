@@ -10,8 +10,9 @@
 The rule registry writes ``{name}.yaml`` and the runner's rule compiler reads the
 same file, so that is the file a hunt write looks for: in ``hunts.rules_dir``, or
 in the deploy repo's ``config/rules`` once the registry is backed by it. A rule
-not there yet is a warning, because a hunt may be drafted before its rules. A file
-the runner could not read as a YAML mapping is refused.
+not there is refused with 422 ``unknown_rule``, as is a file the runner could not
+read as a YAML mapping. A hunt whose rule is deleted afterwards stays editable and
+reads back with ``missing_rules`` and an ``error``.
 """
 
 from pathlib import Path
@@ -66,15 +67,77 @@ def test_a_hunt_naming_a_stored_rule_finds_its_yaml(
     assert _missing_warnings(audit_events) == []
 
 
-def test_a_hunt_naming_a_missing_rule_warns_on_its_yaml_and_is_saved(
-    client, admin_headers, api_settings, audit_events
-):
+def test_a_hunt_naming_a_missing_rule_is_refused_by_name(client, admin_headers, api_settings):
     resp = _create_hunt(client, admin_headers, "absent")
 
-    assert resp.status_code == 201, resp.text
-    expected = Path(api_settings.hunts.rules_dir) / "absent.yaml"
-    [warning] = _missing_warnings(audit_events)
-    assert str(expected) in warning
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["code"] == "unknown_rule"
+    assert "'absent'" in resp.json()["detail"]
+    assert not (Path(api_settings.hunts.hunt_dir) / "windows_hunt.yaml").exists()
+
+
+def test_every_missing_rule_is_named(client, admin_headers):
+    assert client.post("/api/v1/rules", json=_RULE, headers=admin_headers).status_code == 201
+
+    resp = client.post(
+        "/api/v1/hunts",
+        json={"name": "windows_hunt", **_HUNT, "rules": ["certutil", "gone_a", "gone_b"]},
+        headers=admin_headers,
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"] == "Not a stored rule: 'gone_a', 'gone_b'"
+
+
+def _hunt_with_its_rule_deleted(client, headers, api_settings) -> None:
+    assert client.post("/api/v1/rules", json=_RULE, headers=headers).status_code == 201
+    assert _create_hunt(client, headers, "certutil").status_code == 201
+    (Path(api_settings.hunts.rules_dir) / "certutil.yaml").unlink()
+
+
+def test_a_hunt_shows_an_error_once_its_rule_is_deleted(client, admin_headers, api_settings):
+    assert client.post("/api/v1/rules", json=_RULE, headers=admin_headers).status_code == 201
+    created = _create_hunt(client, admin_headers, "certutil")
+    assert (created.json()["missing_rules"], created.json()["error"]) == ([], "")
+    [healthy] = client.get("/api/v1/hunts", headers=admin_headers).json()["items"]
+    assert (healthy["missing_rules"], healthy["error"]) == ([], "")
+
+    (Path(api_settings.hunts.rules_dir) / "certutil.yaml").unlink()
+
+    detail = client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).json()
+    [listed] = client.get("/api/v1/hunts", headers=admin_headers).json()["items"]
+    for shown in (detail, listed):
+        assert shown["missing_rules"] == ["certutil"]
+        assert "'certutil'" in shown["error"]
+
+
+def test_a_hunt_whose_rule_is_gone_can_still_be_edited_and_disabled(
+    client, admin_headers, api_settings
+):
+    _hunt_with_its_rule_deleted(client, admin_headers, api_settings)
+
+    resp = client.put(
+        "/api/v1/hunts/windows_hunt",
+        json={**_HUNT, "rules": ["certutil"], "enabled": False},
+        headers=admin_headers,
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["enabled"] is False
+    assert resp.json()["missing_rules"] == ["certutil"]
+
+
+def test_an_update_cannot_name_a_rule_that_was_never_stored(client, admin_headers, api_settings):
+    _hunt_with_its_rule_deleted(client, admin_headers, api_settings)
+
+    resp = client.put(
+        "/api/v1/hunts/windows_hunt",
+        json={**_HUNT, "rules": ["certutil", "absent"]},
+        headers=admin_headers,
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"] == "Not a stored rule: 'absent'"
 
 
 @pytest.mark.parametrize(

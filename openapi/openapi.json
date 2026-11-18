@@ -14748,7 +14748,7 @@
           "hunts"
         ],
         "summary": "List Hunts",
-        "description": "List persisted hunt configurations, each with its run state, paginated.\n\nRun state comes from ONE ClickHouse read across every listed hunt: the watermark\n(last run), the lease (running now), hunt_state (too aggressive) and hunt_run\n(rows the last run wrote). Next due is derived, not stored.",
+        "description": "List persisted hunt configurations, each with its run state, paginated.\n\nRun state comes from ONE ClickHouse read across every listed hunt: the watermark\n(last run), the lease (running now), hunt_state (too aggressive) and hunt_run\n(rows the last run wrote). Next due is derived, not stored. A hunt naming a rule\nwith no stored rule file carries ``missing_rules`` and an ``error``.",
         "operationId": "hunts.list",
         "parameters": [
           {
@@ -15020,7 +15020,7 @@
           "hunts"
         ],
         "summary": "Get Hunt",
-        "description": "Get full hunt configuration by file name, with the runner's stop on it if any.",
+        "description": "Get full hunt configuration by file name, with the runner's stop on it if any.\n\nA hunt naming a rule with no stored rule file carries ``missing_rules`` and an ``error``.",
         "operationId": "hunts.get",
         "parameters": [
           {
@@ -15111,7 +15111,7 @@
           "hunts"
         ],
         "summary": "Update Hunt",
-        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org.",
+        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
         "operationId": "hunts.apply",
         "parameters": [
           {
@@ -41569,6 +41569,20 @@
             "title": "Auto Disabled Reason",
             "description": "The ClickHouse error category and code that tripped the stop",
             "default": ""
+          },
+          "missing_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Rules",
+            "description": "Rules the hunt names that no stored rule file backs, so it cannot fire"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Why the runner cannot fire the hunt; empty when nothing stops it",
+            "default": ""
           }
         },
         "type": "object",
@@ -41827,6 +41841,20 @@
             "type": "string",
             "title": "Auto Disabled Reason",
             "description": "The ClickHouse error category and code that tripped the auto-disable",
+            "default": ""
+          },
+          "missing_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Rules",
+            "description": "Rules the hunt names that no stored rule file backs, so it cannot fire"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Why the runner cannot fire the hunt; empty when nothing stops it",
             "default": ""
           }
         },

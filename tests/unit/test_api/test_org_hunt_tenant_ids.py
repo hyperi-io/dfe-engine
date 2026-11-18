@@ -26,6 +26,8 @@ from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.yaml_utils import yaml_load
 
+pytestmark = pytest.mark.usefixtures("certutil_rule")
+
 ORGS = "/api/v1/orgs"
 HUNTS = "/api/v1/hunts"
 _HUNT = {

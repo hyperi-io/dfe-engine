@@ -80,14 +80,20 @@ def deploy_repo(client, api_settings, tmp_path):
     """A real local deploy repo behind the running app's hunt and rule registries.
 
     ``client`` first: the app lifespan builds the directory-backed registries, and
-    these replace them. No ``certutil`` rule is stored, which a hunt write only warns
-    about, so a hunt create reaches git.
+    these replace them.
     """
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
     crud = GitCrud(repo, default_registry())
     # An empty repo has no base to branch from, so main carries a first commit.
     crud.put("hunts", "seed", dict(_HUNT), "seed")
     return crud
+
+
+def _store_certutil(crud) -> None:
+    """Store the ``certutil`` rule the hunts name, which a hunt write refuses to name until it exists."""
+    crud.put(
+        "rules", "certutil", {"display_name": "Certutil Abuse", "where_clause": "1 = 1"}, "seed"
+    )
 
 
 def _rule_payload(name: str = "certutil") -> dict:
@@ -103,6 +109,7 @@ class TestDevPostureIsUnchanged:
     def test_a_hunt_create_in_dev_carries_no_review_header(
         self, client, admin_headers, deploy_repo
     ):
+        _store_certutil(deploy_repo)
         _rebind(deploy_repo, environment="dev", mode="team")
         resp = client.post(
             "/api/v1/hunts", json={"name": "windows_hunt", **_HUNT}, headers=admin_headers
@@ -116,6 +123,7 @@ class TestProductionTeamWritesReportReview:
     def test_a_hunt_create_says_review_required_and_names_the_pr(
         self, client, admin_headers, deploy_repo
     ):
+        _store_certutil(deploy_repo)
         forge = _RecordingForge(url="http://forge/pr/42")
         _rebind(deploy_repo, environment="production", mode="team", forge=forge)
 
@@ -146,6 +154,8 @@ class TestProductionTeamWritesReportReview:
         self, client, admin_headers, deploy_repo, route, body, stored, team
     ):
         """Dev commits the delete to main under the standard, production+team to a review branch."""
+        if route.endswith("/hunts"):
+            _store_certutil(deploy_repo)
         _rebind(deploy_repo, environment="dev", mode="solo")
         assert client.post(route, json=body, headers=admin_headers).status_code == 201
         main_before = deploy_repo.head_revision()
@@ -187,6 +197,7 @@ class TestProductionTeamWritesReportReview:
         # The shared app fixture configures no destinations dir, and the destination
         # store itself is not the subject here -- only the hunt write the link makes.
         _registries["alert_destinations"] = AlertDestinationRegistry()
+        _store_certutil(deploy_repo)
         _rebind(deploy_repo, environment="dev", mode="solo")
         assert (
             client.post(
@@ -211,6 +222,7 @@ class TestProductionTeamWritesReportReview:
         self, client, admin_headers, deploy_repo
     ):
         """No forge means no PR to name, but the change is still off main."""
+        _store_certutil(deploy_repo)
         _rebind(deploy_repo, environment="production", mode="team")
         main_before = deploy_repo.head_revision()
 

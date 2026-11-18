@@ -17,7 +17,7 @@ import pytest
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
-pytestmark = pytest.mark.usefixtures("customer_orgs")
+pytestmark = pytest.mark.usefixtures("customer_orgs", "certutil_rule")
 
 _HUNT = {
     "name": "visible_hunt",
@@ -26,7 +26,7 @@ _HUNT = {
     "global_target_table_name": "dfe.detection",
     "global_source_table_name": "dfe.main",
     "customers": ["org_a"],
-    "rules": ["some_rule"],
+    "rules": ["certutil"],
 }
 
 

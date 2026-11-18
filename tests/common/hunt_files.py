@@ -51,6 +51,41 @@ def write_rule(
         registry.close()
 
 
+def store_rule_file(rules_dir: Path, name: str) -> None:
+    """Store the minimal ``{name}.yaml`` a hunt write finds, which is all it reads of a rule."""
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / f"{name}.yaml").write_text(
+        f"display_name: {name}\nwhere_clause: 1 = 1\n", encoding="utf-8", newline="\n"
+    )
+
+
+def plant_hunt(
+    registry: Any,
+    hunt: str,
+    rules: Sequence[str],
+    *,
+    source: str,
+    customers: Mapping[str, list[str]],
+) -> None:
+    """Store a hunt as one written straight to the deploy repo holds it, naming rules not yet stored.
+
+    The API refuses a hunt naming a rule with no file, so this is how a test reaches
+    the state a deleted or not-yet-written rule leaves. *customers* maps each org name
+    to the tenant ids the API would have resolved for it.
+    """
+    body = HuntCreateRequest(
+        name=hunt,
+        cron="*/5 * * * *",
+        rules=list(rules),
+        customers=list(customers),
+        global_source_table_name=source,
+        global_target_table_name="dfe.detection",
+    )
+    config = body.to_config_dict(hunt_name=hunt)
+    config[CUSTOMER_TENANT_IDS] = {name: list(ids) for name, ids in customers.items()}
+    registry.save(hunt, config)
+
+
 def write_hunt(
     hunts_dir: Path,
     hunt: str,

@@ -21,6 +21,7 @@ one query already answers for all of them.
 """
 
 import time
+from collections.abc import Collection
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -51,6 +52,7 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
+from dfe_engine.hunts.rule_names import missing_rules
 from dfe_engine.hunts.run_status import (
     RunStatus,
     clear_auto_disable,
@@ -59,7 +61,7 @@ from dfe_engine.hunts.run_status import (
 )
 from dfe_engine.hunts.schedule import next_due, read_schedule
 from dfe_engine.hunts.spec_loader import interval_seconds_for
-from dfe_engine.hunts.validator import HuntValidator
+from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
 from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
 
@@ -83,6 +85,11 @@ def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
     return [{"rule_name": name} for name in rule_names]
 
 
+def _held_rules(stored: dict[str, Any]) -> set[str]:
+    """The rule names a stored hunt already names."""
+    return {entry["rule_name"] for entry in _rules_from_stored(stored.get("rules"))}
+
+
 def _refuse_new_rule_names(rules: list[str], stored: dict[str, Any]) -> None:
     """Refuse a rule reference no rule can be created under, unless *stored* already holds it.
 
@@ -92,7 +99,7 @@ def _refuse_new_rule_names(rules: list[str], stored: dict[str, Any]) -> None:
     Raises:
         ProblemError: 422 ``validation_error`` naming the first refused reference.
     """
-    held = {entry["rule_name"] for entry in _rules_from_stored(stored.get("rules"))}
+    held = _held_rules(stored)
     for name in rules:
         if name in held:
             continue
@@ -113,30 +120,46 @@ def _resolve_customers(request: Request, config: dict[str, Any]) -> None:
     config[CUSTOMER_TENANT_IDS] = tenant_ids_by_org(customers, registered_orgs(request))
 
 
-def _validate_hunt_config(config: dict[str, Any], settings: Any, rules: Any) -> None:
+def _rules_dir(settings: Any, rules: Any) -> Any:
+    """The directory the hunt runner reads rule files from: the registry's, else ``hunts.rules_dir``."""
+    return rules.directory if rules is not None else settings.hunts.rules_dir
+
+
+def _unreadable_rule_error(missing: list[str]) -> str:
+    """The error a hunt carries while *missing* name no stored rule."""
+    listed = ", ".join(f"'{name}'" for name in missing)
+    return f"The runner cannot fire this hunt: no stored rule named {listed}"
+
+
+def _validate_hunt_config(
+    config: dict[str, Any], settings: Any, rules: Any, held: Collection[str] = ()
+) -> None:
     """Run the deep HuntValidator on an API create/update hunt config (422 on error).
 
     Pydantic only checks the request SHAPE. This closes the gap where API CRUD skipped
     rule-file + structural (source/customer) validation. Each rule is looked up as the
     ``{name}.yaml`` the rule registry writes and the hunt runner reads: in the registry's
     directory (the deploy repo's ``config/rules`` under gitops), else ``hunts.rules_dir``.
-    checkpoint_timestamp_field is API-optional so it falls back to the setting then a
-    default. source_registry is None (source-ref checks only warn), so an unknown source
-    ref is not blocked here.
+    A rule with no file is refused, except one in *held*. checkpoint_timestamp_field is
+    API-optional so it falls back to the setting then a default. source_registry is None
+    (source-ref checks only warn), so an unknown source ref is not blocked here.
     """
     checkpoint_field = (
         config.get("checkpoint_timestamp_field")
         or settings.hunts.checkpoint_timestamp_field
         or "timestamp"
     )
-    rules_dir = rules.directory if rules is not None else settings.hunts.rules_dir
     try:
         HuntValidator.validate_hunt_configuration(
             config,
-            rules_dir,
+            _rules_dir(settings, rules),
             checkpoint_field,
             source_registry=None,
+            held_rules=held,
         )
+    except UnknownRuleError as exc:
+        listed = ", ".join(f"'{name}'" for name in exc.missing)
+        raise ProblemError(422, f"Not a stored rule: {listed}", code="unknown_rule") from exc
     except ValueError as exc:
         raise ProblemError(422, str(exc), code="validation_error") from exc
 
@@ -207,6 +230,14 @@ class HuntSummary(BaseModel):
     auto_disabled_reason: str = Field(
         default="",
         description="The ClickHouse error category and code that tripped the auto-disable",
+    )
+    missing_rules: list[str] = Field(
+        default_factory=list,
+        description="Rules the hunt names that no stored rule file backs, so it cannot fire",
+    )
+    error: str = Field(
+        default="",
+        description="Why the runner cannot fire the hunt; empty when nothing stops it",
     )
 
 
@@ -332,6 +363,14 @@ class HuntDetailResponse(_HuntConfigFields):
     )
     auto_disabled_reason: str = Field(
         default="", description="The ClickHouse error category and code that tripped the stop"
+    )
+    missing_rules: list[str] = Field(
+        default_factory=list,
+        description="Rules the hunt names that no stored rule file backs, so it cannot fire",
+    )
+    error: str = Field(
+        default="",
+        description="Why the runner cannot fire the hunt; empty when nothing stops it",
     )
 
     @classmethod
@@ -508,8 +547,10 @@ def _hunt_row_to_summary(
     now: int,
     fraction: float,
     learned: dict[str, tuple[int, int]],
+    rules_dir: Any,
 ) -> HuntSummary:
     customers = row.get("customers") or []
+    missing = missing_rules(rules_dir, row.get("rules") or [])
     # No status = the runner has never touched this hunt, or ClickHouse is down.
     run = status or RunStatus(hunt_id=row["name"])
     return HuntSummary(
@@ -530,7 +571,17 @@ def _hunt_row_to_summary(
         enabled=_enabled_flag(row.get("enabled")),
         auto_disabled_at=run.auto_disabled_at,
         auto_disabled_reason=run.auto_disabled_reason,
+        missing_rules=missing,
+        error=_unreadable_rule_error(missing) if missing else "",
     )
+
+
+def _flag_missing_rules(detail: HuntDetailResponse, rules_dir: Any) -> HuntDetailResponse:
+    """Set the error a hunt carries while a rule it names has no stored rule file."""
+    missing = missing_rules(rules_dir, [entry.rule_name for entry in detail.rules])
+    detail.missing_rules = missing
+    detail.error = _unreadable_rule_error(missing) if missing else ""
+    return detail
 
 
 # -- Endpoints -----------------------------------------------
@@ -579,6 +630,7 @@ HuntsList = Annotated[
 )
 def list_hunts(
     registry: HuntConfigReg,
+    rules: OptionalRuleReg,
     user: CurrentUser,
     settings: Settings,
     query: HuntsList,
@@ -598,7 +650,8 @@ def list_hunts(
 
     Run state comes from ONE ClickHouse read across every listed hunt: the watermark
     (last run), the lease (running now), hunt_state (too aggressive) and hunt_run
-    (rows the last run wrote). Next due is derived, not stored.
+    (rows the last run wrote). Next due is derived, not stored. A hunt naming a rule
+    with no stored rule file carries ``missing_rules`` and an ``error``.
     """
     raw = registry.list_hunts()
     if rule is not None:
@@ -613,8 +666,10 @@ def list_hunts(
     status = _run_status_for([row["name"] for row in raw], now)
     fraction = settings.hunts.phase_spread_fraction
     learned = _learned_offsets(settings.hunts.smoothing.enabled)
+    rules_dir = _rules_dir(settings, rules)
     summaries = [
-        _hunt_row_to_summary(row, status.get(row["name"]), now, fraction, learned) for row in raw
+        _hunt_row_to_summary(row, status.get(row["name"]), now, fraction, learned, rules_dir)
+        for row in raw
     ]
     return paginate(summaries, query, bound={"search": search, "rule": rule})
 
@@ -648,7 +703,9 @@ def create_hunt(
     outcome = registry.save(body.name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", body.name, "created", review_audit_detail(outcome))
-    return HuntDetailResponse.from_stored_config(body.name, config)
+    return _flag_missing_rules(
+        HuntDetailResponse.from_stored_config(body.name, config), _rules_dir(settings, rules)
+    )
 
 
 @router.get(
@@ -660,13 +717,20 @@ def get_hunt(
     name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
+    rules: OptionalRuleReg,
+    settings: Settings,
 ) -> HuntDetailResponse:
-    """Get full hunt configuration by file name, with the runner's stop on it if any."""
+    """Get full hunt configuration by file name, with the runner's stop on it if any.
+
+    A hunt naming a rule with no stored rule file carries ``missing_rules`` and an ``error``.
+    """
     try:
         config = registry.get(name)
     except HuntConfigNotFoundError:
         raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
-    detail = HuntDetailResponse.from_stored_config(name, config)
+    detail = _flag_missing_rules(
+        HuntDetailResponse.from_stored_config(name, config), _rules_dir(settings, rules)
+    )
     run = _run_status_for([name], int(time.time())).get(name)
     if run is not None:
         detail.auto_disabled_at = run.auto_disabled_at
@@ -693,7 +757,8 @@ def update_hunt(
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
-    ``unknown_org`` when a customer names no registered org.
+    ``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a
+    rule newly named has no stored rule file.
     """
     try:
         stored = registry.get(name)
@@ -704,13 +769,15 @@ def update_hunt(
     config = body.to_config_dict(hunt_name=name)
     if body.enabled is None and "enabled" in stored:
         config["enabled"] = stored["enabled"]
-    _validate_hunt_config(config, settings, rules)
+    _validate_hunt_config(config, settings, rules, _held_rules(stored))
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
     _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
-    return HuntDetailResponse.from_stored_config(name, config)
+    return _flag_missing_rules(
+        HuntDetailResponse.from_stored_config(name, config), _rules_dir(settings, rules)
+    )
 
 
 @router.delete(

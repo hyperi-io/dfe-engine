@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from common.hunt_files import store_rule_file
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
@@ -109,6 +110,12 @@ def customer_orgs(api_settings: DFESettings) -> tuple[str, ...]:
     for name in CUSTOMER_ORGS:
         registry.create(name)
     return CUSTOMER_ORGS
+
+
+@pytest.fixture
+def certutil_rule(client: TestClient, api_settings: DFESettings) -> None:
+    """Store the ``certutil`` rule file, which a hunt write refuses to name until it exists."""
+    store_rule_file(Path(api_settings.hunts.rules_dir), "certutil")
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from scalo.logger import logger
 
-from dfe_engine.hunts.validator import HuntValidator
+from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError
 
 
 @pytest.fixture
@@ -146,6 +146,25 @@ class TestValidatorRuleFile:
 
         [warning] = [w for w in warnings if "Rule file not found" in w]
         assert str(tmp_path / "test_rule.yaml") in warning
+
+    def test_a_missing_rule_is_refused_by_name_when_rules_are_required(self, tmp_path, warnings):
+        with pytest.raises(UnknownRuleError, match="Not a stored rule: 'test_rule'") as refused:
+            HuntValidator.validate_hunt_configuration(
+                _base_hunt_data(), tmp_path, "timestamp_load", held_rules=()
+            )
+
+        assert refused.value.missing == ["test_rule"]
+        assert not [w for w in warnings if "Rule file not found" in w]
+
+    def test_a_missing_rule_the_stored_hunt_already_names_is_allowed(self, tmp_path):
+        HuntValidator.validate_hunt_configuration(
+            _base_hunt_data(), tmp_path, "timestamp_load", held_rules={"test_rule"}
+        )
+
+    def test_a_stored_rule_passes_when_rules_are_required(self, rule_dir):
+        HuntValidator.validate_hunt_configuration(
+            _base_hunt_data(), rule_dir, "timestamp_load", held_rules=()
+        )
 
     def test_a_jinja2_template_is_not_the_file_the_runner_reads(self, tmp_path, warnings):
         (tmp_path / "test_rule.jinja2").write_text("SELECT * FROM {{ source_table_name }}")

@@ -1,6 +1,6 @@
 """Validation for hunt configurations and the syntax they carry."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +9,7 @@ from scalo.logger import logger
 from ..clickhouse.quoting import plain_source_name, plain_table_name
 from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load, yaml_load_string
 from .rule_guard import refuse_direct_query
-from .rule_names import rule_file
+from .rule_names import missing_rules, rule_file
 
 
 def rule_source(source_db: str, source_table: str) -> str:
@@ -27,6 +27,19 @@ def rule_source(source_db: str, source_table: str) -> str:
     return f"{source_db}.{source_table}" if source_db else source_table
 
 
+class UnknownRuleError(ValueError):
+    """A hunt names rules that no stored rule file backs.
+
+    Attributes:
+        missing: The rule names with no file, each once.
+    """
+
+    def __init__(self, missing: list[str]) -> None:
+        """Name the rules in the message, which is what a caller shows."""
+        self.missing = missing
+        super().__init__(f"Not a stored rule: {', '.join(repr(name) for name in missing)}")
+
+
 class HuntValidator:
     """A class that provides static methods for validating hunt configurations and related syntax."""
 
@@ -36,6 +49,7 @@ class HuntValidator:
         rules_dir: str | Path,
         checkpoint_timestamp_field: str | None,
         source_registry: Any = None,
+        held_rules: Collection[str] | None = None,
     ):
         """Validates the hunt configuration for correctness.
 
@@ -44,6 +58,10 @@ class HuntValidator:
             file the hunt runner reads.
         :param checkpoint_timestamp_field: The timestamp field for checkpointing.
         :param source_registry: Optional SourceRegistry for validating source references.
+        :param held_rules: None warns about a rule with no file, since a hunt may be
+            drafted before its rules. A collection refuses one with
+            :class:`UnknownRuleError`, except a rule it holds: the rules a stored hunt
+            already names, so a hunt whose rule was deleted stays editable.
         """
         logger.info("--- HUNT VALIDATOR STARTED ---")
         logger.info(f"Hunt Config:\n {hunt_data} ")
@@ -51,7 +69,7 @@ class HuntValidator:
         HuntValidator._validate_yaml_structure(hunt_data)
         HuntValidator._validate_required_fields(hunt_data, checkpoint_timestamp_field)
         HuntValidator._validate_customers(hunt_data)
-        HuntValidator._validate_rules(hunt_data, rules_dir, source_registry)
+        HuntValidator._validate_rules(hunt_data, rules_dir, source_registry, held_rules)
         HuntValidator._validate_scheduling_fields(hunt_data)
 
         logger.info("--- HUNT VALIDATOR COMPLETED ---")
@@ -170,10 +188,18 @@ class HuntValidator:
 
     @staticmethod
     def _validate_rules(
-        hunt_data: dict, rules_dir: str | Path, source_registry: Any = None
+        hunt_data: dict,
+        rules_dir: str | Path,
+        source_registry: Any = None,
+        held_rules: Collection[str] | None = None,
     ) -> None:
         """Validate rules configuration and the rule files the hunt runner reads."""
         rules = hunt_data.get("rules", [])
+        if held_rules is not None:
+            named = [str(rule_info.get("rule_name") or "") for rule_info in rules]
+            missing = [name for name in missing_rules(rules_dir, named) if name not in held_rules]
+            if missing:
+                raise UnknownRuleError(missing)
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
             fields = (
