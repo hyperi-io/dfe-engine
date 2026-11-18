@@ -50,6 +50,7 @@ from dfe_engine.api.deps import (
     check_action,
     get_source_registry_optional,
     is_action_allowed,
+    reads_every_org,
     require_action,
 )
 from dfe_engine.api.errors import backend_failure
@@ -203,11 +204,11 @@ async def list_orgs(
 ):
     """List organisations visible to the caller, paginated.
 
-    System-scope org:read holders see every org. Org-scope holders see
-    only the orgs their grants cover.
+    Platform holders of org:read at system scope see every org. Org-scope holders,
+    and a system-bound ``scoped`` role, see only the orgs their grants cover.
     """
     registry: OrgRegistry = request.app.state.org_registry
-    if is_action_allowed(request, user, scopes_dict["org_read"]):
+    if reads_every_org(request, user, scopes_dict["org_read"]):
         visible = list(registry.list())
     else:
         visible = [
