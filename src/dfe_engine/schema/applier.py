@@ -24,6 +24,11 @@ and left, because each rewrites or expires data, and ``dfe schema apply
 whose TTL follows the deployment default takes a change of that default through
 :meth:`ManifestApplier.reconcile_ttl`.
 
+A column COMMENT that differs from the declared one is applied in place on either kind
+of table with ``ALTER TABLE ... COMMENT COLUMN``, which rewrites no data. The comments
+carry the loader's ``@`` directives, so a stale one changes how rows are read. A table
+that refuses the ALTER keeps its comment and the pass logs the column.
+
 Every statement renders through dfe-schemas: the database replicates its own
 DDL, every table takes the argumentless ``Replicated`` engine, and nothing
 carries ``ON CLUSTER``.
@@ -49,6 +54,7 @@ from sqlglot.errors import SqlglotError
 from sqlglot.tokens import Token, TokenType
 
 from dfe_engine import __version__ as engine_version
+from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_settings
 from dfe_engine.schema.ledger import LedgerRow, MigrationLedger
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator, quote_ident
@@ -174,6 +180,7 @@ class TableDefinition:
         clauses: ``ORDER BY``, ``TTL`` and the other table clauses, keyword to text.
         settings: The SETTINGS clause, name to the value as written.
         ttl: The TTL clause's interval, None when the table declares no TTL.
+        comments: Column name to its COMMENT text, for the columns that declare one.
     """
 
     columns: dict[str, str]
@@ -183,6 +190,7 @@ class TableDefinition:
     clauses: dict[str, str]
     settings: dict[str, str]
     ttl: LiveTtl | None
+    comments: dict[str, str] = field(default_factory=dict)
 
     @property
     def json_settings(self) -> dict[str, int]:
@@ -312,6 +320,16 @@ def _codecs(tokens: Sequence[Token]) -> tuple[str, ...]:
     return tuple(_word(part[0]) for part in _split(tokens[start + 2 : end]))
 
 
+def _comment(tokens: Sequence[Token]) -> str | None:
+    """The text of a column's ``COMMENT '...'``, unescaped, or None when it declares none."""
+    for i, token in _top(tokens):
+        if _word(token) == "COMMENT" and i + 1 < len(tokens):
+            following = tokens[i + 1]
+            if following.token_type is TokenType.STRING:
+                return following.text
+    return None
+
+
 def _index(text: str, part: Sequence[Token]) -> IndexDefinition:
     """``INDEX name expr TYPE type [GRANULARITY n]``."""
     keyword = {_word(t): i for i, t in _top(part) if _word(t) in ("TYPE", "GRANULARITY")}
@@ -343,6 +361,7 @@ def read_table(statement: str) -> TableDefinition:
     columns: dict[str, str] = {}
     types: dict[str, str] = {}
     codecs: dict[str, tuple[str, ...]] = {}
+    comments: dict[str, str] = {}
     indexes: list[IndexDefinition] = []
     for part in _split(tokens[start + 1 : end]):
         head = _word(part[0])
@@ -357,6 +376,8 @@ def read_table(statement: str) -> TableDefinition:
         types[name] = _span(statement, rest[:type_end])
         if families := _codecs(rest):
             codecs[name] = families
+        if (comment := _comment(rest)) is not None:
+            comments[name] = comment
     clauses = _clauses(tokens[end + 1 :])
     return TableDefinition(
         columns=columns,
@@ -366,6 +387,7 @@ def read_table(statement: str) -> TableDefinition:
         clauses={key: _span(statement, value) for key, value in clauses.items()},
         settings=_settings(statement, clauses.get("SETTINGS", [])),
         ttl=_interval(clauses["TTL"]) if "TTL" in clauses else None,
+        comments=comments,
     )
 
 
@@ -517,6 +539,19 @@ def _add_columns(definition: TableDefinition, *, target: str, missing: Sequence[
 
 
 # -- server reads ---------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CommentMove:
+    """One column whose live COMMENT differs from the declared one.
+
+    Attributes:
+        column: The column.
+        statement: The ``ALTER TABLE ... COMMENT COLUMN`` that makes the move.
+    """
+
+    column: str
+    statement: str
 
 
 def _select(client: Any, sql: str, parameters: dict[str, Any]) -> list:
@@ -687,6 +722,7 @@ class TablePlan:
         columns_added: The columns the plan adds.
         ttl: The TTL move among the statements.
         settings: The settings move among the statements.
+        comments: The comment moves among the statements.
     """
 
     statements: tuple[str, ...]
@@ -694,6 +730,36 @@ class TablePlan:
     columns_added: tuple[str, ...] = ()
     ttl: TtlMove = TtlMove()
     settings: SettingsMove = SettingsMove()
+    comments: tuple[CommentMove, ...] = ()
+
+
+def _comment_moves(
+    client: Any, definition: TableDefinition, *, database: str, table: str, kept: Sequence[str]
+) -> list[CommentMove]:
+    """The ALTERs that give each *kept* column the COMMENT *definition* declares.
+
+    A column declaring none is compared with an empty comment, so a comment the
+    schema dropped is cleared. The text goes through :func:`quote_literal`.
+    """
+    rows = _select(
+        client,
+        "SELECT name, comment FROM system.columns "
+        "WHERE database = {db:String} AND table = {tbl:String}",
+        {"db": database, "tbl": table},
+    )
+    live = {str(name): str(comment or "") for name, comment in rows}
+    target = table_target(database, table)
+    return [
+        CommentMove(
+            column=name,
+            statement=(
+                f"ALTER TABLE {target} COMMENT COLUMN {quote_identifier(name)} "
+                f"{quote_literal(definition.comments.get(name, ''))}"
+            ),
+        )
+        for name in kept
+        if name in live and live[name] != definition.comments.get(name, "")
+    ]
 
 
 def plan_source_table(
@@ -703,7 +769,8 @@ def plan_source_table(
 
     An absent table is created. A present one gains the columns it lacks with their
     indexes, has its kept columns' indexes and its TTL moved to the declared ones,
-    and then its JSON settings. No column is dropped or retyped.
+    and its columns' comments moved to the declared ones, and then its JSON settings.
+    No column is dropped or retyped.
 
     Args:
         client: A live ClickHouse client.
@@ -727,13 +794,20 @@ def plan_source_table(
     # After the column adds: the TTL column may be one of them.
     live_ttl = ttl_from_engine_full(_shape(client, database, table).get("engine_full", ""))
     ttl = ttl_move(target=target, wanted=ttl_days, definition=definition, live=live_ttl)
+    comments = _comment_moves(client, definition, database=database, table=table, kept=kept)
     settings = settings_move_for(client, definition, database=database, table=table)
     return TablePlan(
-        statements=(*statements, *filter(None, [ttl.statement]), *settings.statements),
+        statements=(
+            *statements,
+            *(move.statement for move in comments),
+            *filter(None, [ttl.statement]),
+            *settings.statements,
+        ),
         exists=True,
         columns_added=tuple(missing),
         ttl=ttl,
         settings=settings,
+        comments=tuple(comments),
     )
 
 
@@ -753,6 +827,8 @@ class TableChange:
     ttl: str = ""
     # "name = value" set and "reset name" reset by this pass, empty when none moved.
     settings: tuple[str, ...] = ()
+    # The columns whose COMMENT this pass changed.
+    comments: tuple[str, ...] = ()
 
     def describe(self) -> str:
         """One line, in the past tense, for the apply log."""
@@ -766,6 +842,10 @@ class TableChange:
                 parts.append(f"added {len(self.columns_added)} column(s) [{cols}]")
             if self.ttl:
                 parts.append(f"TTL {self.ttl} days")
+            if self.comments:
+                parts.append(
+                    f"comment on {len(self.comments)} column(s) [{', '.join(self.comments)}]"
+                )
             parts.extend(describe_settings(self.settings))
             return f"altered {target}: {', '.join(parts)}"
         return f"unchanged {target}"
@@ -865,8 +945,14 @@ class SchemaApplier:
         )
         if plan.ttl.expires_rows:
             logger.warning(f"{database}.{table}: TTL {plan.ttl.move}; rows past the new TTL expire")
+        by_statement = {move.statement: move.column for move in plan.comments}
+        comments: list[str] = []
         for statement in plan.statements:
-            self._run(statement)
+            if statement in by_statement:
+                if self._run_comment(f"{database}.{table}", by_statement[statement], statement):
+                    comments.append(by_statement[statement])
+            else:
+                self._run(statement)
         altered = "altered" if plan.statements else "unchanged"
         change = TableChange(
             database=database,
@@ -876,6 +962,7 @@ class SchemaApplier:
             engine=engine_clause(parse_engine(cfg.engine)),
             ttl=plan.ttl.move,
             settings=plan.settings.assignments,
+            comments=tuple(comments),
         )
         self.report.tables.append(change)
         return change
@@ -928,6 +1015,24 @@ class SchemaApplier:
             head = sql.splitlines()[0]
             raise SchemaApplyError(f"ClickHouse rejected: {head} -- {exc}") from exc
 
+    def _run_comment(self, target: str, column: str, statement: str) -> bool:
+        """Apply one COMMENT COLUMN, and say whether the table took it.
+
+        A table that refuses it keeps its comment, which changes no data, so the
+        pass logs the column and goes on rather than failing the whole apply.
+        """
+        try:
+            self._run(statement)
+        except SchemaApplyError as exc:
+            logger.warning(
+                "column comment not applied; the table keeps the comment it has",
+                object=target,
+                column=column,
+                error=str(exc),
+            )
+            return False
+        return True
+
 
 # -- manifest objects -----------------------------------------------------
 
@@ -948,6 +1053,8 @@ class ObjectOutcome:
     reason: str = ""
     # "name = value" for each table setting this pass set, "reset name" for each reset.
     settings: tuple[str, ...] = ()
+    # The columns whose COMMENT this pass changed.
+    comments: tuple[str, ...] = ()
 
     @property
     def qualified(self) -> str:
@@ -959,6 +1066,10 @@ class ObjectOutcome:
         if self.columns_added:
             added = ", ".join(self.columns_added)
             changes.append(f"added {len(self.columns_added)} column(s) [{added}]")
+        if self.comments:
+            changes.append(
+                f"comment on {len(self.comments)} column(s) [{', '.join(self.comments)}]"
+            )
         changes.extend(describe_settings(self.settings))
         return changes
 
@@ -1174,6 +1285,14 @@ class ManifestApplier(SchemaApplier):
         )
         for statement in indexes:
             self._run(statement)
+        # Metadata only, so like an index a drift refusal never holds it back.
+        applied_comments = [
+            move.column
+            for move in _comment_moves(
+                self._client, definition, database=database, table=rendered.name, kept=kept
+            )
+            if self._run_comment(target, move.column, move.statement)
+        ]
 
         if drift and not self._allow_drift:
             action: Action = "refused"
@@ -1181,7 +1300,9 @@ class ManifestApplier(SchemaApplier):
             for column, message in drift:
                 self._apply_drift(definition, target, column, message)
             action = (
-                "altered" if missing or settings.statements or indexes or drift else "unchanged"
+                "altered"
+                if missing or settings.statements or indexes or applied_comments or drift
+                else "unchanged"
             )
         return self._record(
             rendered,
@@ -1190,6 +1311,7 @@ class ManifestApplier(SchemaApplier):
             drift=tuple(message for _, message in drift),
             extra_columns=extra,
             settings=settings.assignments,
+            comments=tuple(applied_comments),
         )
 
     def _drift(
@@ -1274,6 +1396,7 @@ class ManifestApplier(SchemaApplier):
         extra_columns: tuple[str, ...] = (),
         reason: str = "",
         settings: tuple[str, ...] = (),
+        comments: tuple[str, ...] = (),
     ) -> ObjectOutcome:
         outcome = ObjectOutcome(
             id=rendered.id,
@@ -1287,6 +1410,7 @@ class ManifestApplier(SchemaApplier):
             extra_columns=extra_columns,
             reason=reason,
             settings=settings,
+            comments=comments,
         )
         self.manifest.outcomes.append(outcome)
         if action in ("created", "altered", "unchanged"):

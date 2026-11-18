@@ -66,6 +66,8 @@ class _FakeClient:
         if "engine_full" in sql:
             return _Result([["", "", self.engine_full()]])
         if "system.columns" in sql:
+            if "comment" in sql:
+                return _Result([(name, "") for name in self.columns])
             return _Result([(name, "String") for name in self.columns])
         if "data_skipping_indices" in sql:
             return _Result([])
