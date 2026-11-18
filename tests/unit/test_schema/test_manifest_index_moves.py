@@ -59,6 +59,8 @@ class _LiveTable:
             return _Result(
                 [["_timestamp_load", "", "ReplicatedMergeTree ORDER BY _timestamp_load"]]
             )
+        if "system.columns" in sql and "comment" in sql:
+            return _Result([("_timestamp_load", ""), ("_source", ""), ("attrs", "")])
         if "system.columns" in sql:
             return _Result(
                 [
