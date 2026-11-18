@@ -76,8 +76,8 @@ A view is a ClickHouse parameterised view deployed through the governed DDL path
 
 ```python
 result = client.query(
-    "hunts/active_threats",                         # view label
-    params={"severities": ["critical", "high"]},    # the view's parameters
+    "hunts/active_threats",  # view label
+    params={"severities": ["critical", "high"]},  # the view's parameters
     limit=500,
 )
 ```

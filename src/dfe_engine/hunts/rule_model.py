@@ -159,6 +159,7 @@ class Rule(BaseModel):
 
     rule_id: str = Field(..., description="Unique rule identifier")
     name: str = Field(..., description="Human-readable rule name")
+    description: str | None = Field(default=None, description="What the rule detects")
     severity: str = Field(default="medium", description="Detection severity")
     source_db: str | None = Field(default=None, description="Source database")
     source_table: str | None = Field(default=None, description="Source table name")

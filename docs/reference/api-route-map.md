@@ -12,18 +12,18 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 128 | Not placed yet: see its question |
+| decide | 136 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 327 | |
+| total | 335 | |
 
 ## Questions
 
 | Question | Operations |
 |---|---|
 | [apps-depth](#apps-depth) | 22 |
+| [detection-rules](#detection-rules) | 16 |
 | [groups-scope](#groups-scope) | 11 |
 | [compute-helpers](#compute-helpers) | 8 |
-| [detection-rules](#detection-rules) | 8 |
 | [hunts-orgs](#hunts-orgs) | 7 |
 | [synthetic-data](#synthetic-data) | 7 |
 | [queries](#queries) | 6 |
@@ -336,6 +336,29 @@ An instance's children sit 4 levels deep under the `deployment` root: drop `depl
 | `GET /api/v1/apps/{service}/{instance}/status` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/apps/{service}/{instance}/values` | - | - | - | - | decide | 0 |  |
 
+### detection-rules
+
+Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
+| `POST /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
+| `GET /api/v1/rules-v2` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/from-hyperdx` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/preview` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/validate` | - | - | - | - | decide | 0 |  |
+| `DELETE /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `GET /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `PUT /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/validate` | - | - | - | - | decide | ui 2 |  |
+| `DELETE /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+| `GET /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+| `PUT /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+
 ### groups-scope
 
 A group is system- or org-scoped, so `orgs/{org}/groups` cannot own a system group: one `identity/groups/{group}` collection with the scope as a field, or split between the two.
@@ -368,21 +391,6 @@ A compute-only helper that owns no resource: an action on the resource it serves
 | `POST /api/v1/authoring/scaffold` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/cel/check` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/cel/check-batch` | - | - | - | - | decide | 0 |  |
-
-### detection-rules
-
-Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `GET /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
-| `POST /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
-| `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules/validate` | - | - | - | - | decide | ui 2 |  |
-| `DELETE /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
-| `GET /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
-| `PUT /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
 
 ### hunts-orgs
 
