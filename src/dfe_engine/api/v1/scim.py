@@ -60,7 +60,7 @@ from scim2_models import (
     User as ScimUser,
 )
 
-from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_platform_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
@@ -310,7 +310,7 @@ def _scim_last_admin_member_removals(
 
 @router.get(
     "/Users",
-    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_read"]))],
 )
 async def list_users(user: CurrentUser, request: Request) -> Response:
     """List users (SCIM ListResponse). Supports ``userName eq``, ``externalId eq`` + paging."""
@@ -349,7 +349,7 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
 
 @router.get(
     "/Users/{user_id}",
-    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_read"]))],
 )
 async def get_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Fetch a single user by id (username)."""
@@ -367,7 +367,7 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
 
 @router.post(
     "/Users",
-    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
 )
 async def create_user(user: CurrentUser, request: Request) -> Response:
     """Provision a user. IdP-owned. Local password is randomised when omitted.
@@ -427,7 +427,7 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
 
 @router.put(
     "/Users/{user_id}",
-    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
 )
 async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a user's writable attributes (SCIM PUT)."""
@@ -483,7 +483,7 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
 
 @router.patch(
     "/Users/{user_id}",
-    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
 )
 async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision."""
@@ -547,7 +547,7 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 
 @router.delete(
     "/Users/{user_id}",
-    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
 )
 async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
@@ -587,7 +587,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
 
 @router.get(
     "/Groups",
-    dependencies=[Depends(require_action(scopes_dict["group_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_read"]))],
 )
 async def list_groups(user: CurrentUser, request: Request) -> Response:
     """List groups (SCIM ListResponse). Supports ``displayName eq``, ``id eq`` + paging.
@@ -621,7 +621,7 @@ async def list_groups(user: CurrentUser, request: Request) -> Response:
 
 @router.get(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_action(scopes_dict["group_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_read"]))],
 )
 async def get_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Fetch a single group by id (name)."""
@@ -636,7 +636,7 @@ async def get_group(group_id: str, user: CurrentUser, request: Request) -> Respo
 
 @router.post(
     "/Groups",
-    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_write"]))],
 )
 async def create_group(user: CurrentUser, request: Request) -> Response:
     """Provision a group with its member set (member Account.groups kept in sync)."""
@@ -687,7 +687,7 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
 
 @router.put(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_write"]))],
 )
 async def replace_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a group's member set (SCIM PUT)."""
@@ -760,7 +760,7 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
 
 @router.patch(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_write"]))],
 )
 async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp on group membership (add/remove/replace members)."""
@@ -809,7 +809,7 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
 
 @router.delete(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_action(scopes_dict["group_delete"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["group_delete"]))],
 )
 async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a group. Members are detached first so the store permits removal."""
