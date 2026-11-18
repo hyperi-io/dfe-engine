@@ -57,6 +57,10 @@ Applied automatically:
 - a JSON table's settings are brought to the platform's: `MODIFY SETTING` where a
   self-hosted table lacks `write_marks_for_substreams_in_compact_parts = 0`,
   `RESET SETTING` where a Cloud table has it
+- a column whose `COMMENT` differs from the definition's gets the new one with
+  `ALTER TABLE ... COMMENT COLUMN`, which rewrites no data. The comments carry the
+  loader's `@` directives, such as `@source`. A table that refuses the ALTER keeps its
+  comment, and the pass logs the column
 - a plain view with a changed SELECT is replaced, because it holds no state
 - a role, settings profile, quota or grant is re-asserted, because every statement
   in that set converges
