@@ -327,8 +327,6 @@ routes = [
   { old = "GET /api/v1/system/settings", verb = "settings", status = "unchanged" },
   { old = "GET /api/v1/system/status", verb = "status", status = "unchanged" },
   { old = "GET /api/v1/system/version", verb = "version", status = "unchanged" },
-  { old = "POST /api/v1/transforms/compile", status = "decide", note = "compute-helpers" },
-  { old = "POST /api/v1/transforms/test", status = "decide", note = "compute-helpers" },
   { old = "GET /api/v1/usage", status = "decide", note = "usage-scope" },
   { old = "GET /api/v1/usage/overview", status = "decide", note = "usage-scope" },
 ]

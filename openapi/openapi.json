@@ -5090,7 +5090,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__v1__oidc_providers__TestResponse"
+                  "$ref": "#/components/schemas/TestResponse"
                 }
               }
             }
@@ -14763,190 +14763,6 @@
             "positional": []
           },
           "action": "clickhouse_cloud:manage"
-        }
-      }
-    },
-    "/api/v1/transforms/compile": {
-      "post": {
-        "tags": [
-          "Transforms"
-        ],
-        "summary": "Compile Transform",
-        "description": "Compile user source code to a WASM binary.\n\nProxies to the dfe-transform-compiler service. The response includes\na base64-encoded WASM binary that can be passed directly to /test.",
-        "operationId": "transforms.compile",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CompileRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompileResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Problem details (RFC 9457)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "x-scalo": {
-          "group": "transforms",
-          "resource": "transforms",
-          "hierarchy": [
-            "transforms"
-          ],
-          "verb": "compile",
-          "read_only": false,
-          "cli": {
-            "hidden": false,
-            "aliases": [],
-            "positional": []
-          },
-          "action": "transform:compile"
-        }
-      }
-    },
-    "/api/v1/transforms/test": {
-      "post": {
-        "tags": [
-          "Transforms"
-        ],
-        "summary": "Test Transform",
-        "description": "Run a compiled WASM transform against sample records.\n\nProxies to the dfe-transform-wasm service's /test endpoint.\nThe wasm_base64 field should come directly from /compile.",
-        "operationId": "transforms.test",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TestRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__v1__transforms__TestResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Problem details (RFC 9457)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "x-scalo": {
-          "group": "transforms",
-          "resource": "transforms",
-          "hierarchy": [
-            "transforms"
-          ],
-          "verb": "test",
-          "read_only": false,
-          "cli": {
-            "hidden": false,
-            "aliases": [],
-            "positional": []
-          },
-          "action": "transform:test"
         }
       }
     },
@@ -38567,53 +38383,6 @@
         "title": "CompatWriteResponse",
         "description": "The bindings an apply leaves, and what the apps did with them."
       },
-      "CompileRequest": {
-        "properties": {
-          "language": {
-            "type": "string",
-            "enum": [
-              "rust",
-              "go",
-              "assemblyscript"
-            ],
-            "title": "Language"
-          },
-          "files": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Files",
-            "description": "Source files. Key = filename, value = source content."
-          }
-        },
-        "type": "object",
-        "required": [
-          "language",
-          "files"
-        ],
-        "title": "CompileRequest",
-        "description": "Body for compiling transform source to WASM."
-      },
-      "CompileResponse": {
-        "properties": {
-          "wasm_base64": {
-            "type": "string",
-            "title": "Wasm Base64"
-          },
-          "wasm_bytes": {
-            "type": "integer",
-            "title": "Wasm Bytes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "wasm_base64",
-          "wasm_bytes"
-        ],
-        "title": "CompileResponse",
-        "description": "The compiled WASM module, base64-encoded."
-      },
       "ConfigFieldModel": {
         "properties": {
           "path": {
@@ -40252,32 +40021,6 @@
         ],
         "title": "DryRunResponse",
         "description": "A dry run's per-event outcomes and totals."
-      },
-      "EmittedRecord": {
-        "properties": {
-          "key": {
-            "type": "string",
-            "title": "Key"
-          },
-          "value": {
-            "type": "string",
-            "title": "Value"
-          },
-          "headers": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Headers"
-          }
-        },
-        "type": "object",
-        "required": [
-          "key",
-          "value"
-        ],
-        "title": "EmittedRecord",
-        "description": "One record a transform emitted."
       },
       "ExternalConnectionModel": {
         "properties": {
@@ -49602,37 +49345,6 @@
         "title": "SampleMode",
         "description": "How to pick the sample.\n\n- ``recent``  - newest rows first (fast tail, ClickHouse ORDER BY ts DESC,\n  Kafka reads from the partition high-watermark backwards).\n- ``random``  - uniform-ish random rows (fair distribution, no recency bias).\n- ``smart``   - logreducer representative/diverse sample (default). Gated.\n- ``anomaly`` - logreducer isolation-forest outliers (the weird events). Gated."
       },
-      "SampleRecord": {
-        "properties": {
-          "key": {
-            "type": "string",
-            "title": "Key",
-            "default": ""
-          },
-          "value": {
-            "type": "string",
-            "title": "Value"
-          },
-          "timestamp": {
-            "type": "integer",
-            "title": "Timestamp",
-            "default": 0
-          },
-          "headers": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Headers"
-          }
-        },
-        "type": "object",
-        "required": [
-          "value"
-        ],
-        "title": "SampleRecord",
-        "description": "One input record for a transform test."
-      },
       "SampleRequest": {
         "properties": {
           "mode": {
@@ -55134,29 +54846,24 @@
         "title": "TaskStatus",
         "description": "Task lifecycle states."
       },
-      "TestRequest": {
+      "TestResponse": {
         "properties": {
-          "wasm_base64": {
-            "type": "string",
-            "title": "Wasm Base64",
-            "description": "Base64-encoded WASM binary from /compile"
+          "success": {
+            "type": "boolean",
+            "title": "Success"
           },
-          "records": {
-            "items": {
-              "$ref": "#/components/schemas/SampleRecord"
-            },
-            "type": "array",
-            "title": "Records",
-            "description": "Sample input records"
+          "message": {
+            "type": "string",
+            "title": "Message"
           }
         },
         "type": "object",
         "required": [
-          "wasm_base64",
-          "records"
+          "success",
+          "message"
         ],
-        "title": "TestRequest",
-        "description": "Body for running a compiled transform over sample records."
+        "title": "TestResponse",
+        "description": "Whether the provider answered the connection test."
       },
       "TokenResponse": {
         "properties": {
@@ -57542,25 +57249,6 @@
         "title": "SyncResponse",
         "description": "The outcome of a group sync."
       },
-      "dfe_engine__api__v1__oidc_providers__TestResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "success",
-          "message"
-        ],
-        "title": "TestResponse",
-        "description": "Whether the provider answered the connection test."
-      },
       "dfe_engine__api__v1__schemas__SchemaBuildResult": {
         "properties": {
           "source_name": {
@@ -57851,33 +57539,6 @@
         ],
         "title": "SeedResponse",
         "description": "Result of seeding built-in sources."
-      },
-      "dfe_engine__api__v1__transforms__TestResponse": {
-        "properties": {
-          "emitted": {
-            "items": {
-              "$ref": "#/components/schemas/EmittedRecord"
-            },
-            "type": "array",
-            "title": "Emitted"
-          },
-          "duration_ms": {
-            "type": "number",
-            "title": "Duration Ms"
-          },
-          "wasm_memory_bytes": {
-            "type": "integer",
-            "title": "Wasm Memory Bytes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "emitted",
-          "duration_ms",
-          "wasm_memory_bytes"
-        ],
-        "title": "TestResponse",
-        "description": "What a transform emitted, and the time and memory it used."
       },
       "dfe_engine__schema__models__SchemaColumn-Output": {
         "properties": {

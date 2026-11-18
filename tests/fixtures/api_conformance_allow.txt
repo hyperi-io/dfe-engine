@@ -119,8 +119,6 @@ dry-run POST /api/v1/synthetic-data/streams/{operation}/cancel
 dry-run POST /api/v1/system/clickhouse-cloud/start
 dry-run POST /api/v1/system/clickhouse-cloud/stop
 dry-run POST /api/v1/system/defaults/apply
-dry-run POST /api/v1/transforms/compile
-dry-run POST /api/v1/transforms/test
 dry-run PUT /api/v1/alerts/destinations/{name}
 dry-run PUT /api/v1/apps/{service}/{instance}/config
 dry-run PUT /api/v1/apps/{service}/{instance}/files/{set_name}/{filename}
@@ -349,8 +347,6 @@ hierarchy POST /api/v1/synthetic-data/stream
 hierarchy POST /api/v1/synthetic-data/streams/{operation}/cancel
 hierarchy POST /api/v1/system/clickhouse-cloud/start
 hierarchy POST /api/v1/system/clickhouse-cloud/stop
-hierarchy POST /api/v1/transforms/compile
-hierarchy POST /api/v1/transforms/test
 hierarchy PUT /api/v1/alerts/destinations/{name}
 hierarchy PUT /api/v1/apps/{service}/{instance}/config
 hierarchy PUT /api/v1/apps/{service}/{instance}/files/{set_name}/{filename}
