@@ -67,8 +67,8 @@ source gets its routing and typed table, an index moves on the live table,
 and a transform parses a syslog line into columns.
 
 A step that cannot pass yet is `xfail(strict=True)` naming its open issue, so
-the run goes red when the cause is fixed rather than passing quietly. 2.7 is
-dfe-engine#1173. Nothing here is softened to make a run pass.
+the run goes red when the cause is fixed rather than passing quietly. Nothing
+here is softened to make a run pass.
 
 The steps share one source and one table, so run this file in ONE worker --
 pass `-p no:xdist`, because workers would split the sequence across
@@ -77,10 +77,6 @@ the harness's: a fresh source's first record waits on dfe-loader's 60 s topic
 refresh, and a promoted column cannot be judged inside the loader's 300 s
 directive cache, so 1.3 sends a fresh record each poll until the cache turns
 over.
-
-2.7 additionally needs the per-source transform instance RUNNING and the
-receiver restarted onto the fresh source's routing. A deploy does neither, and the
-API reports `restart_required: []` while the receiver still needs one.
 
 Each 1.3 run leaves a forked schema behind. `meta/syslog` is core, so promote
 forks it to `<source>_syslog` before adding the column. Teardown removes the
@@ -149,7 +145,7 @@ says the umbrella path transformed -- not that all three corpus modules did.
 `test_live_pipeline.py` has NOT passed as a whole run.
 
 `test_data_evolution.py` has been run against the 2.2.2 compose stack. 1.3, 3.2
-and 3.3 pass and 2.7 is the one xfail. 1.1 expects a 409 where the engine lets a
+and 3.3 pass. 1.1 expects a 409 where the engine lets a
 core schema's `current` move and answers 422 for an unknown version, and 2.6 saw
 its active-part count fall from 5 to 1 across the add and drop. A failure in this
 file is as likely to be the harness as the product.

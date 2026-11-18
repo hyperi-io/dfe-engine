@@ -22,7 +22,7 @@ its number in the test name.
 | 2.4 | 2 | A derived schema selects a subset, with an index type per field | live |
 | 2.5 | 2 | Deploying it routes the feed to the narrower table | live |
 | 2.6 | 2 | An index is added and dropped on the live table, no rebuild | live, part |
-| 2.7 | 2 | A transform turns a text line in `message` into typed columns | live, xfail dfe-engine#1173 |
+| 2.7 | 2 | A transform turns a text line in `message` into typed columns | covered by 2.8, no step of its own |
 | 2.8 | 2 | The transform is swapped and the same columns still fill | live, part |
 | 3.1 | 3 | A derived schema stops the loader populating `_json` and `_raw`, and the columns still EXIST on the table | live |
 | 3.2 | 3 | The feed still lands with typed columns filled and `_json` empty | live |
@@ -38,6 +38,8 @@ directly rather than through a derived-schema edit, which is what 2.4 and 2.5
 cover. 1.2 re-imports into the SAME deployment under a second path, which proves
 the bundle holds what the import needs but not that it lands in a deployment
 that has never seen the schema -- that needs a second stack.
+
+2.7 has no step of its own. A source created through the API gets a transform instance with no program, because the files an operator authors into an instance are not derived, and a Compose deploy does not start the instance. 2.8 asserts the parsing on the deployment's own `filebeat` source, and [test_filebeat_pipeline.py](../tests/e2e/test_filebeat_pipeline.py) asserts it across the receiver, Kafka, transform and loader.
 
 2.8 drives the source that has a transform instance, because Compose declares one service per transform app and binds it at deploy. So it proves a different engine on the same corpus, never a second binding. It reads that source's match rule off the API, since the source belongs to the deployment.
 
@@ -79,6 +81,5 @@ Two constraints on that corpus:
 The VRL needs the `timezones.csv` enrichment table, and optionally
 `._conf.tz_offset` and `._conf.tz_map`.
 
-2.7 posts the Cisco IOS module alone, through whichever transform app
-`DFE_E2E_TRANSFORM` names. Widening it to all three at once turns it into the
-fixture above.
+2.8 posts the Cisco IOS module alone. Widening it to all three at once turns it
+into the fixture above.
