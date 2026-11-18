@@ -5331,7 +5331,7 @@
           "Organisations"
         ],
         "summary": "List Orgs",
-        "description": "List organisations visible to the caller, paginated.\n\nSystem-scope org:read holders see every org. Org-scope holders see\nonly the orgs their grants cover.",
+        "description": "List organisations visible to the caller, paginated.\n\nPlatform holders of org:read at system scope see every org. Org-scope holders,\nand a system-bound ``scoped`` role, see only the orgs their grants cover.",
         "operationId": "orgs.list",
         "parameters": [
           {

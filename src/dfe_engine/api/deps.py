@@ -10,7 +10,7 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 4. Auth disabled -- dev/test default, root context
 """
 
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
@@ -897,6 +897,18 @@ def live_role_config(request: Request) -> RoleConfig | None:
     return getattr(request.app.state, "role_config", None)
 
 
+def scope_orgs(request: Request, scope: Scope | None) -> Callable[[], list[Any]] | None:
+    """A read of the org registry when ``scope`` is one an org's markers decide, else None.
+
+    A tenant-fenced system grant reaches an org scope, or a group an org owns, only
+    through the orgs its group names, which ``authorize()`` resolves against the
+    registry, and reads it only when such a grant is checked.
+    """
+    if scope is None or scope.type not in ("org", "group"):
+        return None
+    return lambda: registered_orgs(request)
+
+
 def is_action_allowed(
     request: Request,
     user: AuthContext,
@@ -912,6 +924,7 @@ def is_action_allowed(
         scope=scope,
         enabled=settings.auth.enabled,
         role_config=live_role_config(request),
+        orgs=scope_orgs(request, scope),
     ).allowed
 
 
@@ -1109,6 +1122,7 @@ def check_action(
         scope=scope,
         enabled=settings.auth.enabled,
         role_config=live_role_config(request),
+        orgs=scope_orgs(request, scope),
     )
     if not result.allowed:
         audit_permission_denied(user.user_id, action, user.roles, result.reason)
@@ -1146,10 +1160,35 @@ def require_action(action: str, *, scope: Scope | None = None):
             scope=scope,
             enabled=settings.auth.enabled,
             role_config=live_role_config(request),
+            orgs=scope_orgs(request, scope),
         )
         if not result.allowed:
             audit_permission_denied(user.user_id, action, user.roles, result.reason)
             raise AuthorizationError(f"Action '{action}' denied: {result.reason}")
+
+    return _check
+
+
+def require_platform_action(action: str):
+    """FastAPI dependency factory: ``action`` held at system scope through a platform role.
+
+    For a route whose rows no handler holds to the caller's orgs, such as the API-key
+    and SCIM routes. A system-bound ``scoped`` role passes :func:`require_action` and
+    would read every org's rows there, so only a grant that reads across orgs
+    (:func:`reads_every_org`) passes. The spec names ``action`` as ``x-scalo.action``,
+    as :func:`require_action` does.
+    """
+
+    @permission(action)
+    async def _check(
+        request: Request,
+        user: AuthContext = Depends(get_current_user),
+        settings: DFESettings = Depends(get_app_settings),
+    ) -> None:
+        if settings.auth.enabled and not reads_every_org(request, user, action):
+            reason = f"no role that reads across orgs grants '{action}' at scope 'system'"
+            audit_permission_denied(user.user_id, action, user.roles, reason)
+            raise AuthorizationError(f"Action '{action}' denied: {reason}")
 
     return _check
 

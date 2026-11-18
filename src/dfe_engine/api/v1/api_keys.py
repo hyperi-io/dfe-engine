@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
 from dfe_engine.api.conventions import apply_search
-from dfe_engine.api.deps import CurrentUser, refuse_unknown_orgs, require_action
+from dfe_engine.api.deps import CurrentUser, refuse_unknown_orgs, require_platform_action
 from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
 from dfe_engine.auth.audit import audit_api_key_change
 from dfe_engine.auth.membership import groups_named
@@ -116,7 +116,7 @@ def _response_fields(key_meta: APIKey) -> dict:
     "",
     response_model=APIKeyCreatedResponse,
     status_code=201,
-    dependencies=[Depends(require_action(scopes_dict["api_key_write"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["api_key_write"]))],
 )
 async def create_api_key(
     body: CreateAPIKeyRequest,
@@ -169,7 +169,7 @@ ApiKeysList = Annotated[
 @router.get(
     "",
     response_model=Page[APIKeyResponse],
-    dependencies=[Depends(require_action(scopes_dict["api_key_read"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["api_key_read"]))],
 )
 async def list_api_keys(
     user: CurrentUser,
@@ -191,7 +191,7 @@ async def list_api_keys(
 @router.delete(
     "/{short_token}",
     status_code=204,
-    dependencies=[Depends(require_action(scopes_dict["api_key_delete"]))],
+    dependencies=[Depends(require_platform_action(scopes_dict["api_key_delete"]))],
 )
 async def revoke_api_key(
     short_token: str,
