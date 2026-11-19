@@ -308,6 +308,13 @@ class AppDescriptor:
     telemetry, so nothing the engine derives reads this.
     """
 
+    emits_telemetry: bool = True
+    """Whether the app emits scalo's telemetry, which its reporting status reads.
+
+    False for an app built on another stack: its status is unknown, never
+    not reporting.
+    """
+
     deployment_owned: dict[str, str] = field(default_factory=dict)
     """Config paths the deployment sets over the overlay, each with what sets it.
 
@@ -546,6 +553,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         detect_path=str(raw.get("detect_path", "")),
         config_file=_config_file_from(service, raw.get("consumes")),
         display_name=_display_name_from(service, raw.get("display_name")),
+        emits_telemetry=_emits_telemetry_from(service, raw.get("telemetry")),
         deployment_owned=_owned_paths_from(
             service, "deployment_owned", raw.get("deployment_owned")
         ),
@@ -630,6 +638,19 @@ def _display_name_from(service: str, raw: object) -> str:
             "omit the key to show the service id"
         )
     return raw.strip()
+
+
+def _emits_telemetry_from(service: str, raw: object) -> bool:
+    """Whether the manifest's ``telemetry`` key says the app emits scalo's telemetry.
+
+    ``scalo`` when absent. Anything but ``scalo`` or ``none`` is refused, so a
+    typo never hides an app's status.
+    """
+    if raw is None or raw == "scalo":
+        return True
+    if raw == "none":
+        return False
+    raise CatalogueError(f"{service}: telemetry must be scalo or none, got {raw!r}")
 
 
 def _reload_setting_from(service: str, raw: object, *, hot_reload: bool) -> str:
