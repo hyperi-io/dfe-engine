@@ -54,6 +54,7 @@ SINGLETONS = frozenset(
         "health",
         "identity",
         "ingest",
+        "organisation",
         "retention",
         "sensitive-attributes",
         "state",

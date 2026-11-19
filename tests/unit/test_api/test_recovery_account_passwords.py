@@ -49,6 +49,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from tests.support.accounts import session_token
+from tests.support.orgs import name_your_org
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_BREAKGLASS = secrets.token_urlsafe(16)
@@ -393,8 +394,8 @@ class TestRotate:
 
 
 def _complete_setup(app: FastAPI, settings: DFESettings) -> dict[str, str]:
-    """An organisation and an admin of the deployment's own: setup is complete."""
-    app.state.org_registry.create("acme", display_name="Acme")
+    """Your organisation and an admin of the deployment's own: setup is complete."""
+    name_your_org(app=app)
     return _alice(app, settings)
 
 

@@ -15,8 +15,8 @@ deployed receiver ran on its built-in defaults and every event landed in the
 default topic whatever the sources said.
 
 Tenancy is compiled the same way, from a :class:`~dfe_engine.orgs.tenancy.Tenancy`
-read once per pass: the default org's tenant id into the receiver, loader and
-fetcher, each fetched source's org into its fetcher, each ingest credential's orgs
+read once per pass: ``unassigned`` as the receiver's, loader's and fetcher's
+default tenant, each fetched source's org into its fetcher, each ingest credential's orgs
 into the receiver's ``ingest_bindings``, and each bearer listener's ``auth`` from
 the credentials that list it.
 
@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 from scalo.logger import logger
 
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
-from dfe_engine.orgs.models import DEFAULT_ORG_ID
+from dfe_engine.orgs.models import UNASSIGNED_ORG_ID
 from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, compile_ingest_bindings
 from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source, SourceTransform
@@ -326,7 +326,7 @@ def _fetched_tenant(source: Source, tenancy: Tenancy | None, app: AppDescriptor)
     """
     org = source.fetcher.org if source.fetcher is not None else None
     if org is None:
-        return DEFAULT_ORG_ID
+        return UNASSIGNED_ORG_ID
     try:
         return _required(tenancy, app).tenant_id(org)
     except UnknownOrgError as exc:
@@ -389,7 +389,7 @@ def _fetcher(
         "sources": polls,
         "output": output,
         "org_id": org_id,
-        "default_org_id": DEFAULT_ORG_ID,
+        "default_org_id": UNASSIGNED_ORG_ID,
     }
 
 

@@ -26,7 +26,6 @@ from dfe_engine.orgs.ingest_tokens import (
     sync_bearer_tokens,
 )
 from dfe_engine.orgs.registry import OrgRegistry
-from dfe_engine.orgs.seed import ensure_default_org
 from dfe_engine.secrets import build_secret_mirror, build_secrets
 from dfe_engine.settings import IngestSettings, SecretsSettings, _get_env_overrides
 from tests.support.local_kube_api import LocalKubeApi, local_kube_api, mirror_for
@@ -38,7 +37,7 @@ SA_TOKEN = "service-account-token-placeholder"
 @pytest.fixture
 def registry(tmp_path) -> OrgRegistry:
     registry = OrgRegistry(tmp_path / "orgs")
-    ensure_default_org(registry)
+    registry.create("default", display_name="Default", org_ids=["default"])
     registry.create("acme", org_ids=["acme-prod"])
     return registry
 

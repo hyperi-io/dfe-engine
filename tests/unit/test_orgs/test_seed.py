@@ -65,13 +65,13 @@ class TestSeedOrgs:
         assert seed_orgs(registry=registry, seeds=[]) == []
         assert registry.list() == []
 
-    def test_seeded_org_completes_the_organisations_setup_step(self, registry):
+    def test_a_seeded_org_alone_leaves_the_organisations_step_pending(self, registry):
+        # The step asks which org is yours, which seeding an org does not answer.
         seed_orgs(registry=registry, seeds=[SeedOrg(name="acme")])
 
         state = SETUP_MACHINE.evaluate(SetupContext(org_registry=registry))
 
-        assert STEP_ORGANISATIONS in state.completed_steps
-        assert STEP_ORGANISATIONS not in state.pending_steps
+        assert STEP_ORGANISATIONS in state.pending_steps
 
 
 def _hunts(tmp_path, stored: dict):

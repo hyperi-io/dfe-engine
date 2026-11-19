@@ -159,7 +159,7 @@ class ExternalConnection:
     sasl_mechanism: str
     credential_ref: str | None
     org: str | None
-    """The registered org the records belong to, None for the default org."""
+    """The registered org the records belong to, None for the ``unassigned`` tenant."""
 
     allowed_org_ids: tuple[str, ...]
     allowed_sources: tuple[str, ...]

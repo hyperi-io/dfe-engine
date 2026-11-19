@@ -86,23 +86,26 @@ async def _ensure_startup_topics(
 
 
 def _bootstrap_orgs(app: FastAPI, settings: DFESettings) -> None:
-    """Build the org registry, then make sure the reserved default org exists and seed the rest.
-
-    Raises:
-        ValueError: Another org holds the default org's tenant id, so every record
-            that names no org would be that org's to read.
-    """
+    """Build the org registry and where your org is named, then seed the orgs the settings name."""
     import os
     from pathlib import Path
 
     from dfe_engine.api.deps import get_hunt_config_registry_optional
+    from dfe_engine.orgs.home import HomeOrgStore
     from dfe_engine.orgs.registry import OrgRegistry
-    from dfe_engine.orgs.seed import ensure_default_org, seed_orgs
+    from dfe_engine.orgs.seed import seed_orgs
 
     config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
-    orgs_dir = Path(config_dir) / "orgs" if config_dir else Path("config") / "orgs"
-    app.state.org_registry = OrgRegistry(orgs_dir)
-    ensure_default_org(app.state.org_registry)
+    config_root = Path(config_dir) if config_dir else Path("config")
+    app.state.org_registry = OrgRegistry(config_root / "orgs")
+    app.state.org_registry.home = HomeOrgStore(
+        config_dir=config_root, crud=getattr(app.state, "gitcrud", None)
+    )
+    # Read once so sessions of root accounts are bound to your org from the first request.
+    try:
+        app.state.org_registry.home_name()
+    except ValueError as exc:
+        logger.warning("your organisation not read at startup", error=str(exc))
 
     try:
         seed_orgs(
@@ -591,12 +594,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Synthetic data service (synthetic reference streams, ceilings from settings)
     from dfe_engine.synthetic_data.autostart import start_autostart
+    from dfe_engine.synthetic_data.credential import stream_credential
     from dfe_engine.synthetic_data.service import SyntheticDataService
 
     app.state.synthetic_data = SyntheticDataService(settings.synthetic_data)
     # Standing demo streams - only when an operator configured autostart.
     app.state.synthetic_autostart = start_autostart(
-        app.state.synthetic_data, settings.synthetic_data
+        app.state.synthetic_data,
+        settings.synthetic_data,
+        credential=functools.partial(
+            stream_credential, registry=app.state.org_registry, secrets=app.state.dfe_secrets
+        ),
     )
 
     # Readiness reflects ClickHouse reachability. The engine's core paths

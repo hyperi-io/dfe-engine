@@ -25,15 +25,16 @@ TENANT_ID_PATTERN = r"^[^\s,\x00-\x1f\x7f](?:[^,\x00-\x1f\x7f]*[^\s,\x00-\x1f\x7
 
 TenantId = Annotated[str, StringConstraints(pattern=TENANT_ID_PATTERN)]
 
-DEFAULT_ORG_NAME = "default"
-"""The reserved org every record with no ``_org_id`` lands in. It cannot be deleted."""
+# The _org_id every app stamps on a record that names no org. No org may hold it, as a name or a tenant id.
+UNASSIGNED_ORG_ID = "unassigned"
 
-DEFAULT_ORG_ID = "default"
-"""The tenant id the default org's rows carry, compiled as ``default_org_id`` into every app."""
+UNASSIGNED_REFUSAL = (
+    f"{UNASSIGNED_ORG_ID!r} is the tenant of records that name no org, and no org may hold it"
+)
 
 
-class ReservedOrgError(ValueError):
-    """A write would delete the default org, disable it, or take its tenant id away."""
+class HomeOrgError(ValueError):
+    """A write would delete or disable your org, the organisation running this deployment."""
 
 
 class Org(BaseModel):

@@ -89,13 +89,13 @@ match:
 #   routes:                             # Fetched records that belong to ANOTHER source
 #     - match: {field: eventType, operator: starts_with, value: policy.}
 #       source: okta-policy             # Their landing, table and transform, not this source's
-#   org: acme                           # The registered org every fetched record belongs to, unset is the default org
+#   org: acme                           # The registered org every fetched record belongs to, unset is the unassigned tenant
 
 # An external source is written by the customer's own pipeline, which produces to
 # <source>_land past the receiver. Bus only. See external-pipelines.md.
 # external:
 #   credential_ref: vault:kv/acme/kafka/vector   # A reference only: vault:, bao:, openbao:, env: or file:
-#   org: acme                           # The registered org its records belong to, unset is the default org
+#   org: acme                           # The registered org its records belong to, unset is the unassigned tenant
 #   allowed_org_ids: []                 # Further tenant ids a record may keep in _org_id, any other is replaced
 #   allowed_sources: []                 # Further sources a record may keep in _source, any other is replaced
 

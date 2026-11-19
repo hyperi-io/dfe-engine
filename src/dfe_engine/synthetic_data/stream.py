@@ -23,10 +23,14 @@ import time
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+import httpx
 from scalo.logger import logger
 
 from dfe_engine.synthetic_data.models import SyntheticDataError
 from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
+
+# How long a batch the receiver refused waits before it is posted again.
+_REFUSED_RETRY_SECONDS = 1.0
 
 
 class EventSink(Protocol):
@@ -64,6 +68,8 @@ class HttpPostSink:
         batch_max: Events per POST (1 = one event per request).
         ndjson: Send batches as NDJSON lines instead of a JSON array.
         timeout: Per-request timeout seconds.
+        refused_until: Epoch second until which a 401 is retried, while the receiver
+            loads a token minted moments ago.
     """
 
     def __init__(
@@ -74,6 +80,7 @@ class HttpPostSink:
         batch_max: int = 10,
         ndjson: bool = False,
         timeout: float = 10.0,
+        refused_until: float = 0.0,
     ) -> None:
         if batch_max < 1:
             raise SyntheticDataError("batch_max must be >= 1")
@@ -82,6 +89,7 @@ class HttpPostSink:
         self.batch_max = batch_max
         self.ndjson = ndjson
         self.timeout = timeout
+        self.refused_until = refused_until
         self.sent = 0
         self.failed = 0
         self._buffer: list[dict[str, Any]] = []
@@ -111,17 +119,15 @@ class HttpPostSink:
             return
         batch, self._buffer = self._buffer, []
         try:
-            client = await self._get_client()
-            # The URL is passed whole: a base_url + "" join appends a trailing
-            # slash and 404s on exact-path ingest routes.
-            # The scalo client raises on non-2xx itself - no status check here.
-            if self.ndjson:
-                payload = "\n".join(json.dumps(e, default=str) for e in batch)
-                headers = {**self.headers, "Content-Type": "application/x-ndjson"}
-                await client.post(self.url, content=payload, headers=headers)
-            else:
-                body: Any = batch[0] if len(batch) == 1 else batch
-                await client.post(self.url, json=body, headers=self.headers)
+            while True:
+                try:
+                    await self._post(batch=batch)
+                    break
+                except httpx.HTTPStatusError as exc:
+                    wait = self.refused_until - time.time()
+                    if (exc.response.status_code != 401) or (wait <= 0):
+                        raise
+                    await asyncio.sleep(min(wait, _REFUSED_RETRY_SECONDS))
             self.sent += len(batch)
         except Exception as exc:
             # A demo stream must degrade, not die: count it and stream on.
@@ -129,6 +135,19 @@ class HttpPostSink:
             logger.warning(
                 "synthetic data POST failed", url=self.url, batch=len(batch), error=str(exc)
             )
+
+    async def _post(self, *, batch: list[dict[str, Any]]) -> None:
+        """POST one batch. The scalo client raises on a non-2xx answer."""
+        client = await self._get_client()
+        # The URL is passed whole: a base_url + "" join appends a trailing
+        # slash and 404s on exact-path ingest routes.
+        if self.ndjson:
+            payload = "\n".join(json.dumps(e, default=str) for e in batch)
+            headers = {**self.headers, "Content-Type": "application/x-ndjson"}
+            await client.post(self.url, content=payload, headers=headers)
+        else:
+            body: Any = batch[0] if len(batch) == 1 else batch
+            await client.post(self.url, json=body, headers=self.headers)
 
     async def aclose(self) -> None:
         """Release the HTTP client after the final flush."""

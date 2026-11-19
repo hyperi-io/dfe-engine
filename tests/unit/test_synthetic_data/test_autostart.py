@@ -13,8 +13,10 @@ import pytest
 from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
 from dfe_engine.settings import SyntheticDataSettings
 from dfe_engine.synthetic_data.autostart import run_standing_stream, start_autostart
+from dfe_engine.synthetic_data.credential import StreamCredential
 from dfe_engine.synthetic_data.models import StreamRequest
 from dfe_engine.synthetic_data.service import SyntheticDataService
+from tests.unit.test_synthetic_data.factories import make_stream_credential
 
 _SCHEMAS_ROOT = _resolve_package_schemas_root()
 SYSLOG = (_SCHEMAS_ROOT / "meta" / "syslog.yaml") if _SCHEMAS_ROOT else None
@@ -75,7 +77,7 @@ class TestRunStandingStream:
         segments = 0
         third = asyncio.Event()
 
-        async def fake_run_stream(request, *, task=None):
+        async def fake_run_stream(request, *, credential=None, task=None):
             nonlocal segments
             segments += 1
             if segments >= 3:
@@ -101,10 +103,29 @@ class TestRunStandingStream:
         with pytest.raises(asyncio.CancelledError):
             await task
 
+    async def test_each_segment_presents_the_credential(self):
+        def mint() -> StreamCredential:
+            return held
+
+        async def fake_run_stream(request, *, credential=None, task=None):
+            presented.append(credential)
+            raise asyncio.CancelledError
+
+        held = make_stream_credential(token="segment-token")
+        presented: list[StreamCredential | None] = []
+        svc = service()
+        svc.run_stream = fake_run_stream  # ty: ignore[invalid-assignment]  # the test replaces this service's stream segment
+        request = StreamRequest(
+            schema_ref="meta/syslog", receiver_url="http://127.0.0.1:9/ingest", count=1
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await run_standing_stream(svc, request, credential=mint, retry_seconds=0.05)
+        assert presented == [held]
+
     async def test_failed_segment_is_retried_not_fatal(self):
         calls = 0
 
-        async def failing_run_stream(request, *, task=None):
+        async def failing_run_stream(request, *, credential=None, task=None):
             nonlocal calls
             calls += 1
             raise RuntimeError("receiver refused")

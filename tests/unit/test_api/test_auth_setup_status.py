@@ -36,6 +36,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.orgs import name_your_org
 
 
 def _settings(tmp_path: Path) -> DFESettings:
@@ -82,12 +83,12 @@ def _deploy_repo_crud(tmp_path: Path) -> GitCrud:
 
 
 def _complete_setup(app) -> None:
-    """Satisfy every required step -- an organisation and a real user.
+    """Satisfy every required step -- your organisation and a real user.
 
     The admin password is minted here too, as a deployed engine's is, but it
     gates ``default_credentials`` rather than any wizard step.
     """
-    app.state.org_registry.create("acme", display_name="Acme")
+    name_your_org(app=app)
     app.state.account_store.create("alice", "a-strong-user-password", groups=["dfe-admins"])
     # The admin password is injected config, so moving off the default is a config change.
     app.state.settings.auth.local.admin_password = MINTED_ADMIN
@@ -265,7 +266,7 @@ def test_setup_status_step_details_carry_required_and_complete(tmp_path):
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.org_registry.create("acme", display_name="Acme")
+            name_your_org(app=app)
 
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
             details = {s["id"]: s for s in setup["step_details"]}
@@ -297,7 +298,7 @@ def test_setup_status_complete_when_all_required_steps_done(tmp_path):
 
 
 def test_setup_stays_complete_once_finished(tmp_path):
-    """Deleting the last org and user, then restarting, never reopens the wizard."""
+    """Deleting the last user, then restarting, never reopens the wizard."""
     settings = _settings(tmp_path)
     app = create_app(settings=settings)
     try:
@@ -305,14 +306,13 @@ def test_setup_stays_complete_once_finished(tmp_path):
             _complete_setup(app)
             assert client.get("/api/v1/auth/setup-status").json()["initial_setup"]["complete"]
 
-            app.state.org_registry.delete("acme")
             app.state.account_store.delete("alice")
 
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
             assert setup["complete"] is True
             assert setup["current_step"] is None
             assert setup["pending_steps"] == []
-            assert setup["completed_steps"] == []
+            assert setup["completed_steps"] == ["organisations"]
         _registries.clear()
 
         with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
@@ -342,7 +342,7 @@ def test_setup_status_partial_completion(tmp_path):
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.org_registry.create("acme", display_name="Acme")
+            name_your_org(app=app)
 
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
             assert setup["complete"] is False
@@ -387,11 +387,18 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
                 headers=admin,
             )
             assert created.status_code == 201, created.text
+            named = client.put(
+                "/api/v1/system/organisation",
+                json={"name": "northwind"},
+                headers={**admin, "If-None-Match": "*"},
+            )
+            assert named.status_code == 200, named.text
 
             body = client.get("/api/v1/auth/setup-status").json()
             assert body["initial_setup"]["complete"] is False
             assert "organisations" in body["initial_setup"]["completed_steps"]
             assert [o["name"] for o in body["organisations"]] == ["northwind"]
+            assert body["your_org"]["display_name"] == "Northwind"
 
             user = client.post(
                 "/api/v1/auth/accounts",
@@ -405,8 +412,9 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
             body = client.get("/api/v1/auth/setup-status").json()
             assert body["initial_setup"]["complete"] is True
             assert body["organisations"] == []
+            assert body["your_org"] is None
             listed = client.get("/api/v1/orgs", headers=admin).json()
-            assert [o["name"] for o in listed["items"]] == ["default", "northwind"]
+            assert [o["name"] for o in listed["items"]] == ["northwind"]
     finally:
         _registries.clear()
 
@@ -526,7 +534,7 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
     app = create_app(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.org_registry.create("acme", display_name="Acme")
+            name_your_org(app=app)
             for n in range(25):
                 app.state.account_store.put(Account(username=f"user{n:02d}", password_hash="x"))
             for n in range(20):

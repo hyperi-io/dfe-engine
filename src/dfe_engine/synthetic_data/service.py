@@ -14,8 +14,6 @@ progress reporting. Refs are containment-checked against the schemas root,
 so a traversal ref can never read outside it.
 """
 
-from __future__ import annotations
-
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,6 +43,7 @@ from dfe_engine.synthetic_data.stream import HttpPostSink, stream_events
 
 if TYPE_CHECKING:
     from dfe_engine.settings import SyntheticDataSettings
+    from dfe_engine.synthetic_data.credential import StreamCredential
 
 
 class SyntheticDataService:
@@ -182,8 +181,14 @@ class SyntheticDataService:
                 )
         self.resolve_ref(req.schema_ref)
 
-    async def run_stream(self, req: StreamRequest, *, task: Any = None) -> dict[str, Any]:
-        """Stream to the receiver as a TaskManager coroutine. Returns the summary."""
+    async def run_stream(
+        self,
+        req: StreamRequest,
+        *,
+        credential: StreamCredential | None = None,
+        task: Any = None,
+    ) -> dict[str, Any]:
+        """Stream to the receiver as a TaskManager coroutine, presenting *credential*'s token where one is given. Returns the summary."""
         factory = self.build_factory(
             req.schema_ref,
             version=req.version,
@@ -191,11 +196,17 @@ class SyntheticDataService:
             tags=req.tags,
             mark_synthetic=req.mark_synthetic,
         )
+        headers = dict(req.headers or {})
+        refused_until = 0.0
+        if credential is not None:
+            headers["Authorization"] = f"Bearer {credential.token}"
+            refused_until = credential.refused_until
         sink = HttpPostSink(
             req.receiver_url,
-            headers=req.headers,
             batch_max=req.batch_max,
+            headers=headers,
             ndjson=req.ndjson,
+            refused_until=refused_until,
         )
         rate = min(req.rate_eps or self.settings.default_rate_eps, self.settings.max_rate_eps)
         started = time.monotonic()

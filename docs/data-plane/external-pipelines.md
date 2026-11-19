@@ -145,7 +145,7 @@ Give the principal write on the one topic your pipeline writes, plus read on `_l
 
 Your pipeline sets `_org_id` and `_source` itself, and the loader holds them on your topic. That's what stops a pipeline writing into another tenant's data, or into another source's table.
 
-- **`_org_id`** is kept when it's the source's org (`org`, a registered org name, the default org when unset) or one listed in `allowed_org_ids`. Any other value is replaced with the source's org.
+- **`_org_id`** is kept when it's the source's org (`org`, a registered org name, the `unassigned` tenant when unset) or one listed in `allowed_org_ids`. Any other value is replaced with the source's org.
 - **`_source`** is kept when it's this source or one listed in `allowed_sources`. Any other value is replaced with this source, so the record lands in this source's table.
 
 Nothing is refused. A replaced record still lands, and the loader counts it in `loader_external_org_id_replaced_total` or `loader_external_source_replaced_total`. A climbing counter is a pipeline stamping labels it shouldn't, and you'll want to go and look.

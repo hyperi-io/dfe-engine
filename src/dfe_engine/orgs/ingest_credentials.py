@@ -32,6 +32,9 @@ from dfe_engine.yaml_utils import yaml_dump, yaml_load
 # dfe-receiver's is_credential_id: a ':' would split a token entry.
 CREDENTIAL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 
+# The engine's own credential, which its synthetic-data streams present. It never turns a listener's auth on.
+SYNTHETIC_DATA_CREDENTIAL = "dfe-engine-synthetic-data"
+
 IngestListener = Literal["http", "grpc", "otlp", "splunk_hec", "prometheus_rw"]
 """A dfe-receiver listener that authenticates a bearer token, by its transport label."""
 

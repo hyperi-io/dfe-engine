@@ -330,11 +330,13 @@ def test_searchable_organisations_are_local_and_fenced(tmp_path, monkeypatch):
         Organisations,
         searchable_organisation_names,
     )
-    from dfe_engine.orgs.models import DEFAULT_ORG_NAME
+    from dfe_engine.orgs.home import HomeOrgStore
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
-    orgs.create(DEFAULT_ORG_NAME, org_ids=["default"], display_name="Default")
+    orgs.home = HomeOrgStore(config_dir=tmp_path, crud=None)
+    orgs.create("default", display_name="Default", org_ids=["default"])
+    orgs.home.set(actor="test", name="default")
     seeder = Organisations(account_store=accounts, group_store=groups, org_registry=orgs)
 
     assert seeder.seed_searchable_organisations() is True
@@ -347,12 +349,13 @@ def test_searchable_organisations_are_local_and_fenced(tmp_path, monkeypatch):
         assert org.display_name == f"Searchable Organisation {num}"
         assert org.org_ids == [name]
         assert org.enabled is True
-    default = orgs.get(DEFAULT_ORG_NAME)
+    default = orgs.get("default")
     assert default is not None
     assert default.org_ids == ["default"]
 
+    # Your org is kept, so a reset leaves records naming no org somewhere to land.
     seeder.delete_all()
-    assert orgs.get(DEFAULT_ORG_NAME) is not None
+    assert orgs.get("default") is not None
     assert orgs.get(names[0]) is None
 
 

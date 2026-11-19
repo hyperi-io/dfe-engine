@@ -811,6 +811,24 @@
             "description": "Exact match on the OIDC provider name last used to log the account in"
           },
           {
+            "name": "org",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact match on the org the account belongs to, where your org also matches the root accounts naming none. Empty matches only the root accounts.",
+              "title": "Org"
+            },
+            "description": "Exact match on the org the account belongs to, where your org also matches the root accounts naming none. Empty matches only the root accounts."
+          },
+          {
             "name": "blocked",
             "in": "query",
             "required": false,
@@ -5789,7 +5807,7 @@
           "Organisations"
         ],
         "summary": "Delete Org",
-        "description": "Delete an organisation (admin only), and the ingest credentials it owns.\n\nEvery hunt naming the org loses its stored tenant ids first and keeps the name,\nso it fails as ``unknown_customers`` and holds its watermark until it is edited,\nrather than reading the rows the org left behind. A production+team posture\nroutes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.\n\nThe reserved ``default`` org cannot be deleted, nor can an org another org's\ningest credential binds or a fetched source names: each answers 409.",
+        "description": "Delete an organisation (admin only), and the ingest credentials it owns.\n\nEvery hunt naming the org loses its stored tenant ids first and keeps the name,\nso it fails as ``unknown_customers`` and holds its watermark until it is edited,\nrather than reading the rows the org left behind. A production+team posture\nroutes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.\n\nYour org cannot be deleted, nor can an org another org's ingest credential binds\nor a fetched source names: each answers 409.",
         "operationId": "orgs.delete",
         "parameters": [
           {
@@ -6122,7 +6140,7 @@
           "Ingest credentials"
         ],
         "summary": "Apply Ingest Credential",
-        "description": "Create an ingest credential and mint its token, or change what it binds.\n\n``If-None-Match: *`` creates it and answers 201 with the token, once.\n``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its\ntoken. A credential id is unique across every org, so creating one another org\nholds answers 409 ``credential_id_taken``. A binding the receiver could not\nhold answers 422 ``invalid_binding`` with a field error for each problem. A write\nanother one got to first answers 412 where its precondition no longer holds, else\n409 ``conflict``, and changes nothing.",
+        "description": "Create an ingest credential and mint its token, or change what it binds.\n\n``If-None-Match: *`` creates it and answers 201 with the token, once.\n``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its\ntoken. A credential id is unique across every org, so creating one another org\nholds answers 409 ``credential_id_taken``, as does the engine's own\n``dfe-engine-synthetic-data``. A binding the receiver could not\nhold answers 422 ``invalid_binding`` with a field error for each problem. A write\nanother one got to first answers 412 where its precondition no longer holds, else\n409 ``conflict``, and changes nothing.",
         "operationId": "orgs.ingest-credentials.apply",
         "parameters": [
           {
@@ -13813,6 +13831,268 @@
         }
       }
     },
+    "/api/v1/system/organisation": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Organisation",
+        "description": "Your org, the organisation running this deployment. The ETag is absent while none is named.",
+        "operationId": "system.organisation.get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YourOrganisation"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "The current entity-tag, for If-Match",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "home_org_unreadable: the doc cannot be read, PUT replaces it",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "system",
+          "resource": "organisation",
+          "hierarchy": [
+            "system",
+            "organisation"
+          ],
+          "verb": "get",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:read"
+        }
+      },
+      "put": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Put Organisation",
+        "description": "Name a registered, enabled org as yours, the organisation running this deployment.\n\n``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this\nis a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,\nelse that file under the config directory.",
+        "operationId": "system.organisation.apply",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Validate and report the change without committing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The current ETag: the write fails with 412 if it has changed",
+              "title": "If-Match"
+            },
+            "description": "The current ETag: the write fails with 412 if it has changed"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`*` to create: the write fails with 412 if the resource exists",
+              "title": "If-None-Match"
+            },
+            "description": "`*` to create: the write fails with 412 if the resource exists"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/YourOrganisationUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YourOrganisation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "A precondition failed: your org changed, or one is already named",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "unknown_org: no enabled org of that name is registered",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "precondition_required: send If-None-Match: * or If-Match",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: this engine holds no organisations",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "system",
+          "resource": "organisation",
+          "hierarchy": [
+            "system",
+            "organisation"
+          ],
+          "verb": "apply",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:write"
+        }
+      }
+    },
     "/api/v1/system/defaults": {
       "get": {
         "tags": [
@@ -16852,7 +17132,7 @@
           "synthetic-data"
         ],
         "summary": "Start Stream",
-        "description": "Start a stream task that posts generated events to an ingest URL.",
+        "description": "Start a stream task that posts generated events to an ingest URL.\n\nThe stream presents the engine's own ingest credential, minted for the primary org\non the first stream, unless the request's ``headers`` carry an ``Authorization``.",
         "operationId": "synthetic-data.stream",
         "requestBody": {
           "content": {
@@ -35464,7 +35744,7 @@
           "org": {
             "type": "string",
             "title": "Org",
-            "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty binds it to none, so it reads no org-bound view. The binding grants nothing itself: such a view also needs the org among those its groups grant.",
+            "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty makes it a root account, bound to your org (GET /system/organisation), or to none while no org is yours. The binding grants nothing itself: an org-bound view also needs the org among those its groups grant.",
             "default": ""
           },
           "external": {
@@ -38860,7 +39140,7 @@
           "org": {
             "type": "string",
             "title": "Org",
-            "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty binds it to none, so it reads no org-bound view. The binding grants nothing itself: such a view also needs the org among those its groups grant.",
+            "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty makes it a root account, bound to your org (GET /system/organisation), or to none while no org is yours. The binding grants nothing itself: an org-bound view also needs the org among those its groups grant.",
             "default": ""
           }
         },
@@ -40076,7 +40356,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the records belong to; null is the default org"
+            "description": "The registered org the records belong to; null is the unassigned tenant"
           },
           "allowed_org_ids": {
             "items": {
@@ -51238,7 +51518,18 @@
             },
             "type": "array",
             "title": "Organisations",
-            "description": "The organisation registry, bar the reserved default org. Empty once setup is complete."
+            "description": "The organisation registry. Empty once setup is complete."
+          },
+          "your_org": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Org"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Your organisation, the deployment's own. Null while none is named, and once setup is complete."
           },
           "break_glass": {
             "anyOf": [
@@ -52361,7 +52652,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the pipeline's records belong to. Unset is the default org. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+            "description": "The registered org the pipeline's records belong to. Unset is the unassigned tenant. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
           },
           "allowed_org_ids": {
             "items": {
@@ -52426,7 +52717,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is the default org"
+            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is the unassigned tenant"
           }
         },
         "type": "object",
@@ -53377,7 +53668,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the pipeline's records belong to. Unset is the default org. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+            "description": "The registered org the pipeline's records belong to. Unset is the unassigned tenant. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
           },
           "allowed_org_ids": {
             "items": {
@@ -55382,7 +55673,7 @@
               }
             ],
             "title": "Org",
-            "description": "Replace the org binding. The registered org the account belongs to, which its sessions carry as org_id. Empty binds it to none, so it reads no org-bound view. The binding grants nothing itself: such a view also needs the org among those its groups grant."
+            "description": "Replace the org binding. The registered org the account belongs to, which its sessions carry as org_id. Empty makes it a root account, bound to your org (GET /system/organisation), or to none while no org is yours. The binding grants nothing itself: an org-bound view also needs the org among those its groups grant."
           }
         },
         "type": "object",
@@ -56901,6 +57192,57 @@
         ],
         "title": "VrlRequest",
         "description": "Body for AI VRL drafted from raw log samples."
+      },
+      "YourOrganisation": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Your org's name. Null while none is named."
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Its display name. Null while none is named or the org is gone."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "display_name"
+        ],
+        "title": "YourOrganisation",
+        "description": "The org the deployment names as its own."
+      },
+      "YourOrganisationUpdate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Name",
+            "description": "A registered, enabled org's name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "YourOrganisationUpdate",
+        "description": "The registered org to name as yours."
       },
       "dfe_engine__api__v1__account_groups__AttributesRequest": {
         "properties": {

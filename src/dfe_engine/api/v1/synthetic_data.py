@@ -20,10 +20,12 @@ Reads need ``synthetic-data:read``. Generating or streaming needs ``synthetic-da
 A stream is an operation, polled at the ``Location`` its start answers.
 """
 
-from __future__ import annotations
+import functools
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from scalo.api import ACCEPTED_RESPONSES, ListParams, Page, ProblemError, accept, paginate
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.task_manager import (
@@ -33,8 +35,12 @@ from dfe_engine.api.task_manager import (
     TaskStatus,
     task_operation,
 )
+from dfe_engine.api.v1.orgs import reconcile_tenancy
+from dfe_engine.api.write_turn import write_turn
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.orgs.ingest_credentials import SYNTHETIC_DATA_CREDENTIAL
+from dfe_engine.synthetic_data.credential import StreamCredential, stream_credential
 from dfe_engine.synthetic_data.models import (
     GenerateRequest,
     GenerateResult,
@@ -66,6 +72,30 @@ def _task_manager(request: Request) -> TaskManager:
 
 def _bad_request(exc: SyntheticDataError) -> ProblemError:
     return ProblemError(400, str(exc), code="bad_synthetic_data_request")
+
+
+def _caller_authorises(*, body: StreamRequest) -> bool:
+    """Whether the request sends its own receiver auth, which the engine's credential then stays out of."""
+    return any(name.lower() == "authorization" for name in body.headers or {})
+
+
+async def _stream_credential(*, request: Request, user: Any) -> StreamCredential | None:
+    """The engine's synthetic-data credential, recompiling the receiver's bindings when this call mints it."""
+    state = request.app.state
+    registry = getattr(state, "org_registry", None)
+    secrets = getattr(state, "dfe_secrets", None)
+    if (registry is None) or (secrets is None):
+        return None
+    async with write_turn(request):
+        credential = await run_blocking(
+            functools.partial(stream_credential, registry=registry, secrets=secrets)
+        )
+        if (credential is not None) and credential.minted:
+            audit_resource_change(
+                user.user_id, "ingest_credential", SYNTHETIC_DATA_CREDENTIAL, "created"
+            )
+            await run_blocking(functools.partial(reconcile_tenancy, request, user))
+    return credential
 
 
 # -- endpoints --------------------------------------------------
@@ -116,7 +146,11 @@ def lookalike(body: LookalikeRequest, request: Request, user: CurrentUser) -> Ge
 async def start_stream(
     body: StreamRequest, request: Request, response: Response, user: CurrentUser
 ) -> TaskOperation:
-    """Start a stream task that posts generated events to an ingest URL."""
+    """Start a stream task that posts generated events to an ingest URL.
+
+    The stream presents the engine's own ingest credential, minted for the primary org
+    on the first stream, unless the request's ``headers`` carry an ``Authorization``.
+    """
     service = _service(request)
     try:
         # Fail fast on a bad request rather than burying it in a task.
@@ -138,7 +172,16 @@ async def start_stream(
             "cancel one or raise synthetic_data.max_concurrent_streams",
             code="too_many_streams",
         )
-    info = manager.submit(_TASK_KIND, service.run_stream, body, reportable=(SyntheticDataError,))
+    credential = None
+    if not (_caller_authorises(body=body)):
+        credential = await _stream_credential(request=request, user=user)
+    info = manager.submit(
+        _TASK_KIND,
+        service.run_stream,
+        body,
+        credential=credential,
+        reportable=(SyntheticDataError,),
+    )
     audit_resource_change(
         user.user_id,
         "synthetic-data",
