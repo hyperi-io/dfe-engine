@@ -475,6 +475,29 @@ class TestManifestParsing:
         with pytest.raises(CatalogueError, match="display_name must be a non-empty string"):
             load_catalogue(self._manifest(tmp_path, {"display_name": value}))
 
+    @pytest.mark.parametrize(
+        ("fields", "emits"),
+        [
+            ({"multiplicity": "single"}, True),
+            ({"telemetry": "scalo"}, True),
+            ({"telemetry": "none"}, False),
+        ],
+    )
+    def test_the_telemetry_key_says_whether_the_app_reports(self, tmp_path, fields, emits):
+        apps = load_catalogue(self._manifest(tmp_path, fields))
+
+        assert apps["dfe-thing"].emits_telemetry is emits
+
+    @pytest.mark.parametrize("value", ["otel", "None", False, ["none"]])
+    def test_a_telemetry_value_other_than_scalo_or_none_is_refused(self, tmp_path, value):
+        with pytest.raises(CatalogueError, match="telemetry must be scalo or none"):
+            load_catalogue(self._manifest(tmp_path, {"telemetry": value}))
+
+    def test_the_apps_on_another_stack_declare_no_telemetry(self):
+        silent = {service for service, app in load_catalogue().items() if not app.emits_telemetry}
+
+        assert silent == {"dfe-ui", "dfe-hyperdx"}
+
     def test_an_app_naming_no_idle_condition_always_has_work(self, tmp_path):
         apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))
 
