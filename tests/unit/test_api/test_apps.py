@@ -135,6 +135,23 @@ class TestCatalogue:
         assert labels["dfe-hyperdx"] == "Search"
         assert labels["dfe-loader"] is None
 
+    def test_an_app_with_no_telemetry_reports_an_unknown_status(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # A bare object has no execute(), so a status that queried the otel tables fails here.
+        from dfe_engine.api.deps import get_clickhouse_client
+
+        _wire(app, tmp_path)
+        app.dependency_overrides[get_clickhouse_client] = object
+        try:
+            resp = client.get("/api/v1/apps/dfe-hyperdx/default/status", headers=admin_headers)
+        finally:
+            app.dependency_overrides.pop(get_clickhouse_client)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reporting"] is None
+        assert resp.json()["telemetry_name"] == "dfe-hyperdx"
+
     def test_only_the_engine_lists_processes_of_its_own(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]

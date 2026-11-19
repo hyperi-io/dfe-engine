@@ -54200,8 +54200,16 @@
             "title": "Telemetry Name"
           },
           "reporting": {
-            "type": "boolean",
-            "title": "Reporting"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporting",
+            "description": "Whether the instance is reporting. Null for an app that emits no scalo telemetry (telemetry: none in the app manifest), whose state is unknown rather than not reporting."
           },
           "last_seen_epoch": {
             "anyOf": [

@@ -677,7 +677,13 @@ class StatusResponse(BaseModel):
     """Whether an instance is reporting telemetry, and since when."""
 
     telemetry_name: str
-    reporting: bool
+    reporting: bool | None = Field(
+        description=(
+            "Whether the instance is reporting. Null for an app that emits no "
+            "scalo telemetry (telemetry: none in the app manifest), whose state "
+            "is unknown rather than not reporting."
+        ),
+    )
     last_seen_epoch: float | None = None
     started_epoch: float | None = None
     uptime_seconds: float | None = None
@@ -2413,6 +2419,8 @@ def get_status(
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
     telemetry_name = _telemetry_name(app=app, process=process, settings=request.app.state.settings)
+    if process is None and not app.descriptor.emits_telemetry:
+        return StatusResponse(telemetry_name=telemetry_name, reporting=None)
     try:
         status = _reader(request, client).status(telemetry_name)
     except MetricsUnavailableError as exc:
