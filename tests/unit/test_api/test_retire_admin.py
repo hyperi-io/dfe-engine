@@ -40,6 +40,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from tests.support.accounts import session_token
+from tests.support.orgs import name_your_org
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_USER = secrets.token_urlsafe(16)
@@ -98,7 +99,7 @@ def _admin_after_its_change(client: TestClient, settings: DFESettings) -> dict[s
 
 def _complete_setup(app, *, admin_of_our_own: bool = True) -> None:
     """Satisfy every required step, optionally without an admin of the org's own."""
-    app.state.org_registry.create("acme", display_name="Acme")
+    name_your_org(app=app)
     groups = ["dfe-admins"] if admin_of_our_own else ["dfe-viewers"]
     app.state.account_store.create("alice", MINTED_USER, groups=groups)
     app.state.group_store.add_member(groups[0], "alice")

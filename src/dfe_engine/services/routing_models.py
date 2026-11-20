@@ -15,7 +15,6 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dfe_engine.orgs.models import DEFAULT_ORG_ID
 from dfe_engine.source.models import DEFAULT_LANDING_LABEL
 
 
@@ -31,6 +30,8 @@ class DlqConfig(BaseModel):
 
 SOURCE_FIELD = "_source"
 ORG_FIELD = "_org_id"
+# The receiver's and loader's built-in default_org_id. A compile always sets its own.
+APP_DEFAULT_ORG_ID = "default"
 
 RULE_TARGETS = (SOURCE_FIELD, ORG_FIELD)
 """The fields the receiver's rules set, in the order it evaluates them."""
@@ -134,7 +135,7 @@ class ReceiverRoutingConfig(BaseModel):
         default=DEFAULT_LANDING_LABEL, description="_source when no rule matches"
     )
     default_org_id: str = Field(
-        default=DEFAULT_ORG_ID,
+        default=APP_DEFAULT_ORG_ID,
         min_length=1,
         description="_org_id an unbound sender's records take, and the only org they may land in",
     )
@@ -303,7 +304,7 @@ class LoaderRoutingConfig(BaseModel):
     default_table: str = DEFAULT_LANDING_LABEL
     org_id_field: str | None = "_org_id"
     default_org_id: str = Field(
-        default=DEFAULT_ORG_ID,
+        default=APP_DEFAULT_ORG_ID,
         min_length=1,
         description="Tenant for a record whose org_id_field is absent, null or empty",
     )

@@ -15,7 +15,7 @@ configured.
 Wizard order (declared in :data:`SETUP_STEPS`)::
 
     oidc_provider    optional   configure an external IdP
-    organisations    required   create the first customer organisation
+    organisations    required   name your organisation, the deployment's own
     first_user       required   create a real user (NOT a seeded credential)
 
 A step applies when the thing it configures actually exists -- not when a
@@ -57,6 +57,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 from dfe_engine.auth import admin_retirement, setup_marker
 from dfe_engine.auth.account_durability import AccountGitState
@@ -72,7 +73,7 @@ from dfe_engine.auth.deployment_hints import (
 )
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.gitcrud import retention
-from dfe_engine.orgs.models import DEFAULT_ORG_NAME, Org
+from dfe_engine.orgs.models import Org
 
 if TYPE_CHECKING:
     from dfe_engine.auth.accounts import AccountStore
@@ -320,8 +321,12 @@ class SetupStatus(BaseModel):
     )
     organisations: list[Org] = Field(
         default_factory=list,
-        description="The organisation registry, bar the reserved default org. "
-        "Empty once setup is complete.",
+        description="The organisation registry. Empty once setup is complete.",
+    )
+    your_org: Org | None = Field(
+        default=None,
+        description="Your organisation, the deployment's own. Null while none is "
+        "named, and once setup is complete.",
     )
     # The JSON name stays break_glass: dfe-ui reads it. It reports the local admin.
     break_glass: AccountGitState | None = Field(
@@ -400,15 +405,22 @@ def _has_enabled_oidc_provider(ctx: SetupContext) -> bool:
     return any(provider.enabled for _, provider in ctx.oidc_providers)
 
 
-def _customer_orgs(ctx: SetupContext) -> list[Org]:
-    """The registry's orgs bar the reserved default org, which every deployment holds."""
-    if ctx.org_registry is None:
-        return []
-    return [org for org in ctx.org_registry.list() if org.name != DEFAULT_ORG_NAME]
+def _has_home_org(ctx: SetupContext) -> bool:
+    """Whether the deployment names a registered org as its own."""
+    return _home_org(ctx) is not None
 
 
-def _has_organisation(ctx: SetupContext) -> bool:
-    return bool(_customer_orgs(ctx))
+def _home_org(ctx: SetupContext) -> Org | None:
+    """Your org, None while none is named or the doc naming it cannot be read."""
+    registry = ctx.org_registry
+    if registry is None:
+        return None
+    try:
+        name = registry.home_name()
+    except Exception as exc:  # setup-status answers before login, so a bad doc reads as unset
+        logger.warning("your-organisation doc is unreadable", error=str(exc))
+        return None
+    return registry.get(name) if name is not None else None
 
 
 def _has_real_user(ctx: SetupContext) -> bool:
@@ -455,14 +467,13 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
     ),
     StepDefinition(
         id=STEP_ORGANISATIONS,
-        title="Create your first organisation",
+        title="Name your organisation",
         description=(
-            "Organisations scope tenant data and ClickHouse row-level security. "
-            "At least one is needed before data can be onboarded."
+            "Your organisation is the one running DFE. Organisations you serve are added later."
         ),
         applies=lambda ctx: ctx.org_registry is not None,
         required=lambda _ctx: True,
-        complete=_has_organisation,
+        complete=_has_home_org,
     ),
     StepDefinition(
         id=STEP_FIRST_USER,
@@ -586,6 +597,7 @@ class SetupStateMachine:
             initial_setup=state,
             oidc_providers=self._oidc_providers(ctx),
             organisations=self._organisations(ctx),
+            your_org=_home_org(ctx),
             break_glass=ctx.break_glass_git,
             default_credentials=default_credentials(ctx),
             deploy_kind=ctx.deploy_kind,
@@ -604,6 +616,7 @@ class SetupStateMachine:
             update={
                 "oidc_providers": self._enabled_oidc_login_options(ctx),
                 "organisations": [],
+                "your_org": None,
             }
         )
 
@@ -628,7 +641,7 @@ class SetupStateMachine:
 
     @staticmethod
     def _organisations(ctx: SetupContext) -> list[Org]:
-        return _customer_orgs(ctx)
+        return ctx.org_registry.list() if ctx.org_registry is not None else []
 
 
 SETUP_MACHINE = SetupStateMachine()

@@ -20,7 +20,7 @@ stops working whichever writer made the change.
 
 The receiver authenticates a listener only while an accepted credential lists it.
 :func:`compile_listener_auth` compiles ``mode: bearer`` on that listener's secret then,
-and ``mode: none`` otherwise, under which a record lands in the default org.
+and ``mode: none`` otherwise, under which a record lands under ``unassigned``.
 
 On Kubernetes the ``file`` backend writes under the engine's own volume, which no
 receiver pod can mount. With ``DFE_ENGINE_INGEST_BEARER_SECRET`` set, :func:`sync_bearer_tokens`
@@ -39,7 +39,12 @@ from typing import TYPE_CHECKING, Any, assert_never
 from scalo.logger import logger
 from scalo.secrets import SecretsError, SecretsManager
 
-from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential, IngestListener
+from dfe_engine.orgs.ingest_credentials import (
+    BEARER_LISTENERS,
+    SYNTHETIC_DATA_CREDENTIAL,
+    IngestCredential,
+    IngestListener,
+)
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.secrets import DfeSecrets, mirror_put
 
@@ -115,9 +120,9 @@ def compile_listener_auth(
 ) -> dict[IngestListener, dict[str, Any]]:
     """Each bearer listener's dfe-receiver ``auth`` block.
 
-    ``mode: bearer`` on the listener's secret while an accepted credential lists the
-    listener, else ``mode: none``, under which the receiver lands a record in the
-    default org. :func:`sync_bearer_tokens` writes the secret from the same accepted
+    ``mode: bearer`` on the listener's secret while an accepted credential other than
+    :data:`SYNTHETIC_DATA_CREDENTIAL` lists the listener, else ``mode: none``, under which the receiver lands a record under
+    ``unassigned``. :func:`sync_bearer_tokens` writes the secret from the same accepted
     credentials, so the mode and the secret agree on which ones a listener takes. The
     receiver re-reads it every :data:`BEARER_REFRESH_SECONDS`.
 
@@ -130,7 +135,8 @@ def compile_listener_auth(
     """
     listed: set[str] = set()
     for credential in accepted_credentials(tenancy):
-        listed.update(credential.listeners)
+        if credential.name != SYNTHETIC_DATA_CREDENTIAL:
+            listed.update(credential.listeners)
     return {
         listener: bearer_auth(listener, backend) if listener in listed else {"mode": "none"}
         for listener in BEARER_LISTENERS

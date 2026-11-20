@@ -1062,7 +1062,8 @@ class TestRouting:
         assert resp.json()["commit_sha"]
 
         doc = gc.get("helmvars", "dfe-receiver-default-values")
-        assert doc["config"]["routing"]["default_org_id"] == "default"
+        # No org is named as the deployment's own, so a record naming none is held unassigned.
+        assert doc["config"]["routing"]["default_org_id"] == "unassigned"
         # Every block lands: the rules that label a record, the orgs each
         # credential may write, and the set that says where a labelled one goes.
         assert doc["config"]["rules"]["targets"] == ["_source", "_org_id"]

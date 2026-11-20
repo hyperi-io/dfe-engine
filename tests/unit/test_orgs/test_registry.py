@@ -7,13 +7,18 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import inspect
+import re
 import time
 import typing
+from pathlib import Path
 
 import pytest
 
-from dfe_engine.orgs.models import Org
+from dfe_engine.orgs.home import PLAIN_FILE
+from dfe_engine.orgs.models import UNASSIGNED_REFUSAL, HomeOrgError, Org
 from dfe_engine.orgs.registry import OrgRegistry
+from tests.support.present import present
+from tests.unit.test_orgs.factories import make_home_org_store, make_org_registry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -288,6 +293,69 @@ class TestDelete:
         registry.delete("acme")
         assert registry.get("beta") is not None
         assert len(registry.list()) == 1
+
+
+@pytest.fixture
+def homed_registry(tmp_path: Path) -> OrgRegistry:
+    """A registry holding ``acme``, named as your org, and an ordinary org called ``default``."""
+    registry = make_org_registry(
+        home=make_home_org_store(config_dir=tmp_path), path=tmp_path / "orgs"
+    )
+    registry.create("acme")
+    registry.create("default", org_ids=["default"])
+    present(registry.home).set(actor="admin", name="acme")
+    return registry
+
+
+class TestUnassignedTenant:
+    @pytest.mark.parametrize(
+        ("name", "org_ids"),
+        [("unassigned", None), ("zeta", ["zeta", "unassigned"])],
+        ids=["as_a_name", "as_a_tenant_id"],
+    )
+    def test_rejects_a_create(self, registry: OrgRegistry, name: str, org_ids: list[str] | None):
+        with pytest.raises(ValueError, match=re.escape(UNASSIGNED_REFUSAL)):
+            registry.create(name, org_ids=org_ids)
+
+    def test_rejects_an_update(self, registry: OrgRegistry):
+        registry.create("acme")
+        with pytest.raises(ValueError, match=re.escape(UNASSIGNED_REFUSAL)):
+            registry.update("acme", org_ids=["acme", "unassigned"])
+
+
+class TestRefuseHomeDelete:
+    def test_rejects(self, homed_registry: OrgRegistry):
+        message = "Org 'acme' is your organisation: name another one as yours before deleting it"
+        with pytest.raises(HomeOrgError, match=message):
+            homed_registry.delete("acme")
+
+    def test_rejects_while_the_doc_is_unreadable(self, homed_registry: OrgRegistry, tmp_path: Path):
+        (tmp_path / PLAIN_FILE).write_text("name: [acme]\n", encoding="utf-8")
+        message = (
+            "Your organisation cannot be read, so no org is deleted or disabled until "
+            "PUT /api/v1/system/organisation replaces its doc"
+        )
+        with pytest.raises(HomeOrgError, match=re.escape(message)):
+            homed_registry.delete("default")
+
+    def test_an_org_named_default_deletes(self, homed_registry: OrgRegistry):
+        homed_registry.delete("default")
+        assert homed_registry.get("default") is None
+
+
+class TestRefuseHomeUpdate:
+    def test_rejects(self, homed_registry: OrgRegistry):
+        message = "Org 'acme' is your organisation and cannot be disabled"
+        with pytest.raises(HomeOrgError, match=message):
+            homed_registry.update("acme", enabled=False)
+
+    def test_accepts(self, homed_registry: OrgRegistry):
+        homed_registry.update("acme", display_name="Acme", org_ids=["acme-prod"])
+        assert present(homed_registry.get("acme")).org_ids == ["acme-prod"]
+
+    def test_an_org_named_default_disables(self, homed_registry: OrgRegistry):
+        homed_registry.update("default", enabled=False)
+        assert present(homed_registry.get("default")).enabled is False
 
 
 class TestANameThatIsAPath:

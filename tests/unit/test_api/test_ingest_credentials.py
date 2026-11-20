@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_ingest_credentials.py
-#  Purpose:      Tests for an org's ingest credentials and the reserved default org
+#  Purpose:      Tests for an org's ingest credentials and your org
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -27,7 +27,8 @@ from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
-from dfe_engine.orgs.ingest_credentials import IngestCredential
+from dfe_engine.orgs.home import PLAIN_FILE
+from dfe_engine.orgs.ingest_credentials import SYNTHETIC_DATA_CREDENTIAL, IngestCredential
 from dfe_engine.orgs.ingest_tokens import (
     BEARER_SECRET_PREFIX,
     CREDENTIAL_SECRET_PREFIX,
@@ -52,6 +53,15 @@ def orgs(client, admin_headers) -> None:
     for body in ({"name": "acme", "org_ids": ["acme-prod", "acme-dev"]}, {"name": "beta"}):
         resp = client.post("/api/v1/orgs", json=body, headers=admin_headers)
         assert resp.status_code == 201, resp.text
+
+
+def _name_your_org(client, headers, name):
+    """Name *name* as your org, as the console's first naming sends it."""
+    return client.put(
+        "/api/v1/system/organisation",
+        json={"name": name},
+        headers={**headers, "If-None-Match": "*"},
+    )
 
 
 def _create(client, headers, name="agents", **body):
@@ -128,6 +138,11 @@ class TestApplyCreates:
 
         assert resp.status_code == 409
         assert resp.json()["code"] == "credential_id_taken"
+
+    def test_the_engine_s_synthetic_data_id_is_409(self, client, admin_headers, orgs):
+        resp = _create(client, admin_headers, name=SYNTHETIC_DATA_CREDENTIAL)
+
+        assert (resp.status_code, resp.json()["code"]) == (409, "credential_id_taken")
 
     def test_creating_one_that_exists_is_412(self, client, admin_headers, orgs):
         _create(client, admin_headers)
@@ -520,7 +535,7 @@ class TestTheReceiverFollows:
                 "agents": {"orgs": ["acme-prod", "acme-dev", "beta"], "default_org": "beta"}
             }
         }
-        assert overlay["routing"]["default_org_id"] == "default"
+        assert overlay["routing"]["default_org_id"] == "unassigned"
 
     def test_a_deleted_credential_leaves_the_receiver(
         self, client, app, admin_headers, orgs, tmp_path
@@ -565,43 +580,146 @@ class TestTheReceiverFollows:
         assert bound == {"credentials": {"agents": {"orgs": ["acme-eu"], "default_org": "acme-eu"}}}
 
 
-class TestTheDefaultOrg:
-    def test_it_is_there_from_the_first_boot(self, client, admin_headers):
-        resp = client.get("/api/v1/orgs/default", headers=admin_headers)
+class TestYourOrg:
+    def test_a_fresh_boot_has_none(self, client, admin_headers):
+        resp = client.get("/api/v1/system/organisation", headers=admin_headers)
 
         assert resp.status_code == 200
-        assert resp.json()["org_ids"] == ["default"]
+        assert resp.json() == {"name": None, "display_name": None}
+        assert "ETag" not in resp.headers
+        assert client.get("/api/v1/orgs/default", headers=admin_headers).status_code == 404
 
-    def test_it_survives_a_delete(self, client, admin_headers):
+    def test_naming_one_reports_it(self, client, admin_headers, orgs):
+        resp = _name_your_org(client, admin_headers, "acme")
+
+        assert resp.status_code == 200, resp.text
+        read = client.get("/api/v1/system/organisation", headers=admin_headers)
+        assert read.json() == {"name": "acme", "display_name": ""}
+        assert read.headers["ETag"] == resp.headers["ETag"]
+
+    def test_changing_it_takes_the_current_etag(self, client, admin_headers, orgs):
+        etag = _name_your_org(client, admin_headers, "acme").headers["ETag"]
+
+        resp = client.put(
+            "/api/v1/system/organisation",
+            json={"name": "beta"},
+            headers={**admin_headers, "If-Match": etag},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["name"] == "beta"
+
+    @pytest.mark.parametrize(
+        ("precondition", "status"),
+        [({}, 428), ({"If-None-Match": "*"}, 412), ({"If-Match": '"stale"'}, 412)],
+        ids=["none", "create_over_one", "stale"],
+    )
+    def test_a_change_without_the_current_etag_is_refused(
+        self, client, admin_headers, orgs, precondition, status
+    ):
+        _name_your_org(client, admin_headers, "acme")
+
+        resp = client.put(
+            "/api/v1/system/organisation",
+            json={"name": "beta"},
+            headers={**admin_headers, **precondition},
+        )
+
+        assert resp.status_code == status
+        assert (
+            client.get("/api/v1/system/organisation", headers=admin_headers).json()["name"]
+            == "acme"
+        )
+
+    def test_a_dry_run_names_nothing(self, client, admin_headers, orgs):
+        resp = client.put(
+            "/api/v1/system/organisation?dry_run=true",
+            json={"name": "acme"},
+            headers={**admin_headers, "If-None-Match": "*"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["name"] == "acme"
+        assert (
+            client.get("/api/v1/system/organisation", headers=admin_headers).json()["name"] is None
+        )
+
+    @pytest.mark.parametrize("name", ["ghost", "beta"], ids=["unregistered", "disabled"])
+    def test_an_org_that_cannot_hold_records_is_refused(self, client, admin_headers, orgs, name):
+        client.put("/api/v1/orgs/beta", json={"enabled": False}, headers=admin_headers)
+
+        resp = _name_your_org(client, admin_headers, name)
+
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "unknown_org"
+
+    def test_an_unreadable_doc_is_reported_and_replaced(
+        self, client, admin_headers, api_settings, orgs
+    ):
+        doc = Path(api_settings.config_dir) / PLAIN_FILE
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text("- not\n- a mapping\n", encoding="utf-8")
+
+        read = client.get("/api/v1/system/organisation", headers=admin_headers)
+        deleted = client.delete("/api/v1/orgs/beta", headers=admin_headers)
+        replaced = _name_your_org(client, admin_headers, "acme")
+
+        assert (read.status_code, read.json()["code"]) == (409, "home_org_unreadable")
+        assert (deleted.status_code, deleted.json()["code"]) == (409, "home_org")
+        assert replaced.status_code == 200, replaced.text
+
+    def test_a_doc_naming_a_lost_org_is_replaced(self, client, admin_headers, api_settings, orgs):
+        doc = Path(api_settings.config_dir) / PLAIN_FILE
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text("name: ghost\n", encoding="utf-8")
+
+        read = client.get("/api/v1/system/organisation", headers=admin_headers)
+        replaced = _name_your_org(client, admin_headers, "acme")
+
+        assert ("ETag" in read.headers, read.json()["display_name"]) == (False, None)
+        assert replaced.status_code == 200, replaced.text
+
+    def test_it_survives_a_delete(self, client, admin_headers, orgs):
+        _name_your_org(client, admin_headers, "acme")
+
+        resp = client.delete("/api/v1/orgs/acme", headers=admin_headers)
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "home_org"
+        assert client.get("/api/v1/orgs/acme", headers=admin_headers).status_code == 200
+
+    def test_it_cannot_be_disabled(self, client, admin_headers, orgs):
+        _name_your_org(client, admin_headers, "acme")
+
+        resp = client.put("/api/v1/orgs/acme", json={"enabled": False}, headers=admin_headers)
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "home_org"
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("post", "/api/v1/orgs", {"name": "unassigned"}),
+            ("post", "/api/v1/orgs", {"name": "zeta", "org_ids": ["zeta", "unassigned"]}),
+            ("put", "/api/v1/orgs/acme", {"org_ids": ["unassigned"]}),
+        ],
+        ids=["as_a_name", "as_a_tenant_id", "added_later"],
+    )
+    def test_no_org_may_hold_unassigned(self, client, admin_headers, orgs, method, path, body):
+        resp = getattr(client, method)(path, json=body, headers=admin_headers)
+
+        assert resp.status_code == 422, resp.text
+        assert "no org may hold it" in resp.text
+
+    def test_an_org_named_default_is_ordinary(self, client, admin_headers):
+        client.post("/api/v1/orgs", json={"name": "default"}, headers=admin_headers)
+
         resp = client.delete("/api/v1/orgs/default", headers=admin_headers)
 
-        assert resp.status_code == 409
-        assert resp.json()["code"] == "reserved_org"
-        assert client.get("/api/v1/orgs/default", headers=admin_headers).status_code == 200
+        assert resp.status_code == 204, resp.text
 
-    def test_it_cannot_be_disabled(self, client, admin_headers):
-        resp = client.put("/api/v1/orgs/default", json={"enabled": False}, headers=admin_headers)
 
-        assert resp.status_code == 409
-        assert resp.json()["code"] == "reserved_org"
-
-    def test_it_cannot_lose_its_tenant_id(self, client, admin_headers):
-        resp = client.put(
-            "/api/v1/orgs/default", json={"org_ids": ["other"]}, headers=admin_headers
-        )
-
-        assert resp.status_code == 409
-        assert client.get("/api/v1/orgs/default", headers=admin_headers).json()["org_ids"] == [
-            "default"
-        ]
-
-    def test_no_other_org_may_take_its_tenant_id(self, client, admin_headers):
-        resp = client.post(
-            "/api/v1/orgs", json={"name": "acme", "org_ids": ["default"]}, headers=admin_headers
-        )
-
-        assert resp.status_code == 409
-
+class TestOrgDelete:
     def test_an_org_another_org_s_credential_binds_is_kept(self, client, admin_headers, orgs):
         _create(client, admin_headers, orgs=["acme", "beta"])
 

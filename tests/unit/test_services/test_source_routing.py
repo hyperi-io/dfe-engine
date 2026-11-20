@@ -494,7 +494,7 @@ class TestCompileReceiverRouting:
         config = compile_receiver_routing(registry)
         assert config.model_dump(mode="json", exclude_unset=True) == {
             "default_source": "main",
-            "default_org_id": "default",
+            "default_org_id": "unassigned",
             "topic_suffix": "_land",
             "source_to_topic": {},
             "source_org_id": "disallow",
@@ -522,7 +522,7 @@ class TestCompileLoaderRouting:
         )
         assert compiled == {
             "default_db": "prod",
-            "default_org_id": "default",
+            "default_org_id": "unassigned",
             "source_to_table": {
                 "filebeat": "filebeat",
                 "syslog": "syslog",

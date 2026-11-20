@@ -509,6 +509,19 @@ def provider_bindings(request: Request) -> dict[str, str]:
     return settings.auth.source_provider_bindings if settings is not None else {}
 
 
+def bound_org(*, account_org: str, request: Request) -> str:
+    """The org an account naming *account_org* is bound to: your org when it names none.
+
+    Your org is the name this replica last read or wrote, so a request never waits on the deploy repo for it. Empty while none is known, so single-org reads are refused rather than guessed.
+    """
+    if account_org:
+        return account_org
+    registry = getattr(request.app.state, "org_registry", None)
+    if registry is None:
+        return ""
+    return (registry.home_name_known()) or ("")
+
+
 def resolve_live_grants_for_user(
     request: Request, user_id: str, *, groups: Sequence[Group] | None = None
 ) -> GroupResolution:
@@ -701,7 +714,7 @@ async def get_current_user(request: Request) -> AuthContext:
         live = resolve_live_grants_for_user(request, oidc_subject, groups=listed)
         logger.debug("OIDC auth", user_id=oidc_subject, groups=live.groups, roles=live.roles)
         return AuthContext(
-            org_id=bound.org if bound is not None else "",
+            org_id=bound_org(account_org=bound.org, request=request) if bound is not None else "",
             user_id=oidc_subject,
             email=oidc_email,
             roles=live.roles,
@@ -811,7 +824,9 @@ async def get_current_user(request: Request) -> AuthContext:
         # The token's org_id, roles, groups and org_ids claims grant nothing: the bound account decides.
         live = resolve_live_grants_for_user(request, jwt_user_id)
         return AuthContext(
-            org_id=account.org if account is not None else "",
+            org_id=bound_org(account_org=account.org, request=request)
+            if account is not None
+            else "",
             user_id=jwt_user_id,
             email=jwt_email,
             roles=live.roles,

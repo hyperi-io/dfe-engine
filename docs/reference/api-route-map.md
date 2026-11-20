@@ -10,11 +10,11 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|
 | moved | 87 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 42 | Same method and path |
+| unchanged | 44 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 130 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 322 | |
+| total | 324 | |
 
 ## Questions
 
@@ -223,6 +223,8 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `GET /api/v1/system/defaults` | `GET /api/v1/system/defaults` | `system.defaults.get` | `dfe system defaults get` | `dfe_system_defaults_get` | unchanged | ui 2 |  |
 | `PATCH /api/v1/system/defaults` | `PUT /api/v1/system/defaults` | `system.defaults.apply` | `dfe system defaults apply` | `dfe_system_defaults_apply` | moved | ui 2 | PATCH folds into the apply, which takes the whole desired state. |
 | `GET /api/v1/system/defaults/drift` | `GET /api/v1/system/defaults/drift` | `system.defaults.drift` | `dfe system defaults drift` | `dfe_system_defaults_drift` | unchanged | ui 2 |  |
+| `GET /api/v1/system/organisation` | `GET /api/v1/system/organisation` | `system.organisation.get` | `dfe system organisation get` | `dfe_system_organisation_get` | unchanged | 0 |  |
+| `PUT /api/v1/system/organisation` | `PUT /api/v1/system/organisation` | `system.organisation.apply` | `dfe system organisation apply` | `dfe_system_organisation_apply` | unchanged | 0 |  |
 | `GET /api/v1/system/retention` | `GET /api/v1/system/retention` | `system.retention.get` | `dfe system retention get` | `dfe_system_retention_get` | unchanged | ui 2 |  |
 | `PUT /api/v1/system/retention` | `PUT /api/v1/system/retention` | `system.retention.apply` | `dfe system retention apply` | `dfe_system_retention_apply` | unchanged | ui 2 |  |
 | `GET /api/v1/system/schema` | `GET /api/v1/system/schema` | `system.schema` | `dfe system schema` | `dfe_system_schema` | unchanged | infra 98, docker 3 |  |

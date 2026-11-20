@@ -22,6 +22,7 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.retention import set_stored
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.orgs.home import HomeOrgStore
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.state_machines.setup import (
     SETUP_MACHINE,
@@ -43,11 +44,20 @@ def ctx(tmp_path: Path, monkeypatch) -> SetupContext:
     """A freshly bootstrapped deployment: seeded admin, nothing else configured."""
     accounts = AccountStore(tmp_path / "accounts")
     accounts.create("admin", "changeme", groups=["dfe-admins"])
+    orgs = OrgRegistry(tmp_path / "orgs")
+    orgs.home = HomeOrgStore(config_dir=tmp_path, crud=None)
     return SetupContext(
         account_store=accounts,
-        org_registry=OrgRegistry(tmp_path / "orgs"),
+        org_registry=orgs,
         oidc_registry=OIDCProviderRegistry(tmp_path / "oidc"),
     )
+
+
+def _name_your_org(ctx: SetupContext) -> None:
+    """Register ``acme`` and name it as the deployment's own."""
+    orgs = present(ctx.org_registry)
+    orgs.create("acme")
+    present(orgs.home).set(actor="test", name="acme")
 
 
 def _minted(ctx: SetupContext, **overrides) -> SetupContext:
@@ -71,7 +81,7 @@ def test_fresh_deployment_lands_on_the_first_required_step(ctx):
 
 
 def test_optional_oidc_never_blocks_completion(ctx):
-    ctx.org_registry.create("acme")
+    _name_your_org(ctx)
     ctx.account_store.create("alice", "a-strong-user-password")
 
     state = SETUP_MACHINE.evaluate(_minted(ctx))
@@ -356,7 +366,7 @@ def test_status_carries_the_default_ttl_from_the_context(ctx):
     assert SETUP_MACHINE.status(_minted(ctx, default_ttl_days=30)).default_ttl_days == 30
 
     # It survives completion: the console needs it long after the wizard is done.
-    ctx.org_registry.create("acme")
+    _name_your_org(ctx)
     ctx.account_store.create("alice", "a-strong-user-password")
     done = SETUP_MACHINE.status(_minted(ctx, default_ttl_days=0))
     assert done.initial_setup.complete is True
@@ -375,7 +385,7 @@ def _with_git(ctx: SetupContext, *, merged: bool) -> SetupContext:
 
 def test_an_unmerged_deploy_repo_no_longer_blocks_setup(ctx):
     """The admin password comes from the store the deployment injects, not from git."""
-    ctx.org_registry.create("acme")
+    _name_your_org(ctx)
     ctx.account_store.create("alice", "a-strong-user-password")
 
     state = SETUP_MACHINE.evaluate(_with_git(ctx, merged=False))
@@ -423,7 +433,7 @@ def test_first_run_finished_needs_every_required_step(
     ctx, has_org, has_user, accounts_loaded, expected
 ):
     if has_org:
-        ctx.org_registry.create("acme")
+        _name_your_org(ctx)
     if has_user:
         ctx.account_store.create("alice", "a-strong-user-password")
     live = ctx if accounts_loaded else replace(ctx, account_store=None)
@@ -442,6 +452,30 @@ def test_status_projects_the_registries_the_wizard_renders(ctx):
 
     assert [o.name for o in status.organisations] == ["acme"]
     assert [p.name for p in status.oidc_providers] == ["entra"]
+    assert status.your_org is None
+
+
+def test_status_carries_your_org_until_setup_is_complete(ctx):
+    _name_your_org(ctx)
+    assert present(SETUP_MACHINE.status(ctx).your_org).name == "acme"
+
+    ctx.account_store.create("alice", "a-strong-user-password")
+    assert SETUP_MACHINE.status(_minted(ctx)).your_org is None
+
+
+def test_a_served_org_alone_leaves_the_organisations_step_pending(ctx):
+    ctx.org_registry.create("acme")
+
+    assert STEP_ORGANISATIONS in SETUP_MACHINE.evaluate(ctx).pending_steps
+
+
+def test_an_unreadable_your_org_doc_reads_as_unset(ctx, tmp_path):
+    ctx.org_registry.create("acme")
+    doc = tmp_path / "governance" / "settings" / "organisation.yaml"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("- not\n- a mapping\n", encoding="utf-8")
+
+    assert STEP_ORGANISATIONS in SETUP_MACHINE.evaluate(ctx).pending_steps
 
 
 def test_status_never_carries_accounts(ctx):
@@ -473,7 +507,7 @@ def test_completed_setup_still_carries_the_password_hint(ctx):
     command = (
         "kubectl -n dfe get secret dfe-engine -o jsonpath='{.data.admin-password}' | base64 -d"
     )
-    ctx.org_registry.create("acme")
+    _name_your_org(ctx)
     ctx.account_store.create("alice", "a-strong-user-password")
 
     status = SETUP_MACHINE.status(
@@ -486,7 +520,7 @@ def test_completed_setup_still_carries_the_password_hint(ctx):
 
 
 def _complete(ctx: SetupContext) -> SetupContext:
-    present(ctx.org_registry).create("acme")
+    _name_your_org(ctx)
     present(ctx.account_store).create("alice", "a-strong-user-password")
     return _minted(ctx)
 

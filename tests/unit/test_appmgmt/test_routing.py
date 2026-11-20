@@ -33,7 +33,7 @@ from dfe_engine.source.alignment import MixedConnectorTypesError
 
 from .conftest import FakeRegistry
 
-# No org but the default and no ingest credential, as a fresh deployment starts.
+# No org and no ingest credential, as a fresh deployment starts.
 NO_TENANCY = Tenancy()
 
 # Two tenant-fenced orgs, one with a tenant id of its own, and a credential binding both.
@@ -307,7 +307,7 @@ class TestReceiverGolden:
         assert _receiver(fetched_registry, settings, TENANCY) == {
             "routing": {
                 "default_source": "main",
-                "default_org_id": "default",
+                "default_org_id": "unassigned",
                 "topic_suffix": "_land",
                 "source_to_topic": {},
                 "source_org_id": "disallow",
@@ -679,15 +679,15 @@ class TestLoaderStack:
         assert compiled == {
             "routing": {
                 "default_db": settings.clickhouse.effective_data_database,
-                "default_org_id": "default",
+                "default_org_id": "unassigned",
                 "source_to_table": {"filebeat": "filebeat"},
             }
         }
 
     def test_the_loader_needs_no_tenancy_to_compile(self, source_registry, settings):
-        # Its default org is the suite's constant, so a caller holding no orgs still compiles it.
+        # With no tenancy a record naming no org is held unassigned, so a caller holding no orgs still compiles it.
         compiled = routing.compile_for(catalogue.descriptor(LOADER), source_registry, settings)
-        assert compiled["routing"]["default_org_id"] == "default"
+        assert compiled["routing"]["default_org_id"] == "unassigned"
 
 
 class TestLoaderCapture:
@@ -865,8 +865,8 @@ class TestFetcherInstance:
                 }
             },
             "output": {"type": "kafka"},
-            "org_id": "default",
-            "default_org_id": "default",
+            "org_id": "unassigned",
+            "default_org_id": "unassigned",
         }
 
     def test_a_rest_source_nests_its_stanza_under_its_name(self, settings):
@@ -1104,7 +1104,10 @@ class TestFetcherInstance:
         assert routing.sync(app.descriptor, doc, fetched_registry, settings, instance="okta-audit")
         assert doc["config"]["sources"]["okta"]["topic"] == "okta-audit"
         assert doc["config"]["instance_id"] == "okta-audit"
-        assert (doc["config"]["org_id"], doc["config"]["default_org_id"]) == ("default", "default")
+        assert (doc["config"]["org_id"], doc["config"]["default_org_id"]) == (
+            "unassigned",
+            "unassigned",
+        )
 
 
 class TestFetcherOrg:
@@ -1122,7 +1125,7 @@ class TestFetcherOrg:
             tenancy=TENANCY,
         )
 
-        assert (compiled["org_id"], compiled["default_org_id"]) == ("acme-prod", "default")
+        assert (compiled["org_id"], compiled["default_org_id"]) == ("acme-prod", "unassigned")
 
     def test_an_org_with_no_tenant_ids_stamps_its_name(self, settings):
         compiled = routing.compile_for(

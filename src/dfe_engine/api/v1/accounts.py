@@ -45,6 +45,7 @@ from dfe_engine.api.deps import (
     Settings,
     _get_client_ip,
     account_for_session_subject,
+    bound_org,
     provider_bindings,
     refuse_unknown_orgs,
     require_action,
@@ -190,8 +191,9 @@ async def _persist_password(
 
 _ORG_DESCRIPTION = (
     "The registered org the account belongs to, which its sessions carry as org_id. "
-    "Empty binds it to none, so it reads no org-bound view. The binding grants nothing "
-    "itself: such a view also needs the org among those its groups grant."
+    "Empty makes it a root account, bound to your org (GET /system/organisation), or "
+    "to none while no org is yours. The binding grants nothing itself: an org-bound "
+    "view also needs the org among those its groups grant."
 )
 
 
@@ -589,6 +591,11 @@ async def list_accounts(
         None,
         description="Exact match on the OIDC provider name last used to log the account in",
     ),
+    org: str | None = Query(
+        None,
+        description="Exact match on the org the account belongs to, where your org also "
+        "matches the root accounts naming none. Empty matches only the root accounts.",
+    ),
     blocked: bool | None = Query(
         None,
         description="Filter by blocked status. Omitted returns every account.",
@@ -611,6 +618,11 @@ async def list_accounts(
         accounts = [account for account in accounts if account.blocked is blocked]
     if oidc_id is not None:
         accounts = [account for account in accounts if account.oidc_id == oidc_id]
+    if org is not None:
+        home = bound_org(account_org="", request=request)
+        accounts = [
+            account for account in accounts if org in (account.org, (account.org) or (home))
+        ]
     groups = request.app.state.group_store.list()
     rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
@@ -622,6 +634,7 @@ async def list_accounts(
         bound={
             "search": search,
             "oidc_id": oidc_id,
+            "org": org,
             "blocked": blocked,
             "include_core": include_core,
         },

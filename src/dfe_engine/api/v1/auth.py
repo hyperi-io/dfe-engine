@@ -23,6 +23,7 @@ from dfe_engine.api.deps import (
     Settings,
     _get_client_ip,
     bound_account,
+    bound_org,
     check_action,
     create_access_token,
     get_role_config,
@@ -344,7 +345,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     live = resolve_live_grants_for_user(request, auth_ctx.user_id)
     data = _token_data(
         auth_ctx.user_id,
-        auth_ctx.org_id,
+        bound_org(account_org=auth_ctx.org_id, request=request),
         auth_ctx.roles,
         live.grants,
         auth_ctx.groups,

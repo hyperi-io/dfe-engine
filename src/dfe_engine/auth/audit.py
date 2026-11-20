@@ -238,7 +238,7 @@ def audit_org_change(
     Args:
         admin_id: Identity of the admin performing the change.
         org_name: Name of the affected org.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
+        change: One of ``"created"``, ``"updated"``, ``"deleted"``, ``"home"``.
         details: Optional additional structured details.
     """
     logger.info(

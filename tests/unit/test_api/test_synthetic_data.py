@@ -14,9 +14,16 @@ service and no mocks - and assert degrade-not-die accounting.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import pytest
 
+from dfe_engine.orgs.ingest_credentials import SYNTHETIC_DATA_CREDENTIAL
+from dfe_engine.orgs.ingest_tokens import credential_secret_path
 from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
+from tests.support.orgs import name_your_org
 
 _SCHEMAS_ROOT = _resolve_package_schemas_root()
 SYSLOG = (_SCHEMAS_ROOT / "meta" / "syslog.yaml") if _SCHEMAS_ROOT else None
@@ -25,6 +32,29 @@ needs_packs = pytest.mark.skipif(
     SYSLOG is None or not SYSLOG.exists(),
     reason="dfe-schemas package without reference packs",
 )
+
+
+@pytest.fixture
+def receiver() -> Iterator[tuple[str, list[str]]]:
+    """A local ingest URL that takes every POST, and the Authorization header each one carried."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            seen.append(self.headers.get("Authorization", ""))
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(202)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            """Keep the request log out of the test output."""
+
+    seen: list[str] = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(daemon=True, target=server.serve_forever).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/ingest", seen
+    server.shutdown()
+    server.server_close()
 
 
 @needs_packs
@@ -167,6 +197,38 @@ class TestStream:
         assert summary["emitted"] == 5
         assert summary["failed"] == 5
         assert summary["sent"] == 0
+
+    @pytest.mark.parametrize(
+        ("named", "sent", "expected"),
+        [
+            (True, {}, "engine"),
+            (True, {"Authorization": "Bearer mine"}, "Bearer mine"),
+            (False, {}, ""),
+        ],
+        ids=["engine_credential", "caller_auth_stands", "no_primary_org"],
+    )
+    def test_receiver_auth(self, admin_headers, app, client, receiver, named, sent, expected):
+        url, seen = receiver
+        if named:
+            name_your_org(app=app)
+        r = client.post(
+            "/api/v1/synthetic-data/stream",
+            json={
+                "batch_max": 1,
+                "count": 2,
+                "headers": sent,
+                "rate_eps": 200,
+                "receiver_url": url,
+                "schema": "meta/syslog",
+                "wait": 30,
+            },
+            headers=admin_headers,
+        )
+        held = app.state.org_registry.ingest_credentials.get(SYNTHETIC_DATA_CREDENTIAL)
+        if expected == "engine":
+            token = app.state.dfe_secrets.get_or_none(credential_secret_path(credential=held))
+            expected = f"Bearer {token}"
+        assert (r.json()["response"]["sent"], set(seen)) == (2, {expected})
 
     def test_stream_task_is_pollable_and_listed(self, client, admin_headers):
         submit = client.post(

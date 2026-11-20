@@ -15,9 +15,8 @@ shutdown. Default configuration is empty, so nothing runs unless an operator
 turns it on.
 """
 
-from __future__ import annotations
-
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
@@ -26,6 +25,7 @@ from dfe_engine.synthetic_data.models import StreamRequest, SyntheticDataError
 
 if TYPE_CHECKING:
     from dfe_engine.settings import SyntheticDataSettings
+    from dfe_engine.synthetic_data.credential import StreamCredential
     from dfe_engine.synthetic_data.service import SyntheticDataService
 
 _RETRY_SECONDS = 30.0
@@ -36,12 +36,14 @@ async def run_standing_stream(
     service: SyntheticDataService,
     request: StreamRequest,
     *,
+    credential: Callable[[], StreamCredential | None] | None = None,
     retry_seconds: float = _RETRY_SECONDS,
 ) -> None:
-    """Stream one pack forever in bounded segments. Degrade and retry on errors."""
+    """Stream one pack forever in bounded segments, presenting the token *credential* gives each one. Degrade and retry on errors."""
     while True:
         try:
-            summary = await service.run_stream(request)
+            held = None if credential is None else await asyncio.to_thread(credential)
+            summary = await service.run_stream(request, credential=held)
             logger.info("standing synthetic stream segment complete", **summary)
         except asyncio.CancelledError:
             raise
@@ -55,9 +57,16 @@ async def run_standing_stream(
 
 
 def start_autostart(
-    service: SyntheticDataService, settings: SyntheticDataSettings
+    service: SyntheticDataService,
+    settings: SyntheticDataSettings,
+    *,
+    credential: Callable[[], StreamCredential | None] | None = None,
 ) -> list[asyncio.Task]:
-    """Launch a standing stream task per configured pack (none when unset)."""
+    """Launch a standing stream task per configured pack (none when unset).
+
+    A credential *credential* mints here reaches the receiver's bindings at the next
+    apps reconcile, and until then its records land under ``unassigned``.
+    """
     refs = [ref.strip() for ref in settings.autostart_schemas.split(",") if ref.strip()]
     if not refs:
         return []
@@ -85,7 +94,8 @@ def start_autostart(
             continue
         tasks.append(
             asyncio.get_running_loop().create_task(
-                run_standing_stream(service, request), name=f"synthetic-autostart:{ref}"
+                run_standing_stream(service, request, credential=credential),
+                name=f"synthetic-autostart:{ref}",
             )
         )
         logger.info(

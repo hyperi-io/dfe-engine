@@ -28,19 +28,24 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
 from dfe_engine.orgs.ingest_credentials import IngestCredential, IngestCredentialRegistry
 from dfe_engine.orgs.models import (
-    DEFAULT_ORG_ID,
-    DEFAULT_ORG_NAME,
     ORG_NAME_PATTERN,
+    UNASSIGNED_ORG_ID,
+    UNASSIGNED_REFUSAL,
+    HomeOrgError,
     Org,
-    ReservedOrgError,
 )
-from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
+from dfe_engine.orgs.tenant_scope import colliding_org
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump, yaml_load_cached
+
+if TYPE_CHECKING:
+    # The store reads gitcrud, which loads settings, which loads this package.
+    from dfe_engine.orgs.home import HomeOrgStore
 
 
 class OrgBoundError(ValueError):
@@ -70,6 +75,8 @@ class OrgRegistry:
         self.ingest_credentials = IngestCredentialRegistry(
             self._dir / "ingest-credentials", self._changed, self._credential_removed
         )
+        # Where your org is named. None leaves the registry with no org of its own.
+        self.home: HomeOrgStore | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -138,6 +145,8 @@ class OrgRegistry:
         path = self._path(name)
         if path.exists():
             raise OrgExistsError(f"Org already exists: {name}")
+        if UNASSIGNED_ORG_ID in (name, *(org_ids or [])):
+            raise ValueError(UNASSIGNED_REFUSAL)
         other = colliding_org(name, org_ids or [], self.list())
         if other is not None:
             raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
@@ -195,8 +204,7 @@ class OrgRegistry:
 
         Raises:
             KeyError: If no org with *name* exists.
-            ReservedOrgError: If the update would disable the default org or take
-                its tenant id away.
+            HomeOrgError: If the update would disable your org.
             ValueError: If the update's tenant ids collide with another org's
                 name or tenant ids, or one does not match ``TENANT_ID_PATTERN``.
         """
@@ -205,9 +213,11 @@ class OrgRegistry:
             raise KeyError(name)
 
         org = self._read(path)
-        refuse_reserved_update(org.model_copy(update=fields))
+        self.refuse_home_update(after=org.model_copy(update=fields))
 
         new_org_ids = fields.get("org_ids")
+        if isinstance(new_org_ids, list) and UNASSIGNED_ORG_ID in new_org_ids:
+            raise ValueError(UNASSIGNED_REFUSAL)
         if isinstance(new_org_ids, list):
             other = colliding_org(name, new_org_ids, self.list())
             if other is not None:
@@ -241,10 +251,10 @@ class OrgRegistry:
 
         Raises:
             KeyError: If no org with *name* exists.
-            ReservedOrgError: If *name* is the default org.
+            HomeOrgError: If *name* is your org.
             OrgBoundError: If another org's ingest credential binds *name*.
         """
-        refuse_reserved_delete(name)
+        self.refuse_home_delete(name=name)
         path = self._path(name)
         if not path.exists():
             raise KeyError(name)
@@ -254,9 +264,39 @@ class OrgRegistry:
         path.unlink()
         self._changed(name)
 
+    def home_name(self) -> str | None:
+        """Your org's name as its doc names it, None with no store or none named. Raises ``ValueError`` when the doc cannot be read."""
+        return self.home.get() if self.home is not None else None
+
+    def home_name_known(self) -> str | None:
+        """Your org's name as this replica last read or wrote it, for a caller that must not wait on the deploy repo."""
+        return self.home.known if self.home is not None else None
+
+    def refuse_home_delete(self, *, name: str) -> None:
+        """Raise ``HomeOrgError`` when *name* is your org, which records naming no org land in."""
+        if self._is_home(name=name):
+            raise HomeOrgError(
+                f"Org {name!r} is your organisation: name another one as yours before deleting it"
+            )
+
+    def refuse_home_update(self, *, after: Org) -> None:
+        """Raise ``HomeOrgError`` when *after*, the org as an update would write it, is your org disabled."""
+        if (not (after.enabled)) and self._is_home(name=after.name):
+            raise HomeOrgError(f"Org {after.name!r} is your organisation and cannot be disabled")
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _is_home(self, *, name: str) -> bool:
+        """Whether *name* is your org. An unreadable doc refuses with ``HomeOrgError``, since it may name *name*."""
+        try:
+            return self.home_name() == name
+        except ValueError as exc:
+            raise HomeOrgError(
+                f"Your organisation cannot be read, so no org is deleted or disabled until "
+                f"PUT /api/v1/system/organisation replaces its doc: {exc}"
+            ) from exc
 
     def _path(self, name: str) -> Path:
         """The file org *name* lives in.
@@ -293,19 +333,6 @@ class OrgRegistry:
 # ------------------------------------------------------------------
 
 
-def refuse_reserved_delete(name: str) -> None:
-    """Refuse to delete the default org, which every unbound record lands in.
-
-    Raises:
-        ReservedOrgError: If *name* is the default org.
-    """
-    if name == DEFAULT_ORG_NAME:
-        raise ReservedOrgError(
-            f"Org '{DEFAULT_ORG_NAME}' is reserved: every record that names no org lands in "
-            "it, so it cannot be deleted"
-        )
-
-
 def refuse_bound_delete(name: str, credentials: IngestCredentialRegistry) -> None:
     """Refuse to delete an org another org's ingest credential still binds.
 
@@ -319,27 +346,6 @@ def refuse_bound_delete(name: str, credentials: IngestCredentialRegistry) -> Non
         held = ", ".join(f"'{c.name}' of org '{c.org}'" for c in binding)
         raise OrgBoundError(
             f"Org '{name}' is bound by ingest credential {held}: take it out of their orgs first"
-        )
-
-
-def refuse_reserved_update(after: Org) -> None:
-    """Refuse an update that would leave the default org disabled or without its tenant id.
-
-    Args:
-        after: The org as the update would write it.
-
-    Raises:
-        ReservedOrgError: If *after* is the default org and is disabled or has lost
-            ``DEFAULT_ORG_ID``.
-    """
-    if after.name != DEFAULT_ORG_NAME:
-        return
-    if not after.enabled:
-        raise ReservedOrgError(f"Org '{DEFAULT_ORG_NAME}' is reserved and cannot be disabled")
-    if DEFAULT_ORG_ID not in org_tenant_ids(after):
-        raise ReservedOrgError(
-            f"Org '{DEFAULT_ORG_NAME}' is reserved and keeps the tenant id '{DEFAULT_ORG_ID}', "
-            "which every app stamps on a record that names no org"
         )
 
 
