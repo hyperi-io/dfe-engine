@@ -139,6 +139,8 @@ The deploy mints the credentials, the engine turns down defaults, and the UI nev
 
 `admin` takes its password from `DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by the deployment's secret store and issued with a forced change at first login. Every boot reasserts it until the admin replaces it, and after that on a rotation alone.
 
+Set `DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_MANAGED=true` when the operator chose that password and every rebuild must sign in with it. The admin then has no forced change, and every boot puts the configured password back whenever the stored one differs, as for a seed account, so a change made in the console lasts until the next restart. Leave it off for a password a tool minted into a shared file or Secret (dfe-docker `make init`, the chart). The trade-off: anyone who can write the variable can issue themselves the admin at the next boot, as they can with an unmanaged one before its first login or by rotating it. Turning it off again issues the configured password with a forced change. The default-password refusal and admin retirement apply either way.
+
 `breakglass` is the recovery admin, verified against a bcrypt hash committed at `governance/settings/auth.yaml` in the deploy repo, so it survives losing the engine, the UI and the secret store:
 
 ```yaml

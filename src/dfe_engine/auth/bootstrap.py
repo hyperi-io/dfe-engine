@@ -19,6 +19,9 @@ Two accounts are seeded from injected config, through ONE reconcile path:
                posture. Until then it is reasserted on every boot. After that it is
                issued again only when the injected value is neither the owner's
                password nor the one last issued (a rotation in the secret store).
+               With ``DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_MANAGED`` the operator chose
+               the password and keeps it, so it is reconciled as a named seed is: no
+               forced change, and config wins whenever the stored hash does not verify.
 ``breakglass`` the recovery admin, seeded from a hash committed in the deploy
                repo (:mod:`dfe_engine.auth.breakglass`).
 
@@ -38,6 +41,7 @@ Usage::
 
 import importlib.resources
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -231,6 +235,7 @@ def bootstrap_auth(
     auth_dir: Path,
     default_admin_password: str = "",
     default_admin_name: str = "",
+    admin_password_managed: bool = False,
     group_metrics: GroupMetrics | None = None,
     gitcrud: GitCrud | None = None,
     seed_accounts: list[SeedAccount] | None = None,
@@ -254,6 +259,8 @@ def bootstrap_auth(
             to ``changeme``.
         default_admin_name: Username for the local admin. Empty falls through
             to ``admin``.
+        admin_password_managed: The operator chose the admin password and keeps it,
+            so it is never issued with a forced change and config wins on every boot.
         group_metrics: Where the group store counts the group files it skips.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
             hydrated from it before the reconcile, an admin the reconcile created or
@@ -326,17 +333,20 @@ def bootstrap_auth(
                 email=seeded_account_email(admin_name, recovery_email),
             ),
         )
-    seeded = _reconcile_seed_accounts(account_store, group_store, specs, issued={admin_name})
+    issued = set() if admin_password_managed else {admin_name}
+    seeded = _reconcile_seed_accounts(account_store, group_store, specs, issued=issued)
 
     if retired:
         _disable_retired_admin(account_store, admin_name)
-    # Publish every boot that writes the admin's credential: an unpublished reset
-    # leaves the superseded hash in the deploy repo for hydration to put back, and
-    # the next boot resets it again.
-    elif admin_name in seeded:
-        admin = account_store.get(admin_name)
-        if admin is not None:
-            account_durability.publish_direct(gitcrud, admin, summary="seed account")
+    else:
+        cleared = admin_password_managed and _clear_issued_password(account_store, admin_name)
+        # Publish every boot that writes the admin's credential: an unpublished reset
+        # leaves the superseded hash in the deploy repo for hydration to put back, and
+        # the next boot resets it again.
+        if admin_name in seeded or cleared:
+            admin = account_store.get(admin_name)
+            if admin is not None:
+                account_durability.publish_direct(gitcrud, admin, summary="seed account")
 
     # The recovery admin: its hash lives in the deploy repo, not in config.
     from dfe_engine.auth import breakglass
@@ -368,6 +378,33 @@ def _disable_retired_admin(
         # protected name. The store refuses it from anywhere else.
         account_store.update(admin_name, enabled=False, allow_protected=True)
         logger.info(f"Local admin '{admin_name}' is retired; disabled the account")
+
+
+def _clear_issued_password(account_store: AccountStore, admin_name: str) -> bool:
+    """Drop the forced change and the issued digest from a managed admin.
+
+    The digest goes too, so turning the setting off again finds no issued password
+    and issues config's with a forced change.
+
+    Returns:
+        True when the account was written.
+    """
+    account = account_store.get(admin_name)
+    if account is None or not (account.password_change_required or account.seeded_password_hash):
+        return False
+    cleared = account.model_copy(
+        update={
+            "password_change_required": False,
+            "seeded_password_hash": "",
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    # Only the two issue fields change, so the protected-state floor has nothing to check.
+    account_store.put(cleared, allow_protected=True)
+    logger.info(
+        f"Local admin '{admin_name}' password is operator-managed; cleared the forced change"
+    )
+    return True
 
 
 def _seed_roles(dest: Path) -> None:
