@@ -20,8 +20,9 @@ takes an explicit ``offset`` that wins over the hash.
 
 KEDA can only wake the FIRST worker if "is any hunt due?" is answerable with NO
 worker running, i.e. as a ClickHouse query KEDA runs itself. The per-hunt schedule
-(interval + phase offset) is MATERIALISED into ``hunt_schedule`` at config-deploy time
-(an Argo post-sync hook, or the engine on a hunt-config change). The scaler query
+(interval + phase offset) is MATERIALISED into ``hunt_schedule``: a running hunt runner
+publishes it at start and on every spec reload, and ``dfe-hunt-runner materialise``
+writes it once. The scaler query
 counts due-and-unclaimed hunts with the SAME arithmetic the worker uses
 (``latest_fire``): for interval I and offset P, boundary = now // I * I, fire =
 boundary + P once now >= boundary + P, else boundary + P - I, and the hunt is due iff
@@ -309,11 +310,6 @@ def learned_offsets(
     return offsets
 
 
-def _enabled_ids(ch: Any, database: str) -> set[str]:
-    """hunt_ids currently materialised as enabled (for tombstone diffing)."""
-    return set(read_schedule(ch, database))
-
-
 def publish_schedule(
     ch: Any,
     database: str,
@@ -321,38 +317,42 @@ def publish_schedule(
     *,
     fraction: float = PHASE_SPREAD_FRACTION,
     offsets: Mapping[str, int] | None = None,
+    keep_learned: bool = False,
 ) -> int:
     """Materialise the schedule KEDA scales on. Returns live count.
 
-    Writes one enabled=1 row per live hunt carrying its offset from *offsets* where
-    that names it, else the SAME hash offset the worker computes, and tombstones
-    (enabled=0) any hunt that was enabled before but is absent now, so a deleted
-    hunt no longer wakes KEDA. The smoother passes the offsets it learned, and
-    ``dfe-hunt-runner materialise`` passes :func:`learned_offsets` of the live table
-    when smoothing is on, so neither overwrites what the other wrote.
+    Brings the table to one enabled=1 row per live hunt carrying its offset from
+    *offsets* where that names it, else the SAME hash offset the worker computes, and
+    tombstones (enabled=0) any hunt that was enabled before but is absent now, so a
+    deleted hunt no longer wakes KEDA. With *keep_learned*, an offset the table already
+    holds for a hunt whose interval is unchanged is kept (:func:`learned_offsets`), read
+    in the same snapshot the rows are compared against, so a smoother move between two
+    reads cannot be put back. The smoother passes the offsets it learned as *offsets*.
 
-    Idempotent: safe to call on every hunt-config change. A hunt removed and then
-    re-added writes a block identical to an earlier one, and it has to land over the
-    tombstone, so the insert keeps identical rows.
+    Idempotent, and writes only the rows that differ from the table. ``updated`` is
+    the smoother's per-hunt cool-down clock, so a hunt whose row is already right
+    keeps its clock, and a publish racing the smoother's move cannot put back an
+    offset the smoother just wrote. A hunt removed and then re-added writes a block
+    identical to an earlier one, and it has to land over the tombstone, so the insert
+    keeps identical rows.
     """
     ensure_schedule_schema(ch, database)
-    learned = offsets or {}
+    current = read_schedule(ch, database)
+    learned = dict(offsets or {})
+    if keep_learned:
+        learned = learned_offsets(current, specs) | learned
     rows: list[list[Any]] = []
     live_ids: set[str] = set()
     for spec in specs.values():
-        rows.append(
-            [
-                spec.hunt_id,
-                spec.interval_seconds,
-                effective_offset(
-                    spec.hunt_id, spec.interval_seconds, fraction, learned.get(spec.hunt_id)
-                ),
-                1,
-            ]
-        )
         live_ids.add(spec.hunt_id)
-    for gone in _enabled_ids(ch, database) - live_ids:
-        rows.append([gone, 0, 0, 0])  # tombstone: enabled=0, filtered before any intDiv
+        offset = effective_offset(
+            spec.hunt_id, spec.interval_seconds, fraction, learned.get(spec.hunt_id)
+        )
+        if current.get(spec.hunt_id) != (spec.interval_seconds, offset):
+            rows.append([spec.hunt_id, spec.interval_seconds, offset, 1])
+    gone = set(current) - live_ids
+    for hunt_id in gone:
+        rows.append([hunt_id, 0, 0, 0])  # tombstone: enabled=0, filtered before any intDiv
     if rows:
         ch.insert(
             "hunt_schedule",
@@ -360,6 +360,11 @@ def publish_schedule(
             column_names=_COLUMNS,
             database=database,
             settings=keep_identical_rows(ch),
+        )
+        logger.info(
+            "hunt_schedule written",
+            hunts=len(rows) - len(gone),
+            tombstoned=len(gone),
         )
     return len(live_ids)
 
