@@ -6273,7 +6273,7 @@
             "aliases": [],
             "positional": []
           },
-          "action": "org:write"
+          "action": "org:ingest_credentials:write"
         }
       },
       "delete": {
@@ -6415,7 +6415,7 @@
             "aliases": [],
             "positional": []
           },
-          "action": "org:write"
+          "action": "org:ingest_credentials:write"
         }
       }
     },
@@ -6566,7 +6566,7 @@
             "aliases": [],
             "positional": []
           },
-          "action": "org:write"
+          "action": "org:ingest_credentials:write"
         }
       }
     },
@@ -47555,6 +47555,7 @@
           "org:read",
           "org:write",
           "org:delete",
+          "org:ingest_credentials:write",
           "pipeline:read",
           "pipeline:write",
           "query:read",
@@ -47650,6 +47651,7 @@
           "org_read",
           "org_write",
           "org_delete",
+          "org_ingest_credentials_write",
           "pipeline_read",
           "pipeline_write",
           "query_read",

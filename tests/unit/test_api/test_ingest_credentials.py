@@ -37,7 +37,9 @@ from dfe_engine.orgs.ingest_tokens import (
 )
 from dfe_engine.settings import IngestSettings
 from tests.support.accounts import session_token
+from tests.support.held_callers import caller_in_group, define_role
 from tests.support.local_kube_api import local_kube_api, mirror_for
+from tests.support.present import present
 
 BASE = "/api/v1/orgs/acme/ingest-credentials"
 CREATE = {"If-None-Match": "*"}
@@ -355,6 +357,63 @@ class TestBindingAnotherOrg:
 
         assert resp.status_code == 201, resp.text
         assert resp.json()["orgs"] == ["acme", "beta"]
+
+
+# Columns: the caller's role, the request, then whether authorization lets it through.
+_ROLE_REACH = [
+    pytest.param("ingest_admin", "GET", BASE, None, True, id="ingest-list"),
+    pytest.param("ingest_admin", "PUT", f"{BASE}/feed", {}, True, id="ingest-create"),
+    pytest.param("ingest_admin", "POST", f"{BASE}/agents/rotate", None, True, id="ingest-rotate"),
+    pytest.param("ingest_admin", "DELETE", f"{BASE}/agents", None, True, id="ingest-delete"),
+    pytest.param("ingest_admin", "POST", "/api/v1/sources", "source", True, id="source-create"),
+    pytest.param(
+        "ingest_admin", "PUT", "/api/v1/sources/test-source", "source", True, id="source-edit"
+    ),
+    pytest.param("ingest_admin", "POST", "/api/v1/orgs", {"name": "gamma"}, False, id="org-create"),
+    pytest.param("ingest_admin", "DELETE", "/api/v1/orgs/beta", None, False, id="org-delete"),
+    pytest.param("ingest_admin", "GET", "/api/v1/hunts/status", None, False, id="hunts"),
+    pytest.param(
+        "ingest_admin", "POST", "/api/v1/queries/views/any/execute", {}, False, id="queries"
+    ),
+    pytest.param("ingest_admin", "GET", "/api/v1/helm/files", None, False, id="helm"),
+    pytest.param("infra_admin", "PUT", f"{BASE}/feed", {}, True, id="infra-admin-ingest-create"),
+    pytest.param("org_writer", "PUT", f"{BASE}/feed", {}, False, id="org-write-alone"),
+]
+
+
+class TestTheIngestAdminRole:
+    """``ingest_admin`` reaches ingest credentials and source edits, and nothing else."""
+
+    @pytest.mark.parametrize(("role", "method", "path", "body", "allowed"), _ROLE_REACH)
+    def test_what_authorization_lets_through(
+        self,
+        client,
+        app,
+        api_settings,
+        admin_headers,
+        orgs,
+        sample_source,
+        role,
+        method,
+        path,
+        body,
+        allowed,
+    ):
+        assert _create(client, admin_headers).status_code == 201
+        define_role(app, "org_writer", ["org:read", "org:write"], scoped=False)
+        caller = caller_in_group(app, api_settings, "machine-feed", roles=[role], org_ids=[])
+        json = sample_source if body == "source" else body
+
+        resp = caller.request(method, path, json=json, headers=CREATE if method == "PUT" else {})
+
+        if allowed:
+            assert resp.status_code not in (401, 403), resp.text
+            assert resp.status_code < 500, resp.text
+        else:
+            assert resp.status_code == 403, resp.text
+
+    def test_the_default_group_grants_it(self, client, app):
+        assert present(app.state.group_store.get("dfe-ingest")).roles == ["ingest_admin"]
 
 
 class TestADisabledOrg:

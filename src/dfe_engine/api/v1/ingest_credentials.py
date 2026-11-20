@@ -23,9 +23,10 @@ in place of the old one. Every mutation takes ``dry_run``. A mutation another wr
 gets to first changes nothing. It answers 412 where its precondition no longer holds,
 else 409 ``conflict``, and may be sent again as it is.
 
-Reads need ``org:read`` at the owning org's scope. Writes need ``org:write`` there,
-and at the scope of every other org the credential binds, because a credential
-writes into each of them.
+Reads need ``org:read`` at the owning org's scope. Writes need
+``org:ingest_credentials:write`` there, and at the scope of every other org the
+credential binds, because a credential writes into each of them. ``org:*`` grants
+it, ``org:write`` alone does not, so a role can hold it without org create and edit.
 """
 
 import functools
@@ -83,7 +84,7 @@ router = APIRouter(
 )
 
 _READ = Depends(require_org_action(scopes_dict["org_read"]))
-_WRITE = Depends(require_org_action(scopes_dict["org_write"]))
+_WRITE = Depends(require_org_action(scopes_dict["org_ingest_credentials_write"]))
 
 _RESOURCE = "ingest_credential"
 
@@ -256,10 +257,11 @@ def _desired(
 
 
 def _check_bound_orgs(request: Request, user: Any, credential: IngestCredential) -> None:
-    """``org:write`` at every org the credential binds beyond its owner, which the route checked."""
+    """``org:ingest_credentials:write`` at every org it binds beyond its owner, which the route checked."""
+    action = scopes_dict["org_ingest_credentials_write"]
     for bound in credential.orgs:
         if bound != credential.org:
-            check_action(request, user, scopes_dict["org_write"], scope=Scope(type="org", id=bound))
+            check_action(request, user, action, scope=Scope(type="org", id=bound))
 
 
 def _secrets_failure(exc: Exception) -> ProblemError:

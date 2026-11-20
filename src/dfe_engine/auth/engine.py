@@ -55,6 +55,7 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
         "hunt:execute",
         "hunt:read",
         "hunt:write",
+        "org:ingest_credentials:write",
         "org:read",
         "org:write",
         "query:execute",

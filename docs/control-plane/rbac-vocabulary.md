@@ -37,11 +37,12 @@ Roles are defined in `roles.yaml`. `scoped: true` means the role never reads acr
 | `data_analyst_viewer` | control | Analyst scope, read-only |
 | `data_viewer` | data | Search dashboards and query execution |
 | `dfe_operator` | control | Curated operational dials - invoke shipped actions, read governed state |
+| `ingest_admin` | control | Machine feeds: mint and rotate an org's ingest credentials (`org:ingest_credentials:write`), create and edit sources. No org create or delete |
 | `org_viewer` | data | Org-restricted data viewer (`scoped: true`) |
 
 `org_viewer` is the one role hard-tied to the org CRUD: a user or group holding it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the Observe iframe inside dfe-ui, dfe-hyperdx connects as that org's pinned ClickHouse user. That user's READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends ([rbac.md](rbac.md) sections 5 and 6).
 
-The engine SEEDS the first four default groups on bootstrap when the group store is empty.
+The engine SEEDS the first five default groups on bootstrap when the group store is empty.
 They are not suggestions: a fresh install has them, so every consumer can rely
 on them existing.
 
@@ -51,6 +52,7 @@ on them existing.
 | `dfe-analysts` | `data_analyst` | yes | Analyst control plane |
 | `dfe-viewers` | `data_viewer` | yes | Dashboards and query |
 | `dfe-infra` | `infra_admin` | yes | Service and deployment management |
+| `dfe-ingest` | `ingest_admin` | yes | Machine feeds, for an API key that mints ingest credentials and edits sources |
 | `dfe-infra-viewers` | `infra_viewer` | no | Infrastructure read-only |
 | `dfe-analyst-viewers` | `data_analyst_viewer` | no | Analyst read-only |
 | `dfe-operators` | `dfe_operator` | no | Curated ops dials |

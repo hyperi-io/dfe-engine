@@ -88,10 +88,12 @@ oidc_scopes = {
     "oidc_delete": "oidc:delete",
 }
 
+# ingest_credentials has three segments so org:write misses it and org:* or * grants it.
 org_scopes = {
     "org_read": "org:read",
     "org_write": "org:write",
     "org_delete": "org:delete",
+    "org_ingest_credentials_write": "org:ingest_credentials:write",
 }
 
 pipeline_scopes = {

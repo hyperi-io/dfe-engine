@@ -32,6 +32,7 @@ CREATE = {"If-None-Match": "*"}
 TENANT_PERMISSIONS = [
     "org:read",
     "org:write",
+    "org:ingest_credentials:write",
     "group:read",
     "group:write",
     "group:add_member",

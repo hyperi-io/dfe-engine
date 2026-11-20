@@ -224,6 +224,7 @@ _DEFAULT_GROUPS: dict[str, tuple[list[str], str]] = {
     "dfe-analysts": (["data_analyst"], "Hunt, query, source CRUD"),
     "dfe-viewers": (["data_viewer"], "Dashboard and query access"),
     "dfe-infra": (["infra_admin"], "Service and deployment management"),
+    "dfe-ingest": (["ingest_admin"], "Ingest credentials and source edits for machine feeds"),
 }
 
 
