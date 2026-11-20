@@ -41,7 +41,7 @@ from dfe_engine.auth.deployment_hints import (
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.settings import SeedAccount
+from dfe_engine.settings import LocalAuthSettings, SeedAccount, _get_env_overrides
 from dfe_engine.yaml_utils import yaml_load
 from tests.support.present import present
 
@@ -288,6 +288,77 @@ class TestAdminSeed:
         assert store.verify_password("admin", MINTED_ADMIN)
         assert store.verify_password("kay", MINTED_SEED)
         assert "admin" in present(groups.get("dfe-admins")).members
+
+
+# -- An operator-managed admin password -----------------------
+
+OWNERS_OWN = MINTED_ADMIN + "-the-owners-own"
+
+# Each boot rebuilds the live store from the deploy repo, as a recreated pod does.
+# Columns: the managed flag per boot, a password the owner sets after the first
+# boot, then the admin's password and forced change after the last boot.
+_MANAGED_BOOTS = [
+    pytest.param([False], None, MINTED_ADMIN, True, id="off"),
+    pytest.param([True], None, MINTED_ADMIN, False, id="on-fresh-store"),
+    pytest.param([False, True], OWNERS_OWN, MINTED_ADMIN, False, id="on-after-owners-change"),
+    pytest.param([False, True], None, MINTED_ADMIN, False, id="on-with-change-required"),
+    pytest.param([True, False], None, MINTED_ADMIN, True, id="on-then-off"),
+    pytest.param([False, True, False], OWNERS_OWN, MINTED_ADMIN, True, id="changed-on-then-off"),
+]
+
+
+class TestManagedAdminPassword:
+    @pytest.mark.parametrize(("boots", "owner_sets", "live", "change_required"), _MANAGED_BOOTS)
+    def test_the_admin_after_each_boot(
+        self, tmp_path: Path, crud, boots, owner_sets, live, change_required
+    ):
+        for boot, managed in enumerate(boots):
+            store, *_ = bootstrap_auth(
+                tmp_path / f"auth-{boot}",
+                default_admin_password=MINTED_ADMIN,
+                admin_password_managed=managed,
+                gitcrud=crud,
+            )
+            if boot == 0 and owner_sets:
+                store.reset_password("admin", owner_sets)
+                admin = present(store.get("admin"))
+                account_durability.publish_direct(crud, admin, summary="reset password")
+
+        admin = present(store.get("admin"))
+        assert store.verify_password("admin", live)
+        assert admin.password_change_required is change_required
+        assert crud.get("accounts", "admin")["password_change_required"] is change_required
+        if boots[-1]:
+            assert admin.seeded_password_hash == ""
+
+    def test_the_default_password_is_still_refused_outside_dev(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD", SHIPPED_DEFAULT)
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_MANAGED", "true")
+
+        local = LocalAuthSettings(**_get_env_overrides()["auth"]["local"])
+
+        assert local.admin_password_managed is True
+        with pytest.raises(DefaultCredentialsError):
+            require_admin_password(local.admin_password, "production")
+
+    def test_a_retired_admin_is_still_skipped(self, tmp_path: Path, crud):
+        store, *_ = bootstrap_auth(
+            tmp_path / "auth", default_admin_password=MINTED_ADMIN, gitcrud=crud
+        )
+        store.reset_password("admin", OWNERS_OWN)
+        account_durability.publish_direct(crud, present(store.get("admin")), summary="reset")
+        admin_retirement.set_retired(crud, "kaz")
+
+        store, *_ = bootstrap_auth(
+            tmp_path / "rebuilt-auth",
+            default_admin_password=MINTED_ADMIN,
+            admin_password_managed=True,
+            gitcrud=crud,
+        )
+
+        admin = present(store.get("admin"))
+        assert admin.enabled is False
+        assert store.verify_password("admin", OWNERS_OWN)
 
 
 # -- The break-glass hash, round-tripped through gitcrud ------

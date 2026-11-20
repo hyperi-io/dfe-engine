@@ -405,6 +405,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         auth_dir,
         default_admin_password=settings.auth.local.admin_password,
         default_admin_name=settings.auth.local.admin_name,
+        admin_password_managed=settings.auth.local.admin_password_managed,
         group_metrics=group_metrics,
         gitcrud=gitcrud,
         seed_accounts=settings.auth.local.seed_accounts,
