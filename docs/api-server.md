@@ -116,7 +116,7 @@ flowchart TB
 
 1. Routes and auth authenticate the request by trusted OIDC headers, an API key or a bearer token, and check its RBAC scope.
 2. The config registries read and write sources, hunts, rules, field maps, governance and app overlays. With GitOps on they live in the deploy repo, otherwise in directories under `DFE_CONFIG_DIR`.
-3. The compilers turn a source into the receiver's routing rules, the loader's table map, the table's DDL and its Sigma view, and turn Sigma rules into SQL.
+3. The compilers turn a source into the receiver's routing rules, the loader's table map, the table's DDL and its Sigma view. Behind the `sigma.enabled` beta, off by default, they turn Sigma rules into SQL ([#887](https://github.com/hyperi-io/dfe-engine/issues/887)).
 4. The GitOps writer makes one attributed commit per change.
 5. The provisioners apply the dfe-schemas manifest and each source's table, create Kafka topics, and keep the dfe-hyperdx sources and the ClickHouse roles and row policies in step.
 
