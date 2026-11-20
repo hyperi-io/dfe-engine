@@ -50,7 +50,13 @@ from ..clickhouse.quoting import plain_source_name, quote_identifier
 from ..schema.applier import SchemaApplyError, live_columns
 from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
-from .rule_condition import RuleCondition, RuleConditionError, compile_condition
+from .rule_condition import (
+    MAX_CONDITION_SQL_BYTES,
+    ORDERINGS,
+    RuleCondition,
+    RuleConditionError,
+    compile_condition,
+)
 from .rule_guard import (
     VolumeBand,
     VolumeMeasure,
@@ -557,19 +563,40 @@ class RuleCreationService:
             raise RuleConditionError(f"source {source!r} is not a table label: {exc}") from None
         if database:
             raise RuleConditionError(f"source {source!r} is a label, not a <db>.<table> name")
-        where = compile_condition(condition, self._table_columns(self._data_database, table))
+        columns = self._table_columns(self._data_database, table)
+        where = compile_condition(condition, columns)
         target = f"{quote_identifier(self._data_database)}.{quote_identifier(table)}"
+        # A negated time bound survives the rule read below, so each ordering test is read on its own.
+        bounds = [
+            bound
+            for test in condition.tests()
+            if test.operator in ORDERINGS
+            for bound in self._time_bounds(
+                target, compile_condition(test.model_copy(update={"negate": False}), columns)
+            )
+        ]
         sql = f"SELECT * FROM {target} WHERE {where}"  # noqa: S608 - quoted names, and operands quoted by compile_condition
+        if len(sql.encode()) > MAX_CONDITION_SQL_BYTES:
+            raise RuleConditionError(
+                f"the condition compiles to more than {MAX_CONDITION_SQL_BYTES} bytes of SQL, "
+                "which leaves the runner no room under ClickHouse's query size limit"
+            )
         # What the stored condition says must be what the runner runs, so a rule read of the SQL may not change it.
         parsed = self._rewriter.parse_user_sql(sql)
+        bounds = bounds or parsed.stripped_time_bounds
+        if bounds:
+            raise RuleConditionError(
+                "the hunt window bounds time for every rule, so a condition cannot compare a "
+                f"time column with lt, lte, gt or gte: {', '.join(bounds)}"
+            )
         if parsed.where_clause != where:
-            if parsed.stripped_time_bounds:
-                raise RuleConditionError(
-                    "the hunt window bounds time for every rule, so a condition cannot compare a "
-                    f"time column with lt, lte, gt or gte: {', '.join(parsed.stripped_time_bounds)}"
-                )
             raise RuleConditionError("reading the compiled condition as a rule changed it")
         return sql
+
+    def _time_bounds(self, target: str, where: str) -> list[str]:
+        """The time bounds a rule read takes out of ``where`` on ``target``."""
+        sql = f"SELECT * FROM {target} WHERE {where}"  # noqa: S608 - parsed only, never run
+        return self._rewriter.parse_user_sql(sql).stripped_time_bounds
 
     def _table_columns(self, database: str, table: str) -> frozenset[str] | None:
         """The table's column names, or None when no ClickHouse is configured or the table is absent.
