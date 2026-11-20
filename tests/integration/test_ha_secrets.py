@@ -231,9 +231,17 @@ def test_two_engines_on_one_openbao_mint_one_key_and_read_each_other_s_tokens(op
 
 def test_the_receiver_s_secret_source_names_the_bearer_secret_an_engine_wrote(openbao, engines):
     token = _signed_in(engines.a, engines.password)
+    # Boot creates no org, so the test registers the one it mints a credential for.
+    org = httpx.post(
+        f"{engines.a}/api/v1/orgs",
+        json={"name": "acme"},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    assert org.status_code == 201, org.text
 
     created = httpx.put(
-        f"{engines.a}/api/v1/orgs/default/ingest-credentials/agents",
+        f"{engines.a}/api/v1/orgs/acme/ingest-credentials/agents",
         json={"listeners": ["http"]},
         headers={"Authorization": f"Bearer {token}", "If-None-Match": "*"},
         timeout=30,
