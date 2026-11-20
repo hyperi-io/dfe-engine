@@ -319,6 +319,8 @@ routes = [
   { old = "POST /api/v1/system/defaults/apply", status = "decide", note = "defaults-apply" },
   { old = "GET /api/v1/system/defaults/drift", verb = "drift", status = "unchanged" },
   { old = "GET /api/v1/system/deployment", status = "decide", note = "deployment-facts" },
+  { old = "GET /api/v1/system/organisation", status = "unchanged" },
+  { old = "PUT /api/v1/system/organisation", status = "unchanged" },
   { old = "GET /api/v1/system/retention", status = "unchanged" },
   { old = "PUT /api/v1/system/retention", status = "unchanged" },
   { old = "GET /api/v1/system/schema", verb = "schema", status = "unchanged" },

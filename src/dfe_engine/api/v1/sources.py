@@ -114,7 +114,6 @@ from dfe_engine.git_identity import git_author
 from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.manifest import ManifestError
 from dfe_engine.orgs.ingest_tokens import resync_bearer_tokens
-from dfe_engine.orgs.models import DEFAULT_ORG_NAME
 from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.lock import SchemaLockBusyError, SchemaLockError, ddl_lease
@@ -1053,7 +1052,7 @@ class ExternalConnectionModel(BaseModel):
     )
     org: str | None = Field(
         default=None,
-        description="The registered org the records belong to; null is the default org",
+        description="The registered org the records belong to; null is the unassigned tenant",
     )
     allowed_org_ids: list[str] = Field(
         description="Further tenant ids a record may keep in _org_id; any other is replaced"
@@ -1321,11 +1320,12 @@ def source_is_readable(fetcher_org: str | None, has_fetcher: bool, held: set[str
     """Whether a source is readable by a caller held to ``held`` (None reads every org).
 
     A source definition is shared by every org, so only a fetcher source, which is
-    bound to one org (the default org when it names none), belongs to an org.
+    bound to one org, belongs to an org. One naming none lands under ``unassigned``, which no org holds,
+    so only a caller reading every org reads it.
     """
     if held is None or not has_fetcher:
         return True
-    return (fetcher_org or DEFAULT_ORG_NAME) in held
+    return (fetcher_org is not None) and (fetcher_org in held)
 
 
 def source_model_is_readable(source: Source, held: set[str] | None) -> bool:

@@ -61,6 +61,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.ingest_credentials import (
     BEARER_LISTENERS,
     CREDENTIAL_ID_PATTERN,
+    SYNTHETIC_DATA_CREDENTIAL,
     CredentialChangedError,
     CredentialIdTakenError,
     IngestCredential,
@@ -524,7 +525,8 @@ async def apply_ingest_credential(
     ``If-None-Match: *`` creates it and answers 201 with the token, once.
     ``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its
     token. A credential id is unique across every org, so creating one another org
-    holds answers 409 ``credential_id_taken``. A binding the receiver could not
+    holds answers 409 ``credential_id_taken``, as does the engine's own
+    ``dfe-engine-synthetic-data``. A binding the receiver could not
     hold answers 422 ``invalid_binding`` with a field error for each problem. A write
     another one got to first answers 412 where its precondition no longer holds, else
     409 ``conflict``, and changes nothing.
@@ -535,6 +537,13 @@ async def apply_ingest_credential(
             "A credential id is 1 to 128 letters, digits, '.', '_' or '-', starting with a "
             "letter or digit",
             code="invalid_credential_id",
+        )
+    if credential == SYNTHETIC_DATA_CREDENTIAL:
+        raise ProblemError(
+            409,
+            f"Ingest credential id {credential!r} is the engine's own, which its synthetic "
+            "data streams present",
+            code="credential_id_taken",
         )
     registry = _registry(request)
     _require_org(registry, org)

@@ -25,9 +25,9 @@ a tenant id a hunt still reads for another org, on main or on a review branch no
 merged, because in production+team the org is written while its hunts' rewrite waits
 on review.
 
-The ``default`` org is reserved: every record that names no org lands in it, so it
-cannot be deleted, disabled or lose its tenant id. An org another org's ingest
-credential binds, or a fetched source names, cannot be deleted either. The apps'
+Your org, the one every record that names no org lands in, cannot be deleted or
+disabled. An org another org's ingest credential binds, or a fetched source names,
+cannot be deleted either. The apps'
 tenancy is compiled from the orgs, so an update or delete is followed by the same
 reconcile a source write runs.
 """
@@ -36,7 +36,7 @@ import functools
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
@@ -63,13 +63,18 @@ from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.orgs.available_ids import OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
-from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org, ReservedOrgError, TenantId
+from dfe_engine.orgs.models import (
+    ORG_NAME_PATTERN,
+    UNASSIGNED_ORG_ID,
+    UNASSIGNED_REFUSAL,
+    HomeOrgError,
+    Org,
+    TenantId,
+)
 from dfe_engine.orgs.registry import (
     OrgBoundError,
     OrgRegistry,
     refuse_bound_delete,
-    refuse_reserved_delete,
-    refuse_reserved_update,
 )
 from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
 
@@ -93,6 +98,15 @@ class CreateOrgRequest(BaseModel):
         description="Tenant IDs for ClickHouse row-level security",
     )
 
+    @field_validator("name", "org_ids")
+    @classmethod
+    def _refuse_unassigned(cls, value: str | list[str]) -> str | list[str]:
+        """Refuse the tenant id records naming no org take, as the name or among the tenant ids."""
+        held = [value] if isinstance(value, str) else value
+        if UNASSIGNED_ORG_ID in held:
+            raise ValueError(UNASSIGNED_REFUSAL)
+        return value
+
 
 class UpdateOrgRequest(BaseModel):
     """Body for updating an org, where an omitted field keeps its value."""
@@ -100,6 +114,14 @@ class UpdateOrgRequest(BaseModel):
     display_name: str | None = Field(None, description="Human-readable label")
     org_ids: list[TenantId] | None = Field(None, description="Tenant IDs")
     enabled: bool | None = Field(None, description="Enable or disable the org")
+
+    @field_validator("org_ids")
+    @classmethod
+    def _refuse_unassigned(cls, value: list[str] | None) -> list[str] | None:
+        """Refuse the tenant id records naming no org take."""
+        if (value is not None) and (UNASSIGNED_ORG_ID in value):
+            raise ValueError(UNASSIGNED_REFUSAL)
+        return value
 
 
 class OrgResponse(BaseModel):
@@ -324,8 +346,8 @@ def _update_org(
     """Store the org's tenant ids in its hunts, then write the org.
 
     Raises:
-        ProblemError: 404 ``not_found``, 409 ``reserved_org`` for an update that would
-            disable the default org or take its tenant id, 409 ``conflict`` for a
+        ProblemError: 404 ``not_found``, 409 ``home_org`` for an update that would
+            disable your org, 409 ``conflict`` for a
             tenant id another org holds, or 409 ``tenant_id_held`` for one a hunt
             still reads for another org.
     """
@@ -333,9 +355,11 @@ def _update_org(
     if existing is None:
         raise ProblemError(404, f"Org '{name}' not found", code="not_found")
     try:
-        refuse_reserved_update(existing.model_copy(update=body.model_dump(exclude_none=True)))
-    except ReservedOrgError as exc:
-        raise ProblemError(409, str(exc), code="reserved_org") from exc
+        registry.refuse_home_update(
+            after=existing.model_copy(update=body.model_dump(exclude_none=True))
+        )
+    except HomeOrgError as exc:
+        raise ProblemError(409, str(exc), code="home_org") from exc
     if body.org_ids is not None:
         other = colliding_org(name, body.org_ids, registry.list())
         if other is not None:
@@ -380,8 +404,8 @@ async def delete_org(
     rather than reading the rows the org left behind. A production+team posture
     routes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.
 
-    The reserved ``default`` org cannot be deleted, nor can an org another org's
-    ingest credential binds or a fetched source names: each answers 409.
+    Your org cannot be deleted, nor can an org another org's ingest credential binds
+    or a fetched source names: each answers 409.
     """
     registry: OrgRegistry = request.app.state.org_registry
     outcome = await run_blocking(
@@ -400,17 +424,17 @@ def _delete_hunts_first(
     """Refuse a delete the org's dependants forbid, then take its tenant ids out of its hunts.
 
     Raises:
-        ProblemError: 404 ``not_found``, 409 ``reserved_org`` for the default org,
+        ProblemError: 404 ``not_found``, 409 ``home_org`` for your org,
             409 ``org_bound`` for one another org's ingest credential binds, or 409
             ``org_in_use`` for one a fetched source names.
     """
     if registry.get(name) is None:
         raise ProblemError(404, f"Org '{name}' not found", code="not_found")
     try:
-        refuse_reserved_delete(name)
+        registry.refuse_home_delete(name=name)
         refuse_bound_delete(name, registry.ingest_credentials)
-    except ReservedOrgError as exc:
-        raise ProblemError(409, str(exc), code="reserved_org") from exc
+    except HomeOrgError as exc:
+        raise ProblemError(409, str(exc), code="home_org") from exc
     except OrgBoundError as exc:
         raise ProblemError(409, str(exc), code="org_bound") from exc
     refuse_org_named_by_sources(name)

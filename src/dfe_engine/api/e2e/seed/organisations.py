@@ -17,7 +17,6 @@ from __future__ import annotations
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.api.e2e.seed.sources import SEED_ACTOR
 from dfe_engine.api.v1.orgs import refuse_held_tenant_ids, store_hunt_tenant_ids
-from dfe_engine.orgs.models import DEFAULT_ORG_NAME
 
 _DEFAULT_ORGANISATION_NAME = "organisation"
 _SEARCHABLE_COUNT = 50
@@ -36,16 +35,20 @@ class Organisations(Seed):
         name: str = _DEFAULT_ORGANISATION_NAME,
         display_name: str = _DEFAULT_ORGANISATION_NAME,
     ) -> bool:
-        """Seed a local organisation. Returns True when created, False when reset."""
-        return self._ensure_organisation(name, display_name=display_name)
+        """Seed a local organisation, named as yours while none is. Returns True when created, False when reset."""
+        created = self._ensure_organisation(name, display_name=display_name)
+        home = self._org_registry.home
+        if (home is not None) and (home.get() is None):
+            home.set(actor=SEED_ACTOR, name=name)
+        return created
 
     def seed_searchable_organisations(self) -> bool:
         """Create fifty local organisations the list can search by name or label.
 
         Returns True when any were written, False when all fifty were already there.
         Each takes its own name as its only tenant id, so none shares a fence with
-        the reserved default org or with ``seed_organisation``. A second call leaves
-        an existing org as it is. ``reset_all`` removes them with every other org.
+        your org or with ``seed_organisation``. A second call leaves an existing org
+        as it is. ``reset_all`` removes them with every other org but yours.
         """
         changed = False
         for num, name in enumerate(searchable_organisation_names()):
@@ -56,14 +59,15 @@ class Organisations(Seed):
         return changed
 
     def delete_all(self) -> None:
-        """Clear every org but the reserved default one, and the hunts' ids for each.
+        """Clear every org but yours, and the hunts' ids for each.
 
         The ingest credentials go first, so no org is left bound by another's.
         """
+        home_name = self._org_registry.home_name()
         for credential in self._org_registry.ingest_credentials.list():
             self._org_registry.ingest_credentials.delete(credential.name)
         for org in self._org_registry.list():
-            if org.name == DEFAULT_ORG_NAME:
+            if org.name == home_name:
                 continue
             store_hunt_tenant_ids(self._hunt_registry, org.name, None, SEED_ACTOR)
             self._org_registry.delete(org.name)

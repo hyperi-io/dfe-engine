@@ -8,9 +8,9 @@
 
 """What the data-plane apps are told about tenancy.
 
-A record's tenant is its ``_org_id``. A record that names none lands in the
-default org, so every app carries ``default_org_id`` and the engine compiles the
-same value into each of them. dfe-receiver also carries ``ingest_bindings``, the
+A record's tenant is its ``_org_id``. A record that names none takes ``unassigned``,
+which no org may hold, so every app carries ``default_org_id`` and
+the engine compiles the same value into each of them. dfe-receiver also carries ``ingest_bindings``, the
 orgs each ingest credential's records may land in, and dfe-fetcher the one tenant
 the source it polls belongs to. All of it is compiled from a :class:`Tenancy`
 read once per compile, so the apps never disagree about which org a tenant id is.
@@ -22,7 +22,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.orgs.ingest_credentials import IngestCredential
-from dfe_engine.orgs.models import DEFAULT_ORG_ID, Org
+from dfe_engine.orgs.models import UNASSIGNED_ORG_ID, Org
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 
@@ -71,13 +71,13 @@ class Tenancy:
         """The one ``_org_id`` a record bound to *org* is stamped with: its first tenant id.
 
         Args:
-            org: An org name, or None for the default org.
+            org: An org name, or None for ``UNASSIGNED_ORG_ID``.
 
         Raises:
             UnknownOrgError: No registered org is named *org*.
         """
         if org is None:
-            return DEFAULT_ORG_ID
+            return UNASSIGNED_ORG_ID
         return self.tenant_ids(org)[0]
 
 
@@ -104,7 +104,7 @@ def compile_ingest_bindings(tenancy: Tenancy) -> dict[str, Any]:
     """dfe-receiver's ``ingest_bindings`` block: each credential's enabled orgs as tenant ids.
 
     A credential binding an org the registry no longer holds is left out, so its
-    records may land in the default org alone, never in an org it was not given. So
+    records may land under ``unassigned`` alone, never in an org it was not given. So
     is a credential whose owning org is disabled, whose token no listener accepts. A
     disabled org is left out of every other binding, so no record lands in it.
 

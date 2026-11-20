@@ -21,7 +21,16 @@ from typing import Any, Literal
 from dfe_schemas import __version__ as schemas_version
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from scalo.api import ListParams, Page, ProblemError, paginate, scalo_extra
+from scalo.api import (
+    DryRun,
+    ListParams,
+    Page,
+    PreconditionHeaders,
+    ProblemError,
+    etag_of,
+    paginate,
+    scalo_extra,
+)
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
@@ -45,7 +54,7 @@ from dfe_engine.api.review import (
 from dfe_engine.api.v1.backing_services import BackingFacts, backing_facts
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
-from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.audit import audit_org_change, audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.gitcrud import GitCrud
@@ -65,6 +74,7 @@ from dfe_engine.gitcrud.table_defaults import (
 )
 from dfe_engine.gitcrud.table_defaults import resolve as resolve_defaults
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
+from dfe_engine.orgs.home import HomeOrgStore
 from dfe_engine.schema.applier import LiveTable, SchemaApplyError, live_tables
 from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.schema.retention import (
@@ -678,6 +688,124 @@ def put_retention(
             sources_skipped=outcome.sources_skipped,
         ),
     )
+
+
+# -- Your organisation ----------------------------------------
+
+
+class YourOrganisation(BaseModel):
+    """The org the deployment names as its own."""
+
+    name: str | None = Field(description="Your org's name. Null while none is named.")
+    display_name: str | None = Field(
+        description="Its display name. Null while none is named or the org is gone."
+    )
+
+
+class YourOrganisationUpdate(BaseModel):
+    """The registered org to name as yours."""
+
+    name: str = Field(min_length=1, description="A registered, enabled org's name.")
+
+
+def _home_etag(name: str | None) -> str | None:
+    """The entity-tag your org's doc answers with, None while none is named."""
+    return etag_of({"name": name}) if name is not None else None
+
+
+def _replaceable_home(request: Request, store: HomeOrgStore) -> str | None:
+    """The name the doc holds, None when it names none, cannot be read or names an org no longer registered, so a PUT replaces it.
+
+    A config directory lost with its orgs leaves the deploy repo's doc naming one, and the wizard then names a new org.
+    """
+    try:
+        name = store.get()
+    except ValueError as exc:
+        logger.warning("your-organisation doc is unreadable, a PUT replaces it", error=str(exc))
+        return None
+    if (name is not None) and (request.app.state.org_registry.get(name) is None):
+        logger.warning("your-organisation doc names an org no longer registered", org=name)
+        return None
+    return name
+
+
+def _home_store(request: Request) -> HomeOrgStore:
+    """The org registry's your-org store, else 503 ``not_configured``."""
+    registry = getattr(request.app.state, "org_registry", None)
+    if (registry is None) or (registry.home is None):
+        raise ProblemError(503, "This engine holds no organisations", code="not_configured")
+    return registry.home
+
+
+def _your_organisation(*, name: str | None, request: Request) -> YourOrganisation:
+    """*name* and its display name, as the registry holds it now."""
+    org = request.app.state.org_registry.get(name) if name is not None else None
+    return YourOrganisation(display_name=org.display_name if org is not None else None, name=name)
+
+
+@router.get(
+    "/organisation",
+    response_model=YourOrganisation,
+    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
+    responses={
+        409: {"description": "home_org_unreadable: the doc cannot be read, PUT replaces it"},
+    },
+)
+def get_organisation(user: CurrentUser, request: Request, response: Response) -> YourOrganisation:
+    """Your org, the organisation running this deployment. The ETag is absent while none is named."""
+    store = _home_store(request)
+    try:
+        name = request.app.state.org_registry.home_name()
+    except ValueError as exc:
+        raise ProblemError(
+            409,
+            f"Your organisation's doc cannot be read. PUT a name with If-None-Match: * "
+            f"to replace it: {exc}",
+            code="home_org_unreadable",
+        ) from exc
+    etag = _home_etag(_replaceable_home(request, store))
+    if etag is not None:
+        response.headers["ETag"] = etag
+    return _your_organisation(name=name, request=request)
+
+
+@router.put(
+    "/organisation",
+    response_model=YourOrganisation,
+    dependencies=[Depends(require_action(scopes_dict["org_write"])), WRITE_TURN],
+    responses={
+        412: {"description": "A precondition failed: your org changed, or one is already named"},
+        422: {"description": "unknown_org: no enabled org of that name is registered"},
+        428: {"description": "precondition_required: send If-None-Match: * or If-Match"},
+        503: {"description": "not_configured: this engine holds no organisations"},
+    },
+)
+def put_organisation(
+    body: YourOrganisationUpdate,
+    user: CurrentUser,
+    request: Request,
+    response: Response,
+    preconditions: PreconditionHeaders,
+    dry_run: DryRun,
+) -> YourOrganisation:
+    """Name a registered, enabled org as yours, the organisation running this deployment.
+
+    ``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this
+    is a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,
+    else that file under the config directory.
+    """
+    store = _home_store(request)
+    preconditions.check(_home_etag(_replaceable_home(request, store)))
+    org = request.app.state.org_registry.get(body.name)
+    if (org is None) or (not (org.enabled)):
+        raise ProblemError(422, f"No enabled org {body.name!r} is registered", code="unknown_org")
+    response.headers["ETag"] = etag_of({"name": body.name})
+    if dry_run:
+        return _your_organisation(name=body.name, request=request)
+    store.set(actor=user.user_id, name=body.name)
+    audit_org_change(admin_id=user.user_id, change="home", org_name=body.name)
+    logger.info("your organisation set via API", actor=user.user_id, org=body.name)
+    return _your_organisation(name=body.name, request=request)
 
 
 # -- Table defaults -------------------------------------------

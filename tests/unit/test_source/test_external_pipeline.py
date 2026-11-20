@@ -30,7 +30,7 @@ from dfe_engine.source.models import Source, SourceTransform, SourceWriteRequest
 from tests.unit.test_services.test_source_routing import FakeSourceRegistry
 
 TENANCY = Tenancy(
-    orgs=(Org(name="default", org_ids=["default"]), Org(name="acme", org_ids=["acme-prod"]))
+    orgs=(Org(name="default", org_ids=["default"]), Org(name="acme", org_ids=["acme-prod"])),
 )
 
 
@@ -213,10 +213,10 @@ class TestLoaderCompile:
             }
         ]
 
-    def test_no_org_is_the_default_org(self):
+    def test_no_org_is_unassigned(self):
         compiled = compile_loader_routing(FakeSourceRegistry([_origin()]), tenancy=TENANCY)
 
-        assert compiled.external_topics[0].org_id == "default"
+        assert compiled.external_topics[0].org_id == "unassigned"
 
     @pytest.mark.parametrize("tenancy", [TENANCY, None], ids=["unregistered", "no-tenancy"])
     def test_an_org_that_cannot_be_resolved_leaves_the_topic_out(self, tenancy):

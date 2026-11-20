@@ -13,7 +13,8 @@ running side by side would interleave those steps. The turn is awaited on the ev
 loop, so a queued write holds no worker thread and no read waits for it.
 """
 
-from collections.abc import AsyncIterator
+import contextlib
+from collections.abc import AsyncGenerator, AsyncIterator
 
 import anyio
 from fastapi import Depends, Request
@@ -23,11 +24,9 @@ from dfe_engine.api.metrics import ApiMetrics
 _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-async def take_write_turn(request: Request) -> AsyncIterator[None]:
-    """Hold a mutating request until no other one is in flight. Reads pass straight through."""
-    if request.method in _READ_METHODS:
-        yield
-        return
+@contextlib.asynccontextmanager
+async def write_turn(request: Request) -> AsyncGenerator[None]:
+    """Hold until no other mutating request is in flight, for a route that writes in only part of its work."""
     state = request.app.state
     lock = getattr(state, "write_turn", None)
     if lock is None:
@@ -40,7 +39,16 @@ async def take_write_turn(request: Request) -> AsyncIterator[None]:
         yield
 
 
+async def take_write_turn(request: Request) -> AsyncIterator[None]:
+    """Hold a mutating request until no other one is in flight. Reads pass straight through."""
+    if request.method in _READ_METHODS:
+        yield
+        return
+    async with write_turn(request):
+        yield
+
+
 WRITE_TURN = Depends(take_write_turn)
 """The dependency a router or route declares to put its writes in turn."""
 
-__all__ = ["WRITE_TURN", "take_write_turn"]
+__all__ = ["WRITE_TURN", "take_write_turn", "write_turn"]

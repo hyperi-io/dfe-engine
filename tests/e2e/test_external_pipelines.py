@@ -51,7 +51,7 @@ pytestmark = pytest.mark.live
 VECTOR_IMAGE = "timberio/vector:0.60.0-distroless-libc@sha256:a9ed9a4710bdc2efa66e94c1e8edc7b439709e6e50079f1e1b2b1bf479d387da"
 FLUENT_BIT_IMAGE = "fluent/fluent-bit:5.1.5@sha256:2740f387f6e68fab66d28e4fa6a853387b9cab6ffb4cb78958f69bba4eb0e7b4"
 
-DEFAULT_ORG_ID = "default"
+DEFAULT_ORG_ID = "unassigned"
 FOREIGN_ORG_ID = "not-this-sources-tenant"
 KINDS = ("compliant", "bare", "foreign")
 LANDING_WAIT = 240.0
@@ -178,7 +178,7 @@ def cleanup(engine: EngineAPI, e2e: E2EConfig, ch_client) -> Iterator[list[str]]
     names: list[str] = []
     yield names
     for name in names:
-        engine.call("DELETE", f"/api/v1/sources/{name}", None)
+        engine.call("DELETE", f"/sources/{name}", None)
         drop_table(ch_client, e2e.ch_db, name)
 
 
@@ -192,11 +192,11 @@ def _deployed(engine: EngineAPI, name: str, **shape) -> dict:
         "schema_config": {"engine": "MergeTree"},
         **shape,
     }
-    created = engine.call("POST", "/api/v1/sources", body)
+    created = engine.call("POST", "/sources", body)
     assert created.status_code == 201, created.text
-    deployed = engine.call("POST", f"/api/v1/sources/{name}/deploy", None)
+    deployed = engine.call("POST", f"/sources/{name}/deploy", None)
     assert deployed.status_code == 200, deployed.text
-    connection = engine.json("GET", f"/api/v1/sources/{name}")["connection"]
+    connection = engine.json("GET", f"/sources/{name}")["connection"]
     assert connection is not None, "an external source publishes its connection block"
     return connection
 
@@ -295,7 +295,7 @@ def test_fluent_bit_as_the_transform(engine, e2e, ch_client, cleanup) -> None:
         post_events(e2e, [{**record, "e2e_route": name} for record in records(name, marker)])
         _assert_landed(ch_client, e2e, name, marker)
         lag = poll_until(
-            lambda: engine.json("GET", f"/api/v1/sources/{name}/lag"),
+            lambda: engine.json("GET", f"/sources/{name}/lag"),
             done=lambda reading: reading["lag"] == 0,
             timeout=60,
             desc=f"{connection['consumer_group']} to commit past every record",

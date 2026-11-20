@@ -18,11 +18,10 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.appmgmt import appconfig, catalogue, instances, routing
-from dfe_engine.orgs.ingest_credentials import IngestCredential
+from dfe_engine.orgs.ingest_credentials import SYNTHETIC_DATA_CREDENTIAL, IngestCredential
 from dfe_engine.orgs.ingest_tokens import store_token, sync_bearer_tokens
 from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.registry import OrgRegistry
-from dfe_engine.orgs.seed import ensure_default_org
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.secrets import build_secrets
 from dfe_engine.services.registry import default_configs
@@ -63,6 +62,13 @@ AGENTS = IngestCredential(
 )
 HEC = IngestCredential(
     name="beta-hec", org="beta", orgs=["beta"], default_org="beta", listeners=["splunk_hec"]
+)
+SYNTHETIC = IngestCredential(
+    name=SYNTHETIC_DATA_CREDENTIAL,
+    org="acme",
+    orgs=["acme"],
+    default_org="acme",
+    listeners=["http"],
 )
 TENANCY = Tenancy(orgs=ORGS, credentials=(AGENTS, HEC))
 NO_CREDENTIAL = Tenancy(orgs=ORGS)
@@ -171,9 +177,13 @@ class TestLiveCredentials:
         orphaned = Tenancy(orgs=ORGS[:2], credentials=(HEC,))
         assert _auth(settings, orphaned) == dict.fromkeys(BLOCKS, NONE)
 
+    def test_the_engine_s_synthetic_data_credential_turns_no_listener_on(self, settings):
+        synthetic = Tenancy(orgs=ORGS, credentials=(SYNTHETIC,))
+        assert _auth(settings, synthetic) == dict.fromkeys(BLOCKS, NONE)
+
     def test_a_synced_overlay_follows_the_org_switch(self, tmp_path, settings):
         registry = OrgRegistry(tmp_path / "orgs")
-        ensure_default_org(registry)
+        registry.create("default", display_name="Default", org_ids=["default"])
         registry.create("acme")
         registry.ingest_credentials.put(AGENTS)
         app = catalogue.descriptor(RECEIVER)
@@ -206,7 +216,7 @@ class TestFileMount:
         root = tmp_path / "secrets"
         backend = SecretsSettings(provider="file", path=str(root))
         registry = OrgRegistry(tmp_path / "orgs")
-        ensure_default_org(registry)
+        registry.create("default", display_name="Default", org_ids=["default"])
         registry.create("acme")
         registry.ingest_credentials.put(AGENTS)
         secrets = build_secrets(backend)

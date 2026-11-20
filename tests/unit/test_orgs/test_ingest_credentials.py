@@ -27,7 +27,6 @@ from dfe_engine.orgs.ingest_tokens import (
     sync_bearer_tokens,
 )
 from dfe_engine.orgs.registry import OrgBoundError, OrgRegistry
-from dfe_engine.orgs.seed import ensure_default_org
 from dfe_engine.orgs.tenancy import Tenancy, compile_ingest_bindings
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
@@ -49,7 +48,7 @@ def _credential(name: str = "acme-agents", org: str = "acme", **fields) -> Inges
 @pytest.fixture
 def registry(tmp_path) -> OrgRegistry:
     registry = OrgRegistry(tmp_path / "orgs")
-    ensure_default_org(registry)
+    registry.create("default", display_name="Default", org_ids=["default"])
     registry.create("acme", org_ids=["acme-prod", "acme-dev"])
     registry.create("beta")
     return registry

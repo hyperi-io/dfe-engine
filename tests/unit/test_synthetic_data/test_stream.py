@@ -129,6 +129,51 @@ class TestHttpPostSink:
         assert captured["x-demo-token"] == "demo-value"
         assert captured["lines"] == 3
 
+    @pytest.mark.parametrize(
+        ("grace", "expected"),
+        [(30.0, (1, 0, 2)), (0.0, (0, 1, 1))],
+        ids=["within_grace_retried", "past_grace_failed"],
+    )
+    async def test_refused_token(self, grace: float, expected: tuple[int, int, int]):
+        import asyncio
+        import time
+
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            await reader.readline()
+            length = 0
+            while True:
+                header = (await reader.readline()).decode()
+                if header in ("\r\n", ""):
+                    break
+                name, _, value = header.partition(":")
+                if name.strip().lower() == "content-length":
+                    length = int(value.strip())
+            await reader.readexactly(length)
+            requests.append(1)
+            status = b"401 Unauthorized" if len(requests) == 1 else b"202 Accepted"
+            writer.write(
+                b"HTTP/1.1 " + status + b"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            await writer.drain()
+            writer.close()
+
+        requests: list[int] = []
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            sink = HttpPostSink(
+                f"http://127.0.0.1:{port}/ingest",
+                batch_max=1,
+                refused_until=time.time() + grace,
+                timeout=5.0,
+            )
+            await sink({"n": 1})
+            await sink.aclose()
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert (sink.sent, sink.failed, len(requests)) == expected
+
     async def test_unreachable_endpoint_degrades_not_dies(self):
         # Port 9 (discard) is closed on any sane host - a real connection
         # failure with no service to mock.
