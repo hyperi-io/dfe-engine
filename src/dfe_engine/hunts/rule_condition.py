@@ -28,7 +28,7 @@ that into a match. ``exists`` negated is how to find rows that lack a field.
 
 import math
 import re
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterator
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -76,7 +76,8 @@ _COMPARISONS = {
     "gt": ">",
     "gte": ">=",
 }
-_ORDERINGS = frozenset({"lt", "lte", "gt", "gte"})
+ORDERINGS = frozenset({"lt", "lte", "gt", "gte"})
+"""The operators that compare an order, the ones a time bound is written with."""
 _TEXT_TESTS = frozenset({"includes", "starts_with", "ends_with"})
 
 MAX_TESTS = 100
@@ -87,6 +88,9 @@ MAX_LIST_VALUES = 500
 
 MAX_OPERAND_LENGTH = 1024
 """The longest text operand."""
+
+MAX_OPERAND_BYTES = 128 * 1024
+"""The most operand bytes one condition holds, keeping its SQL under ClickHouse's 256 KiB max_query_size."""
 
 RESERVED_TOKENS = ("{window}", "{unseen}", "{timestamp_condition}")
 """Placeholders the hunt runner replaces in a rule's text wherever they sit, a quoted operand included."""
@@ -179,6 +183,7 @@ class RuleCondition(BaseModel):
                 raise ValueError(f"a condition nests at most {MATCH_NESTING_LIMIT} groups deep")
             if self.test_count() > MAX_TESTS:
                 raise ValueError(f"a condition holds at most {MAX_TESTS} tests")
+            _check_operand_bytes(self)
             return self
         if self.field is None:
             raise ValueError("a condition tests a field, or groups tests under all or any")
@@ -186,6 +191,7 @@ class RuleCondition(BaseModel):
         if self.operator is None:
             raise ValueError("a test names an operator")
         _check_operand(self.operator, self.value)
+        _check_operand_bytes(self)
         return self
 
     @property
@@ -210,6 +216,25 @@ class RuleCondition(BaseModel):
             return 1
         return sum(part.test_count() for part in self.parts)
 
+    def operand_bytes(self) -> int:
+        """How many bytes of operand this holds, text as UTF-8 and numbers as written."""
+        if not self.is_test:
+            return sum(part.operand_bytes() for part in self.parts)
+        values = self.value if isinstance(self.value, list) else [self.value]
+        return sum(len(str(value).encode()) for value in values if value is not None)
+
+    def tests(self) -> Iterator[RuleCondition]:
+        """Yield every field test this holds, at any depth.
+
+        Yields:
+            Each test as written. A ``negate`` on an enclosing group is not applied.
+        """
+        if self.is_test:
+            yield self
+            return
+        for part in self.parts:
+            yield from part.tests()
+
 
 def _check_field(field: str) -> None:
     parts = field.split(".")
@@ -219,6 +244,11 @@ def _check_field(field: str) -> None:
             "digits, '_' and '-', starting with a letter or '_', "
             f"at most {MAX_FIELD_PARTS} parts"
         )
+
+
+def _check_operand_bytes(condition: RuleCondition) -> None:
+    if condition.operand_bytes() > MAX_OPERAND_BYTES:
+        raise ValueError(f"a condition's operands total at most {MAX_OPERAND_BYTES} bytes")
 
 
 def _check_scalar(value: Scalar, operator: str) -> None:
@@ -376,7 +406,7 @@ def _compile_test(
     if value is None or isinstance(value, list):
         raise RuleConditionError(f"operator {operator!r} takes a single value")
     comparison = _COMPARISONS[operator]
-    if operator in _ORDERINGS and isinstance(value, str):
+    if operator in ORDERINGS and isinstance(value, str):
         subject = f"parseDateTime64BestEffortOrNull({sql}.:String, 3, 'UTC')" if in_json else sql
         return f"{subject} {comparison} {instant_literal(value)}"
     operand = _operand(value)
