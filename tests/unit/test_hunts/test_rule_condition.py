@@ -204,6 +204,7 @@ SHAPE_REFUSED = {
         "not a column or a dotted path",
     ),
     "a field too deep": ({"field": ".".join("a" * 17), "value": "x"}, "at most 16 parts"),
+    "a field part too long": ({"field": "a" * 256, "value": "x"}, "at most 255 characters"),
     "a test with no field": ({"operator": "equals", "value": "x"}, "tests a field"),
     "a test with no value": ({"field": "a", "operator": "equals"}, "value is required"),
     "an empty text to look for": (

@@ -50,7 +50,13 @@ from ..clickhouse.quoting import plain_source_name, quote_identifier
 from ..schema.applier import SchemaApplyError, live_columns
 from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
-from .rule_condition import ORDERINGS, RuleCondition, RuleConditionError, compile_condition
+from .rule_condition import (
+    MAX_CONDITION_SQL_BYTES,
+    ORDERINGS,
+    RuleCondition,
+    RuleConditionError,
+    compile_condition,
+)
 from .rule_guard import (
     VolumeBand,
     VolumeMeasure,
@@ -570,6 +576,11 @@ class RuleCreationService:
             )
         ]
         sql = f"SELECT * FROM {target} WHERE {where}"  # noqa: S608 - quoted names, and operands quoted by compile_condition
+        if len(sql.encode()) > MAX_CONDITION_SQL_BYTES:
+            raise RuleConditionError(
+                f"the condition compiles to more than {MAX_CONDITION_SQL_BYTES} bytes of SQL, "
+                "which leaves the runner no room under ClickHouse's query size limit"
+            )
         # What the stored condition says must be what the runner runs, so a rule read of the SQL may not change it.
         parsed = self._rewriter.parse_user_sql(sql)
         bounds = bounds or parsed.stripped_time_bounds

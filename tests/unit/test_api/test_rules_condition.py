@@ -249,6 +249,11 @@ class TestARefusedWriteSavesNothing:
                 "invalid_sql",
                 "bounds time for every rule",
             ),
+            (
+                {"condition": {"field": "a", "operator": "in", "value": ["\\" * 1024] * 128}},
+                "invalid_sql",
+                "bytes of SQL",
+            ),
             ({"source_type": "hyperdx"}, "validation_error", "source_type is 'raw'"),
             (
                 {"condition": {"field": "a", "value": "{window}"}},
@@ -271,6 +276,7 @@ class TestARefusedWriteSavesNothing:
             "time column against a number in a group",
             "negated time column against a date",
             "time column in a negated group",
+            "operands that quote past the SQL cap",
             "hyperdx source type",
             "operand carrying a runner placeholder",
         ],

@@ -102,7 +102,13 @@ INT_MIN = -(2**63)
 INT_MAX = 2**64 - 1
 """The integers a typed read can hold: Int64 below, UInt64 above."""
 
-_FIELD_PART = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+MAX_FIELD_PART_LENGTH = 255
+"""The longest part of a field, the longest name a ClickHouse column takes in practice."""
+
+MAX_CONDITION_SQL_BYTES = 192 * 1024
+"""The most SQL a condition compiles to, leaving the runner's own SQL room under ClickHouse's 256 KiB max_query_size."""
+
+_FIELD_PART = re.compile(rf"[A-Za-z_][A-Za-z0-9_-]{{0,{MAX_FIELD_PART_LENGTH - 1}}}")
 _JSON_PREFIX = f"{JSON_COLUMN}."
 
 type Scalar = str | StrictInt | StrictFloat
@@ -240,9 +246,9 @@ def _check_field(field: str) -> None:
     parts = field.split(".")
     if len(parts) > MAX_FIELD_PARTS or not all(_FIELD_PART.fullmatch(p) for p in parts):
         raise ValueError(
-            f"field {field!r} is not a column or a dotted path: each part is letters, "
-            "digits, '_' and '-', starting with a letter or '_', "
-            f"at most {MAX_FIELD_PARTS} parts"
+            f"field {field[:80]!r} is not a column or a dotted path: each part is letters, "
+            f"digits, '_' and '-', starting with a letter or '_', at most "
+            f"{MAX_FIELD_PART_LENGTH} characters, at most {MAX_FIELD_PARTS} parts"
         )
 
 
