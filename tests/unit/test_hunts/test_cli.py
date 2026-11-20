@@ -24,6 +24,7 @@ The logger tests replace scalo's ``setup`` with a recorder and stop the command 
 its settings load, so they prove the init order without installing a sink.
 """
 
+from collections.abc import Mapping
 from types import SimpleNamespace
 
 import pytest
@@ -265,9 +266,15 @@ def test_smoothing_on_wires_a_smoother_and_reports_the_gauge():
     assert metrics.smoothing == [True]
 
 
-@pytest.mark.parametrize("smoothing", [False, True], ids=["off_resets_to_hash", "on_keeps_learned"])
+@pytest.mark.parametrize(
+    ("smoothing", "written"),
+    [
+        pytest.param(False, [["h", 600, phase_offset("h", 600), 1]], id="off_resets_to_hash"),
+        pytest.param(True, [], id="on_keeps_learned_and_writes_nothing"),
+    ],
+)
 def test_materialise_keeps_a_learned_offset_only_with_smoothing_on(
-    setup_calls, monkeypatch, smoothing
+    setup_calls, monkeypatch, smoothing, written
 ):
     learned = phase_offset("h", 600) + 7
     client = _ScheduleClient([("h", 600, learned)])
@@ -280,8 +287,7 @@ def test_materialise_keeps_a_learned_offset_only_with_smoothing_on(
     result = runner.invoke(cli.app, ["materialise"])
 
     assert result.exit_code == 0, result.output
-    want = learned if smoothing else phase_offset("h", 600)
-    assert client.inserted == [["h", 600, want, 1]]
+    assert client.inserted == written
 
 
 @pytest.fixture
@@ -304,6 +310,7 @@ def run_events(monkeypatch) -> list[str]:
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
     monkeypatch.setattr(cli.runner_metrics, "create", _Metrics)
     monkeypatch.setattr(cli, "restore_hash_offsets", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(cli, "_publish_schedule", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(cli, "connect_when_available", lambda *_args, **_kwargs: ("ch", "coord"))
     monkeypatch.setattr(cli, "HuntWorker", lambda *_args, **_kwargs: "worker")
     monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: {})
@@ -342,6 +349,77 @@ def test_a_reload_check_clickhouse_cannot_answer_fires_nothing_until_it_passes(
 
     assert isinstance(result.exception, _Ran)
     assert run_events == ["tick", "check down", "check", "tick", "check", "tick", "check", "tick"]
+
+
+def test_the_runner_publishes_the_schedule_at_start_and_after_every_reload(run_events, monkeypatch):
+    """Each publish carries the specs the runner is built from, so KEDA follows the hunt config."""
+    published: list[object] = []
+    loaded = {"h": HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])}
+    monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: loaded)
+    monkeypatch.setattr(cli, "refuse_tenant_lookups", lambda *_args: None)
+    monkeypatch.setattr(
+        cli, "_publish_schedule", lambda _ch, _db, specs, _settings: published.append(specs) or 1
+    )
+
+    result = runner.invoke(cli.app, ["run", "--poll", "0", "--reload-every", "1"])
+
+    assert isinstance(result.exception, _Ran)
+    # One build at start, then a reload before each of ticks 2, 3 and 4.
+    assert published == [loaded] * 4
+
+
+def test_a_publish_clickhouse_cannot_answer_is_owed_and_lands_on_a_later_tick(monkeypatch):
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    attempts: list[Mapping[str, HuntSpec]] = []
+    answers: list[Exception | None] = [ConnectionError("connection refused")] * 2 + [None]
+
+    def _publish(_ch, _db, specs, _settings) -> int:
+        attempts.append(specs)
+        answer = answers.pop(0)
+        if answer is not None:
+            raise answer
+        return len(specs)
+
+    monkeypatch.setattr(cli, "_publish_schedule", _publish)
+    publisher = cli._SchedulePublisher("ch", "dfe", _settings(False))
+
+    publisher.publish({"h": spec})
+    publisher.retry()
+    publisher.retry()
+    publisher.retry()  # nothing is owed any more, so ClickHouse is not asked again
+
+    assert attempts == [{"h": spec}] * 3
+
+
+def test_a_newer_publish_replaces_the_one_still_owed(monkeypatch):
+    first = {"a": HuntSpec(hunt_id="a", interval_seconds=600, queries=["SELECT 1"])}
+    second = {"b": HuntSpec(hunt_id="b", interval_seconds=600, queries=["SELECT 1"])}
+    published: list[Mapping[str, HuntSpec]] = []
+
+    def _publish(_ch, _db, specs, _settings) -> int:
+        published.append(specs)
+        if len(published) == 1:
+            raise ConnectionError("connection refused")
+        return len(specs)
+
+    monkeypatch.setattr(cli, "_publish_schedule", _publish)
+    publisher = cli._SchedulePublisher("ch", "dfe", _settings(False))
+
+    publisher.publish(first)
+    publisher.publish(second)
+
+    assert published == [first, second]
+
+
+def test_a_publish_failure_that_is_no_outage_stops_the_runner():
+    class _Broken:
+        def query(self, *_args, **_kwargs):
+            raise ValueError("not a ClickHouse outage")
+
+    publisher = cli._SchedulePublisher(_Broken(), "dfe", _settings(False))
+
+    with pytest.raises(ValueError, match="not a ClickHouse outage"):
+        publisher.publish({})
 
 
 def test_the_notifier_reads_destinations_from_the_secrets_backend_alone(tmp_path):

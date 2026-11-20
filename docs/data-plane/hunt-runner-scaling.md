@@ -10,7 +10,7 @@
 
 The hunt runner is pull-based and multi-pod. The default deployment is ONE steady pod with no ScaledObject, because the runner is a thin orchestrator and all hunt load runs in ClickHouse. One pod covers the large majority of deployments.
 
-Autoscaling is a beta, off by default (`huntRunner.autoscaling.enabled`). Leave it off. It reads the due backlog from the `hunt_schedule` table. `hunt_schedule` is written only through `publish_schedule`: by `dfe-hunt-runner materialise` at config-deploy time, and by the phase smoother when smoothing is on. The charts never run `materialise`, so with smoothing off the backlog always reads 0. With autoscaling on, the runner never scales out, and at `minReplicaCount: 0` no hunt ever fires. To try it anyway, run `dfe-hunt-runner materialise` after every hunt-config change.
+Autoscaling is a beta, off by default (`huntRunner.autoscaling.enabled`). Leave it off. It reads the due backlog from the `hunt_schedule` table, which every running hunt runner keeps current: it publishes the schedule when it starts and after each spec reload. With the default floor of 1 pod a runner is always there to do it. At `minReplicaCount: 0` no runner runs while the backlog is 0, so nothing publishes a hunt added in that time and nothing wakes a pod for it, and a fresh install may scale to zero before any runner has published. Run `dfe-hunt-runner materialise` once after each hunt-config change made while no pod is running, or keep the floor at 1.
 
 When on, KEDA scales the pod count on the deterministic-due backlog described below, read through the fail-safe `dfe-keda-shim`. KEDA never asks the engine.
 
@@ -18,7 +18,7 @@ When on, KEDA scales the pod count on the deterministic-due backlog described be
 
 KEDA can only wake the first worker if "is any hunt due right now?" is answerable with no worker running, as a query the shim runs against ClickHouse. The per-hunt schedule (interval and stable phase offset) otherwise lives only in a running worker's memory, loaded from the gitops hunt configs.
 
-So the schedule is materialised into a small ClickHouse table, `hunt_schedule`, at config-deploy time:
+So the schedule is materialised into a small ClickHouse table, `hunt_schedule`, by the runner:
 
 ```text
 hunt_schedule(hunt_id, interval_seconds, phase_offset, enabled, updated)
@@ -51,7 +51,7 @@ Both compute "due" from the same inputs:
 3. KEDA polls a real signal. Worst-case wake latency is `pollingInterval` plus pod start, which is immaterial for minute-plus intervals.
 4. A worker that claims a hunt then dies before writing the watermark loses its lease after `lease_seconds` (default 300). The fire is still owed, so the backlog stays above 0 and another worker reclaims it.
 5. Nothing double-runs. A claim stands only if it is acknowledged within a settle of its free read and is still the latest row after it. A later claim is never released, because it may sit over the winner, but it holds nothing, so the next poll claims again.
-6. Hunts do not all fire at once. The phase offset falls in the first `hunts.phase_spread_fraction` of the interval (default 0.8, `DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION`), so `due_count` rises gradually and KEDA scales out smoothly. The runner, the API's `next_due` and the materialised schedule all read it, so republish the schedule (`dfe-hunt-runner materialise`) after changing it.
+6. Hunts do not all fire at once. The phase offset falls in the first `hunts.phase_spread_fraction` of the interval (default 0.8, `DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION`), so `due_count` rises gradually and KEDA scales out smoothly. The runner, the API's `next_due` and the materialised schedule all read it, and a runner rewrites the table with the new offsets when it next starts.
 
 A fire stays owed until its watermark is written. A worker that ticks inside `[boundary, boundary+offset)` runs the previous interval's fire if nothing ran it, and the backlog counts it the same way. Without that, a hunt whose offset sits between two poll ticks (a 46s offset polled at :00/:15/:30/:45) never fires. Maximum lateness for any fire is under one interval, whether KEDA or a resident worker makes the decision.
 
@@ -61,13 +61,13 @@ Once deployed, the running system needs only ClickHouse:
 
 - Workers read hunt definitions from the gitops config, coordinate through the coordination tables and run queries against ClickHouse.
 - The shim reads `hunt_schedule` and the coordination tables from ClickHouse. It is a separate, distinctly labelled pod on the engine container image with its own entrypoint (`dfe-keda-shim`), not the live engine API.
-- `hunt_schedule` is written only through `publish_schedule`: by `dfe-hunt-runner materialise` at config-deploy time, and by the phase smoother when smoothing is on. `materialise` is a one-shot, idempotent command that rewrites the table from the hunt config, and the charts do not run it.
+- `hunt_schedule` is written only through `publish_schedule`: by each running hunt runner at start and after every spec reload, by the phase smoother when smoothing is on, and by `dfe-hunt-runner materialise`. `materialise` is a one-shot, idempotent command that brings the table to the hunt config, for a deployment that scales the runner to zero. The charts do not run it.
 
 If the engine pod is down, running hunt-runner pods keep firing hunts. What you lose is the ability to change configs, which needs the engine anyway. A pod that is starting is the exception: the runner and the shim each have a `wait-for-engine` init container (dfe-infra `helm/library/dfe-common/templates/_waitfor.tpl`) that holds the pod until the engine reports ready, because the engine applies the ClickHouse schema at its own start. A scale-out or a restart while the engine is down waits for it. ClickHouse is DFE's single operational store and the runner holds to that, which is also why the same runner works on a non-k8s single deploy (dfe-docker), where only ClickHouse is guaranteed present.
 
 Every worker and the shim must see the same coordination tables. On the scale tier's multi-node cluster behind a round-robin load balancer, a plain `ReplacingMergeTree` lands on one node, and workers connected to other nodes see an empty or absent table (`UNKNOWN_DATABASE`, missing leases). The schema phase therefore creates the coordination tables as `ReplicatedReplacingMergeTree` inside a Replicated database on every deployment, so lease, watermark and schedule state is shared across nodes (<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>).
 
-`schedule.publish_schedule(ch, db, specs)` is the only function that writes `hunt_schedule`. Its two callers are `dfe-hunt-runner materialise` and the phase smoother (`smoothing.py`). It is idempotent and diff-aware: it tombstones hunts that vanished from config. On Kubernetes with smoothing off, the table stays empty until an operator runs the command after each hunt-config change. A hunt added while scaled to zero then still gets a row, so KEDA can wake a worker for it.
+`schedule.publish_schedule(ch, db, specs)` is the only function that writes `hunt_schedule`. Its callers are the runner (`runner_cli.py`), `dfe-hunt-runner materialise` and the phase smoother (`smoothing.py`). It is idempotent and diff-aware: it writes only the rows that differ from the table, so a hunt whose row is already right keeps its `updated` time and the smoother's cool-down, and it tombstones hunts that vanished from config. With smoothing on, an offset the smoother learned for a hunt whose interval is unchanged is kept. A ClickHouse the runner cannot reach leaves the publish owed, logged once and retried on each tick, and the runner keeps firing its hunts.
 
 ## The ScaledObject
 

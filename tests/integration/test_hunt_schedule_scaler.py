@@ -19,9 +19,20 @@ the ``dfe_db`` fixture.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from dfe_engine.hunts import runner_cli
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
 from dfe_engine.hunts.hunt_spec import HuntSpec
-from dfe_engine.hunts.schedule import due_count, publish_schedule
+from dfe_engine.hunts.schedule import (
+    due_count,
+    phase_offset,
+    publish_schedule,
+    read_schedule,
+    write_offsets,
+)
+from dfe_engine.hunts.spec_loader import load_specs
+from dfe_engine.settings import DFESettings, HuntSmoothingSettings, HuntsSettings
 
 
 def _spec(hunt_id: str, interval: int = 2) -> HuntSpec:
@@ -86,3 +97,79 @@ def test_a_hunt_removed_then_added_back_is_scheduled_again(ch_client, dfe_db):
     ).result_rows[0][0]
     assert enabled == 1, "the re-added hunt stayed tombstoned"
     assert due_count(ch_client, dfe_db) == 2
+
+
+def _hunt(hunt_dir: Path, name: str, *, interval: str = "2s", enabled: bool = True) -> None:
+    (hunt_dir / f"{name}.yaml").write_text(
+        f'schedule:\n  interval: {interval}\nquery: "SELECT 1 WHERE {{window}}"\n'
+        f"enabled: {str(enabled).lower()}\n"
+    )
+
+
+def _schedule_rows(ch_client, dfe_db) -> int:
+    return int(ch_client.query(f"SELECT count() FROM `{dfe_db}`.hunt_schedule").result_rows[0][0])
+
+
+def test_a_running_runner_keeps_the_schedule_current_for_keda(ch_client, dfe_db, tmp_path: Path):
+    """The runner's own publish is the only writer on Kubernetes, so each reload must leave KEDA right."""
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
+    coord.ensure_schema()
+    settings = DFESettings(env="test")
+    hunt_dir = tmp_path / "hunts"
+    hunt_dir.mkdir()
+
+    publisher = runner_cli._SchedulePublisher(ch_client, dfe_db, settings)
+
+    def reload() -> None:
+        publisher.publish(load_specs(hunt_dir))
+
+    # A runner starts on an empty table: KEDA can see both hunts with no worker running.
+    _hunt(hunt_dir, "a")
+    _hunt(hunt_dir, "b")
+    reload()
+    assert set(read_schedule(ch_client, dfe_db)) == {"a", "b"}
+    assert due_count(ch_client, dfe_db) == 2
+
+    # A hunt added in git is scheduled at the next reload.
+    _hunt(hunt_dir, "c")
+    reload()
+    assert set(read_schedule(ch_client, dfe_db)) == {"a", "b", "c"}
+    assert due_count(ch_client, dfe_db) == 3
+
+    # One deleted and one disabled stop counting.
+    (hunt_dir / "a.yaml").unlink()
+    _hunt(hunt_dir, "b", enabled=False)
+    reload()
+    assert set(read_schedule(ch_client, dfe_db)) == {"c"}
+    assert due_count(ch_client, dfe_db) == 1
+
+    # A changed interval is rewritten, and a reload with nothing changed writes nothing.
+    _hunt(hunt_dir, "c", interval="4s")
+    reload()
+    assert read_schedule(ch_client, dfe_db)["c"][0] == 4
+    rows = _schedule_rows(ch_client, dfe_db)
+    reload()
+    assert _schedule_rows(ch_client, dfe_db) == rows
+
+
+def test_a_runner_with_smoothing_on_keeps_the_offset_the_smoother_learned(
+    ch_client, dfe_db, tmp_path: Path
+):
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
+    coord.ensure_schema()
+    smoothing = HuntsSettings(smoothing=HuntSmoothingSettings(enabled=True))
+    settings = DFESettings(env="test", hunts=smoothing)
+    hunt_dir = tmp_path / "hunts"
+    hunt_dir.mkdir()
+    publisher = runner_cli._SchedulePublisher(ch_client, dfe_db, settings)
+    _hunt(hunt_dir, "a", interval="10m")
+    publisher.publish(load_specs(hunt_dir))
+    learned = phase_offset("a", 600) + 17
+    write_offsets(ch_client, dfe_db, {"a": (600, learned)})
+
+    _hunt(hunt_dir, "b", interval="10m")
+    publisher.publish(load_specs(hunt_dir))
+
+    schedule = read_schedule(ch_client, dfe_db)
+    assert schedule["a"] == (600, learned)
+    assert schedule["b"] == (600, phase_offset("b", 600))

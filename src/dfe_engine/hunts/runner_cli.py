@@ -18,14 +18,17 @@ Two commands, matching the two ways the runner is driven:
 
   materialise - the ONE-SHOT run to write the deterministic ``hunt_schedule`` table
       KEDA scales on.
-      It is deploy-time, NOT the hot path - it runs once per config change, not per
-      tick, so it just publishes and exits.
+      It is NOT the hot path - it publishes and exits. A running worker keeps that
+      table current itself, so this is for a deployment that scales the runner to zero
+      and wants the table written before any worker has started.
 
   run - the long-running worker. It builds the CH coordinator, ensures the
       coordination schema, then repeats ``HuntRunner.tick`` on a poll interval until
       k8s sends SIGTERM (or a local ctrl-c sends SIGINT). A ClickHouse that is down,
       or does not know the runner's user yet, is waited out at the connect and at
-      every tick rather than ending the process (see ``connect``). Add a pod and it competes
+      every tick rather than ending the process (see ``connect``). It publishes
+      ``hunt_schedule`` when it starts and after every spec reload, so the table KEDA
+      scales on follows the hunt config. Add a pod and it competes
       for claims. Kill one and its lease expires and is reclaimed - the coordination
       is entirely in ClickHouse, so the loop here owns nothing but cadence + signals.
 
@@ -37,7 +40,7 @@ agnostic (it only calls the tick and the reload callbacks it was handed).
 import signal
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import clickhouse_connect
@@ -49,16 +52,15 @@ from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
 from dfe_engine.hunts import runner_metrics
 from dfe_engine.hunts.alert import AlertDestinationRegistry
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
-from dfe_engine.hunts.connect import TickGuard, connect_when_available
+from dfe_engine.hunts.connect import TickGuard, connect_when_available, unavailable_reason
 from dfe_engine.hunts.daemon import run_loop
 from dfe_engine.hunts.delivery import MatchNotifier
+from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.lookups import refuse_tenant_lookups
 from dfe_engine.hunts.rule_compiler import detection_cap
 from dfe_engine.hunts.runner import HuntFailures, HuntRunner
 from dfe_engine.hunts.schedule import (
-    learned_offsets,
     publish_schedule,
-    read_schedule,
     restore_hash_offsets,
 )
 from dfe_engine.hunts.smoothing import PhaseSmoother
@@ -191,25 +193,84 @@ def _match_notifier(settings: DFESettings) -> MatchNotifier:
     return MatchNotifier(registry, global_channels=settings.hunts.alert_channels)
 
 
+def _publish_schedule(
+    ch: Any, db: str, specs: Mapping[str, HuntSpec], settings: DFESettings
+) -> int:
+    """Bring ``hunt_schedule`` to *specs*, keeping an offset the smoother learned.
+
+    With smoothing on, an offset learned for a hunt whose interval is unchanged is kept
+    rather than reset to the hash. Returns the live hunt count.
+    """
+    return publish_schedule(
+        ch,
+        db,
+        specs,
+        fraction=settings.hunts.phase_spread_fraction,
+        keep_learned=settings.hunts.smoothing.enabled,
+    )
+
+
+class _SchedulePublisher:
+    """Publishes ``hunt_schedule`` for the specs it is handed, and owes the publish until it lands.
+
+    A runner that cannot publish still runs its hunts, so a refused connection, a
+    refused user or a server out of capacity leaves the publish owed and ``retry``
+    tries it again on each tick until it gets through. Any other failure ends the
+    process, as it does at the connect.
+
+    Args:
+        ch: the raw ClickHouse client.
+        db: the data database holding the schedule.
+        settings: the engine settings, for the offset fraction and the smoothing flag.
+    """
+
+    def __init__(self, ch: Any, db: str, settings: DFESettings) -> None:
+        self._ch = ch
+        self._db = db
+        self._settings = settings
+        self._owed: Mapping[str, HuntSpec] | None = None
+        self._down = False
+
+    def publish(self, specs: Mapping[str, HuntSpec]) -> None:
+        """Publish *specs*, replacing any publish still owed."""
+        self._owed = specs
+        self.retry()
+
+    def retry(self) -> None:
+        """Publish what is owed, if anything is, leaving it owed while ClickHouse cannot answer."""
+        if self._owed is None:
+            return
+        try:
+            _publish_schedule(self._ch, self._db, self._owed, self._settings)
+        except Exception as exc:
+            reason = unavailable_reason(exc)
+            if reason is None:
+                raise
+            if not self._down:
+                logger.warning(
+                    "hunt_schedule not published, retrying on each tick",
+                    reason=reason,
+                    error=str(exc),
+                )
+            self._down = True
+            return
+        self._owed = None
+        self._down = False
+
+
 @app.command("materialise")
 def materialise() -> None:
     """Publish the deterministic ``hunt_schedule`` table KEDA scales on (one-shot).
 
-    Deploy-time, not the hot path: run once per hunt-config change so KEDA can
-    answer "is any hunt due?" with zero workers running. Idempotent -
-    re-materialising tombstones removed hunts. With smoothing on, an offset the
-    smoother learned for an unchanged hunt is kept rather than reset to the hash.
+    A running runner does this itself at start and on every reload, so this is for a
+    deployment that scales the runner to zero and wants the table written before any
+    worker has started. Idempotent: re-materialising tombstones removed hunts.
     """
     init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=False)
     settings = load_settings()
     ch, db = _build_ch(settings)
     specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
-    offsets = None
-    if settings.hunts.smoothing.enabled:
-        offsets = learned_offsets(read_schedule(ch, db), specs)
-    live = publish_schedule(
-        ch, db, specs, fraction=settings.hunts.phase_spread_fraction, offsets=offsets
-    )
+    live = _publish_schedule(ch, db, specs, settings)
     typer.echo(f"materialised {live} hunt(s) into {db}.hunt_schedule")
 
 
@@ -300,11 +361,15 @@ def run(
     # Outlives each rebuild too, so a reload does not reset the cycle clock or the lease.
     smoother = _smoother(ch, db, settings, obs)
 
+    publisher = _SchedulePublisher(ch, db, settings)
+
     def _build_runner() -> HuntRunner:
+        specs = load_specs(hunt_dir, **sources)
+        publisher.publish(specs)
         return HuntRunner(
             coord,
             worker,
-            load_specs(hunt_dir, **sources),
+            specs,
             cap=cap,
             poll_seconds=poll_seconds,
             metrics=obs,
@@ -327,8 +392,14 @@ def run(
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 
+    guarded_tick = TickGuard(runners.tick, metrics=obs)
+
+    def _tick(now: int) -> int:
+        publisher.retry()
+        return guarded_tick(now)
+
     ticks = run_loop(
-        tick=TickGuard(runners.tick, metrics=obs),
+        tick=_tick,
         should_stop=lambda: stop["flag"],
         clock=time.time,
         sleep=time.sleep,
