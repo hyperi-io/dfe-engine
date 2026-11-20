@@ -174,7 +174,7 @@ Apps that never autoscale:
 |-----|------|---------------------|
 | dfe-engine | off - control-plane singleton, always one pod | - |
 | dfe-fetcher | off - one pod per fetcher config. The deployer turns KEDA on in that config's values, and solely for a source with a fetch that supports competing consumers | CPU ~70% once turned on |
-| dfe-hunt-runner | off - one static pod | BETA, `huntRunner.autoscaling.enabled`: due-hunt backlog via the shim (`metrics-api`, `AverageValue`). Keep it off: the charts do not materialise the schedule it reads - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
+| dfe-hunt-runner | off - one static pod | BETA, `huntRunner.autoscaling.enabled`: due-hunt backlog via the shim (`metrics-api`, `AverageValue`). Keep it off: a runner publishes the schedule it reads, but at `minReplicaCount: 0` none runs to publish a new hunt - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
 
 Replica bounds come from dfe-infra `argocd/values/common.yaml` and the tier profile:
 

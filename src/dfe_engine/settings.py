@@ -625,8 +625,8 @@ class HuntsSettings(BaseModel):
         description=(
             "The share of a hunt's interval its fire time may be offset by, so hunts on the "
             "same interval do not all fire at once. The hunt runner, the schedule KEDA scales "
-            "on and the API's next_due read this one value, so a change needs the schedule "
-            "republished (dfe-hunt-runner materialise). DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION."
+            "on and the API's next_due read this one value, and a runner rewrites the schedule "
+            "with the new offsets when it next starts. DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION."
         ),
     )
     smoothing: HuntSmoothingSettings = Field(
