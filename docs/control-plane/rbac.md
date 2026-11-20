@@ -354,7 +354,7 @@ config:
 ---
 flowchart LR
   accTitle: L4 Detail -- Built-in roles
-  accDescr: Six built-in roles grant control-plane actions: admin, infra_admin, infra_viewer, data_analyst, data_analyst_viewer and dfe_operator. Two grant data-plane reads: data_viewer and the scoped org_viewer.
+  accDescr: Seven built-in roles grant control-plane actions: admin, infra_admin, infra_viewer, data_analyst, data_analyst_viewer, dfe_operator and ingest_admin. Two grant data-plane reads: data_viewer and the scoped org_viewer.
 
   subgraph ctrl["Control plane"]
     direction TB
@@ -364,6 +364,7 @@ flowchart LR
     data_analyst["<b>data_analyst</b>"]
     data_analyst_viewer["<b>data_analyst_viewer</b>"]
     dfe_operator["<b>dfe_operator</b>"]
+    ingest_admin["<b>ingest_admin</b>"]
   end
 
   subgraph dataplane["Data plane"]
@@ -373,7 +374,7 @@ flowchart LR
   end
 
   ctrl ~~~ dataplane
-  class admin,infra_admin,infra_viewer,data_analyst,data_analyst_viewer,dfe_operator,data_viewer,org_viewer part
+  class admin,infra_admin,infra_viewer,data_analyst,data_analyst_viewer,dfe_operator,ingest_admin,data_viewer,org_viewer part
   classDef ext fill:#F4F6F8,stroke:#94A3B8,stroke-width:1.5px,stroke-dasharray:5 4,color:#0F172A
   classDef ingest fill:#FFFFFF,stroke:#0E8A7D,stroke-width:3px,color:#0F172A
   classDef xform fill:#FFFFFF,stroke:#7B4FB0,stroke-width:3px,color:#0F172A
@@ -574,6 +575,7 @@ lists every route.
 - `dfe-analysts` -> roles: `[data_analyst]`
 - `dfe-viewers` -> roles: `[data_viewer]`
 - `dfe-infra` -> roles: `[infra_admin]`
+- `dfe-ingest` -> roles: `[ingest_admin]`
 
 The two seeded accounts, `admin` and `breakglass`, are both in `dfe-admins` (section 3.5).
 
