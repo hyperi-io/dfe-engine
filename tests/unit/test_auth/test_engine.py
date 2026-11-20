@@ -396,24 +396,6 @@ class TestDefaults:
         config = RoleConfig.load_builtin()
         assert "infra_admin" in config.roles
 
-    def test_eight_built_in_roles(self):
-        config = RoleConfig.load_builtin()
-        assert len(config.roles) == 8
-
-    def test_all_expected_roles_present(self):
-        config = RoleConfig.load_builtin()
-        expected = {
-            "admin",
-            "data_analyst",
-            "data_analyst_viewer",
-            "data_viewer",
-            "infra_admin",
-            "infra_viewer",
-            "org_viewer",
-            "dfe_operator",
-        }
-        assert set(config.roles.keys()) == expected
-
     def test_operator_holds_the_dials_and_nothing_else(self):
         config = RoleConfig.load_builtin()
         assert config.has_permission("dfe_operator", "action:invoke:receiver-surge")

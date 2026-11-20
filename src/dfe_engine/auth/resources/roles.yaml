@@ -66,6 +66,14 @@ roles:
       - "group:*"
       - "repository:*"
       - "usage:read"
+  ingest_admin:
+    description: "Machine feeds - mint and rotate an org's ingest credentials, create and edit sources"
+    resource_type: core
+    permissions:
+      - "org:read"
+      - "org:ingest_credentials:write"
+      - "source:read"
+      - "source:write"
   dfe_operator:
     description: "Curated operational dials - invoke shipped actions, read governed state"
     resource_type: core
