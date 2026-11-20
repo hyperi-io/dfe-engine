@@ -1306,6 +1306,15 @@ class DeploymentSettings(BaseModel):
             "pre-login page. DFE_ENGINE_DEPLOYMENT_CREDENTIAL_COMMAND."
         ),
     )
+    rotation_command: str = Field(
+        default="",
+        description=(
+            "How an operator of this deployment changes the admin password where it is "
+            "kept, for a deployer with no checkout to hold env/engine.env and run make "
+            "in. Empty means the target's default. Shown when the engine cannot write "
+            "the password itself. DFE_ENGINE_DEPLOYMENT_ROTATION_COMMAND."
+        ),
+    )
     max_replicas_ceiling: int = Field(
         default=MAX_REPLICAS_CEILING,
         gt=0,
@@ -2718,6 +2727,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR": "deployment.app_env_dir",
             "DFE_ENGINE_DEPLOYMENT_HOSTED_INSTANCES": "deployment.hosted_instances",
             "DFE_ENGINE_DEPLOYMENT_CREDENTIAL_COMMAND": "deployment.credential_command",
+            "DFE_ENGINE_DEPLOYMENT_ROTATION_COMMAND": "deployment.rotation_command",
             "DFE_ENGINE_DEPLOYMENT_APPLY_COMMAND": "deployment.apply_command",
             "DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER": "deployment.backing.kafka.provider",
             "DFE_ENGINE_DEPLOYMENT_KAFKA_TIER": "deployment.backing.kafka.tier",
