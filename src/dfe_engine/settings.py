@@ -1546,6 +1546,15 @@ class LocalAuthSettings(BaseModel):
     enabled: bool = Field(default=False, description="Seed built-in local accounts")
     admin_name: str = Field(default="", description="Bootstrap admin username")
     admin_password: str = Field(default="", description="Bootstrap admin password")
+    admin_password_managed: bool = Field(
+        default=False,
+        description=(
+            "The operator chose admin_password and keeps it: it is never issued with a "
+            "forced change, and config wins on every boot as for a seed account. Leave "
+            "false for a password a tool minted. "
+            "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_MANAGED."
+        ),
+    )
     seed_accounts: list[SeedAccount] = Field(
         default_factory=list,
         description=(
@@ -2688,6 +2697,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS": "auth.trust_proxy_auth_headers",
             "DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED": "auth.oidc_group_sync_enabled",
             "DFE_ENGINE_AUTH_LOCAL_ENABLED": "auth.local.enabled",
+            "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_MANAGED": "auth.local.admin_password_managed",
             "DFE_ENGINE_AUTH_LOGIN_THROTTLE_ENABLED": "auth.login_throttle.enabled",
             "DFE_ENGINE_HYPERDX_ENABLED": "hyperdx.enabled",
             "DFE_ENGINE_GITOPS_ENABLED": "gitops.enabled",
