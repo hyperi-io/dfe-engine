@@ -210,7 +210,7 @@ views:
       ParentCommandLine: parent_cmd
 ```
 
-A converted Sigma rule becomes a DFE rule tied to the source, querying the
+The view deploys whether Sigma is on or off. Converting a Sigma rule is a beta behind `sigma.enabled`, default `false`, tracked in <https://github.com/hyperi-io/dfe-engine/issues/887>. A converted Sigma rule becomes a DFE rule tied to the source, querying the
 `{source}_sigma` view. The provider pipeline that keeps the rule catalogue
 current is [sigma.md](sigma.md). The mapping layer itself is
 [field-mapping.md](field-mapping.md).
