@@ -1151,9 +1151,8 @@ class TestWhatTakingTheChangeCosts:
         assert not rendered[RECEIVER].restart_required
         assert rendered[RECEIVER].restart_hint == ""
 
-    def test_a_new_destination_restarts_a_receiver_that_reloads_its_routing(self, crud, tmp_path):
-        # The receiver opens one sink per destination at startup, so a destination
-        # added later has none until the container restarts, reload or not.
+    def test_a_new_destination_reloads_into_a_running_receiver(self, crud, tmp_path):
+        # The receiver's reload builds a sink for a destination added later.
         settings = _settings(tmp_path)
         app = _deploy(crud, RECEIVER, config__routing__default_source="main")
         appconfig.render(crud, settings)
@@ -1167,10 +1166,7 @@ class TestWhatTakingTheChangeCosts:
 
         rendered = {r.service: r for r in appconfig.render(crud, settings)}
 
-        assert rendered[RECEIVER].restart_required
-        assert rendered[RECEIVER].restart_hint == (
-            f"restart required: make apply SERVICES={RECEIVER}"
-        )
+        assert not rendered[RECEIVER].restart_required
 
     def test_a_restart_path_deep_in_a_block_the_receiver_reloads(self, crud, tmp_path):
         # The DLQ sits under the routing block the app rebuilds, and is still

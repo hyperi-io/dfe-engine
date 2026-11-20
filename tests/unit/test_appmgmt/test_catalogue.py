@@ -144,14 +144,13 @@ class TestShippedManifest:
 
         assert settings == {"dfe-loader": "config.hot_reload.enabled"}
 
-    def test_the_receiver_names_the_destinations_it_builds_at_startup(self):
-        # It reloads its routing in place but opens one sink per destination once,
-        # so a new direct destination needs a restart although the app reloads.
+    def test_the_receiver_reloads_its_routing_and_destinations(self):
+        # A reload rebuilds every destination whose wiring changed, the loader's included.
         receiver = catalogue.descriptor("dfe-receiver")
 
         assert receiver.hot_reload is True
-        assert "config.destinations" in receiver.restart_paths
-        assert "config.routing" not in receiver.restart_paths
+        for path in ("config.destinations", "config.loader", "config.routing"):
+            assert path not in receiver.restart_paths
 
     def test_a_fetcher_reloads_its_sources_and_org_and_restarts_for_its_output(self):
         # A reload starts, stops and rebuilds sources and re-reads the org each
