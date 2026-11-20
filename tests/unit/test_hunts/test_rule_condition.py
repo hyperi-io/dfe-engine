@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from dfe_engine.hunts.rule_condition import (
     MAX_LIST_VALUES,
+    MAX_OPERAND_BYTES,
     MAX_TESTS,
     OPERAND_KINDS,
     RuleCondition,
@@ -203,6 +204,7 @@ SHAPE_REFUSED = {
         "not a column or a dotted path",
     ),
     "a field too deep": ({"field": ".".join("a" * 17), "value": "x"}, "at most 16 parts"),
+    "a field part too long": ({"field": "a" * 256, "value": "x"}, "at most 255 characters"),
     "a test with no field": ({"operator": "equals", "value": "x"}, "tests a field"),
     "a test with no value": ({"field": "a", "operator": "equals"}, "value is required"),
     "an empty text to look for": (
@@ -248,6 +250,18 @@ SHAPE_REFUSED = {
         "{timestamp_condition}",
     ),
     "a text too long": ({"field": "a", "value": "a" * 1025}, "at most 1024"),
+    "one list past the operand byte cap": (
+        {"field": "a", "operator": "in", "value": ["a" * 1024] * 129},
+        "operands total at most 131072 bytes",
+    ),
+    "a group past the operand byte cap, each test under it": (
+        {
+            "any": [
+                {"field": f"f{i}", "operator": "in", "value": ["a" * 500] * 100} for i in range(3)
+            ]
+        },
+        "operands total at most 131072 bytes",
+    ),
     "all and any together": (
         {"all": [{"field": "a", "value": "x"}], "any": [{"field": "b", "value": "y"}]},
         "not both",
@@ -285,6 +299,12 @@ def test_a_condition_the_builder_cannot_write_is_refused(body, message):
 
     if message is not None:
         assert message in str(refused.value)
+
+
+def test_operands_at_the_byte_cap_are_accepted():
+    body = {"any": [{"field": "a", "operator": "in", "value": ["a" * 1024] * 128}]}
+
+    assert RuleCondition.model_validate(body).operand_bytes() == MAX_OPERAND_BYTES
 
 
 def test_groups_at_the_nesting_limit_are_accepted():
