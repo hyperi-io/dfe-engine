@@ -39,6 +39,7 @@ from dfe_engine.hunts import schedule
 from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.lookups import LookupDatabaseError
 from dfe_engine.hunts.schedule import phase_offset
+from dfe_engine.hunts.schedule_publish import spec_sources
 from dfe_engine.hunts.smoothing import PhaseSmoother
 from dfe_engine.settings import (
     DFESettings,
@@ -181,7 +182,7 @@ def test_spec_sources_carry_the_configured_detection_cap():
     settings.hunts.rules_dir = "/rules"
     settings.hunts.max_detections_per_run = 250
 
-    assert cli._spec_sources(settings, "tenant_a") == {
+    assert spec_sources(settings, "tenant_a") == {
         "rules_dir": "/rules",
         "default_target": "tenant_a.detection",
         "default_database": "tenant_a",
@@ -193,7 +194,7 @@ def test_spec_sources_carry_the_configured_detection_cap():
 def test_spec_sources_carry_the_configured_lookup_databases():
     settings = DFESettings(env="test", hunts=HuntsSettings(lookup_databases=["threat", "geo"]))
 
-    assert cli._spec_sources(settings, "dfe")["lookup_databases"] == ("threat", "geo")
+    assert spec_sources(settings, "dfe")["lookup_databases"] == ("threat", "geo")
 
 
 def test_a_cap_above_its_ceiling_is_cut_to_the_ceiling():
@@ -201,7 +202,7 @@ def test_a_cap_above_its_ceiling_is_cut_to_the_ceiling():
     settings.hunts.max_detections_per_run = 50_000
     settings.hunts.max_detections_per_run_ceiling = 10_000
 
-    assert cli._spec_sources(settings, "dfe")["max_detections"] == 10_000
+    assert spec_sources(settings, "dfe")["max_detections"] == 10_000
 
 
 class _Ran(Exception):
@@ -310,7 +311,7 @@ def run_events(monkeypatch) -> list[str]:
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
     monkeypatch.setattr(cli.runner_metrics, "create", _Metrics)
     monkeypatch.setattr(cli, "restore_hash_offsets", lambda *_args, **_kwargs: 0)
-    monkeypatch.setattr(cli, "_publish_schedule", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(cli, "publish_hunt_schedule", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(cli, "connect_when_available", lambda *_args, **_kwargs: ("ch", "coord"))
     monkeypatch.setattr(cli, "HuntWorker", lambda *_args, **_kwargs: "worker")
     monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: {})
@@ -358,7 +359,9 @@ def test_the_runner_publishes_the_schedule_at_start_and_after_every_reload(run_e
     monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: loaded)
     monkeypatch.setattr(cli, "refuse_tenant_lookups", lambda *_args: None)
     monkeypatch.setattr(
-        cli, "_publish_schedule", lambda _ch, _db, specs, _settings: published.append(specs) or 1
+        cli,
+        "publish_hunt_schedule",
+        lambda _ch, _db, specs, _settings: published.append(specs) or 1,
     )
 
     result = runner.invoke(cli.app, ["run", "--poll", "0", "--reload-every", "1"])
@@ -380,7 +383,7 @@ def test_a_publish_clickhouse_cannot_answer_is_owed_and_lands_on_a_later_tick(mo
             raise answer
         return len(specs)
 
-    monkeypatch.setattr(cli, "_publish_schedule", _publish)
+    monkeypatch.setattr(cli, "publish_hunt_schedule", _publish)
     publisher = cli._SchedulePublisher("ch", "dfe", _settings(False))
 
     publisher.publish({"h": spec})
@@ -402,7 +405,7 @@ def test_a_newer_publish_replaces_the_one_still_owed(monkeypatch):
             raise ConnectionError("connection refused")
         return len(specs)
 
-    monkeypatch.setattr(cli, "_publish_schedule", _publish)
+    monkeypatch.setattr(cli, "publish_hunt_schedule", _publish)
     publisher = cli._SchedulePublisher("ch", "dfe", _settings(False))
 
     publisher.publish(first)

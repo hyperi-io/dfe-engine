@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.hunts import runner_cli as cli
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.hunts.schedule_publish import spec_sources
 from dfe_engine.hunts.spec_loader import load_specs
 
 pytestmark = pytest.mark.usefixtures("customer_orgs")
@@ -33,7 +33,7 @@ _HUNT = {
 
 def _runner_specs(settings) -> dict:
     database = settings.clickhouse.effective_data_database
-    return load_specs(settings.hunts.hunt_dir, **cli._spec_sources(settings, database))
+    return load_specs(settings.hunts.hunt_dir, **spec_sources(settings, database))
 
 
 def test_a_hunt_over_a_hyphenated_source_saves_and_compiles(client, admin_headers, api_settings):

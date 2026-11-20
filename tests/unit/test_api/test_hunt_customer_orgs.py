@@ -15,9 +15,9 @@ read the org registry, so the engine stores what each name resolves to.
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.hunts import runner_cli as cli
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.hunts.schedule_publish import spec_sources
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.yaml_utils import yaml_load
 
@@ -80,7 +80,7 @@ def test_the_runner_reads_the_resolved_tenant_ids_not_the_org_names(
     )
     database = api_settings.clickhouse.effective_data_database
 
-    specs = load_specs(api_settings.hunts.hunt_dir, **cli._spec_sources(api_settings, database))
+    specs = load_specs(api_settings.hunts.hunt_dir, **spec_sources(api_settings, database))
 
     (statement,) = specs["windows_hunt"].queries
     assert "_org_id IN ('acme-1', 'acme-2')" in statement.sql

@@ -19,10 +19,15 @@ the ``dfe_db`` fixture.
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
+
+import clickhouse_connect
 
 from dfe_engine.hunts import runner_cli
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
+from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.schedule import (
     due_count,
@@ -31,8 +36,14 @@ from dfe_engine.hunts.schedule import (
     read_schedule,
     write_offsets,
 )
+from dfe_engine.hunts.schedule_publish import StoredHuntSchedule
 from dfe_engine.hunts.spec_loader import load_specs
-from dfe_engine.settings import DFESettings, HuntSmoothingSettings, HuntsSettings
+from dfe_engine.settings import (
+    ClickHouseSettings,
+    DFESettings,
+    HuntSmoothingSettings,
+    HuntsSettings,
+)
 
 
 def _spec(hunt_id: str, interval: int = 2) -> HuntSpec:
@@ -173,3 +184,127 @@ def test_a_runner_with_smoothing_on_keeps_the_offset_the_smoother_learned(
     schedule = read_schedule(ch_client, dfe_db)
     assert schedule["a"] == (600, learned)
     assert schedule["b"] == (600, phase_offset("b", 600))
+
+
+def _engine_registry(ch_client, dfe_db, tmp_path: Path, *, smoothing: bool = False):
+    """The engine's hunt registry as the API builds it, publishing into ``dfe_db``."""
+    settings = DFESettings(
+        env="test",
+        clickhouse=ClickHouseSettings(data_database=dfe_db),
+        hunts=HuntsSettings(smoothing=HuntSmoothingSettings(enabled=smoothing)),
+    )
+    schedule = StoredHuntSchedule(settings, client=lambda: ch_client, rules_dir=tmp_path / "rules")
+    return HuntConfigRegistry(hunts_directory=tmp_path / "hunts", on_change=schedule.publish)
+
+
+def _stored(interval: str = "2s", *, enabled: bool | None = None) -> dict:
+    config = {"schedule": {"interval": interval}, "query": "SELECT 1 WHERE {window}"}
+    if enabled is not None:
+        config["enabled"] = enabled
+    return config
+
+
+def test_an_engine_hunt_change_leaves_the_schedule_right_with_no_runner_running(
+    ch_client, dfe_db, tmp_path: Path
+):
+    """No runner publishes at minReplicaCount 0, so each create, edit, disable and delete must."""
+    ChCoordinator(ch_client, database=dfe_db).ensure_schema()
+    registry = _engine_registry(ch_client, dfe_db, tmp_path)
+    try:
+        registry.save("a", _stored())
+        registry.save("b", _stored())
+        assert set(read_schedule(ch_client, dfe_db)) == {"a", "b"}
+        assert due_count(ch_client, dfe_db) == 2
+
+        registry.save("b", _stored(enabled=False))
+        assert set(read_schedule(ch_client, dfe_db)) == {"a"}
+        assert due_count(ch_client, dfe_db) == 1
+
+        registry.save("b", _stored(enabled=True))
+        registry.delete("a")
+        assert set(read_schedule(ch_client, dfe_db)) == {"b"}
+        assert due_count(ch_client, dfe_db) == 1
+
+        registry.save("b", _stored("4s"))
+        assert read_schedule(ch_client, dfe_db)["b"][0] == 4
+        rows = _schedule_rows(ch_client, dfe_db)
+        registry.save("b", _stored("4s"))
+        assert _schedule_rows(ch_client, dfe_db) == rows
+    finally:
+        registry.close()
+
+
+def test_an_engine_hunt_change_keeps_the_offset_the_smoother_learned(
+    ch_client, dfe_db, tmp_path: Path
+):
+    ChCoordinator(ch_client, database=dfe_db).ensure_schema()
+    registry = _engine_registry(ch_client, dfe_db, tmp_path, smoothing=True)
+    try:
+        registry.save("a", _stored("10m"))
+        learned = phase_offset("a", 600) + 17
+        write_offsets(ch_client, dfe_db, {"a": (600, learned)})
+
+        registry.save("b", _stored("10m"))
+        registry.save("a", _stored("10m") | {"display_name": "A"})
+
+        schedule = read_schedule(ch_client, dfe_db)
+        assert schedule["a"] == (600, learned)
+        assert schedule["b"] == (600, phase_offset("b", 600))
+    finally:
+        registry.close()
+
+
+def test_a_publish_that_fails_lands_when_clickhouse_comes_back(
+    ch_client, ch_params, dfe_db, tmp_path: Path
+):
+    """With the runner at zero nothing else writes the schedule, so the engine keeps trying."""
+    ChCoordinator(ch_client, database=dfe_db).ensure_schema()
+    settings = DFESettings(
+        env="test",
+        clickhouse=ClickHouseSettings(data_database=dfe_db),
+        hunts=HuntsSettings(runner_poll_seconds=0.2),
+    )
+    reachable = threading.Event()
+
+    def client():
+        if reachable.is_set():
+            return ch_client
+        return clickhouse_connect.get_client(host="127.0.0.1", port=1, connect_timeout=1)
+
+    # The retry runs on its own thread, and a client takes one query at a time.
+    reader = clickhouse_connect.get_client(**ch_params)
+    schedule = StoredHuntSchedule(settings, client=client, rules_dir=tmp_path / "rules")
+    registry = HuntConfigRegistry(hunts_directory=tmp_path / "hunts", on_change=schedule.publish)
+    try:
+        registry.save("a", _stored())
+        assert read_schedule(reader, dfe_db) == {}
+
+        reachable.set()
+        deadline = time.monotonic() + 10
+        while not read_schedule(reader, dfe_db) and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        assert set(read_schedule(reader, dfe_db)) == {"a"}
+    finally:
+        schedule.close()
+        registry.close()
+        reader.close()
+
+
+def test_a_missing_hunt_directory_does_not_tombstone_the_schedule(
+    ch_client, dfe_db, tmp_path: Path
+):
+    """An unreadable hunt directory is not an empty one: the hunts KEDA counts stay counted."""
+    ChCoordinator(ch_client, database=dfe_db).ensure_schema()
+    registry = _engine_registry(ch_client, dfe_db, tmp_path)
+    try:
+        registry.save("a", _stored())
+    finally:
+        registry.close()
+    settings = DFESettings(env="test", clickhouse=ClickHouseSettings(data_database=dfe_db))
+    schedule = StoredHuntSchedule(settings, client=lambda: ch_client, rules_dir=tmp_path / "rules")
+
+    schedule.publish(tmp_path / "gone")
+    schedule.close()
+
+    assert set(read_schedule(ch_client, dfe_db)) == {"a"}

@@ -20,9 +20,9 @@ takes an explicit ``offset`` that wins over the hash.
 
 KEDA can only wake the FIRST worker if "is any hunt due?" is answerable with NO
 worker running, i.e. as a ClickHouse query KEDA runs itself. The per-hunt schedule
-(interval + phase offset) is MATERIALISED into ``hunt_schedule``: a running hunt runner
-publishes it at start and on every spec reload, and ``dfe-hunt-runner materialise``
-writes it once. The scaler query
+(interval + phase offset) is MATERIALISED into ``hunt_schedule``: the engine API
+publishes it after every hunt change, a running hunt runner publishes it at start and on
+every spec reload, and ``dfe-hunt-runner materialise`` writes it once. The scaler query
 counts due-and-unclaimed hunts with the SAME arithmetic the worker uses
 (``latest_fire``): for interval I and offset P, boundary = now // I * I, fire =
 boundary + P once now >= boundary + P, else boundary + P - I, and the hunt is due iff
@@ -372,9 +372,8 @@ def publish_schedule(
 def restore_hash_offsets(ch: Any, database: str, *, fraction: float = PHASE_SPREAD_FRACTION) -> int:
     """Rewrite every enabled row whose offset is not the hash offset. Returns the rows rewritten.
 
-    What turning smoothing off does to the table. A table with no rows, the default
-    on Kubernetes where nothing runs ``materialise``, stays empty, and a table already
-    on the hash offsets is not written to at all.
+    What turning smoothing off does to the table. A table with no rows stays empty,
+    and a table already on the hash offsets is not written to at all.
     """
     rows: list[list[Any]] = []
     for hunt_id, (interval, offset) in read_schedule(ch, database).items():
