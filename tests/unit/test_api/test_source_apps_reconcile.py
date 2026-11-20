@@ -349,7 +349,7 @@ class TestOneFetcherRunsEveryFetchedSourceOnCompose:
         assert "holds no orgs" not in refused.text
 
     @pytest.mark.parametrize("edited", ["crates-b", "pypi-a"])
-    def test_an_update_the_one_fetcher_cannot_take_is_refused_and_both_keep_running(
+    def test_an_env_value_the_published_install_cannot_deliver_is_refused_and_both_keep_running(
         self, client, app, admin_headers, tmp_path, monkeypatch, edited
     ):
         self._save_gate(app, tmp_path)
@@ -370,8 +370,8 @@ class TestOneFetcherRunsEveryFetchedSourceOnCompose:
         )
 
         assert resp.status_code == 409, resp.text
-        assert resp.json()["code"] == "shared_instance_conflict"
-        assert "extraEnv.ONLY_ME" in resp.json()["detail"]
+        assert resp.json()["code"] == "env_not_delivered"
+        assert resp.json()["path"] == "extraEnv.ONLY_ME"
         polled = self._polled(tmp_path)
         assert polled["crates_io"]["topic"] == "crates-b"
         assert polled["pypi"]["topic"] == "pypi-a"

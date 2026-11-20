@@ -1275,7 +1275,10 @@ class DeploymentSettings(BaseModel):
             "from the host. Each file is written 0640 with the directory's group, "
             "so the engine must hold that group. Empty means something else "
             "delivers the overlay's extraEnv block, which on Kubernetes is the "
-            "app's own chart. DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR."
+            "app's own chart. A Docker deployment that leaves it empty, as a "
+            "Compose install published as one file does, has nothing to deliver it, "
+            "so the engine refuses an extraEnv value there. "
+            "DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
     hosted_instances: str = Field(
