@@ -782,6 +782,8 @@ holds the schedule. Their files and fields are in
 
 ### Sigma Rules (converted)
 
+Conversion is a beta behind `sigma.enabled`, default `false`, and has not yet run from feed to detection. Tracked in <https://github.com/hyperi-io/dfe-engine/issues/887>.
+
 Sigma rules are converted to DFE Rules by propagation (`dfe_engine.sigma.propagation`, `convert_detection_to_where`).
 The conversion produces a Rule definition with:
 

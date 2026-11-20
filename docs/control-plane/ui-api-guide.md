@@ -193,6 +193,8 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 
 ### Sigma (`/api/v1/sigma`)
 
+Sigma is a beta behind `sigma.enabled`, default `false`, and with it off every path below answers 404. Tracked in <https://github.com/hyperi-io/dfe-engine/issues/887>.
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/sigma/mappings/{source}` | Sigma field mappings for a source |
