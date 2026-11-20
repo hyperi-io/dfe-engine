@@ -12,9 +12,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 136 | Not placed yet: see its question |
+| decide | 137 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 335 | |
+| total | 336 | |
 
 ## Questions
 
@@ -38,12 +38,12 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | [clickhouse-cloud](#clickhouse-cloud) | 3 |
 | [gitops-classes](#gitops-classes) | 3 |
 | [samples](#samples) | 3 |
+| [client-config](#client-config) | 2 |
 | [hyperdx](#hyperdx) | 2 |
 | [lifecycle](#lifecycle) | 2 |
 | [pipeline-templates](#pipeline-templates) | 2 |
 | [source-schema-overlap](#source-schema-overlap) | 2 |
 | [usage-scope](#usage-scope) | 2 |
-| [client-config](#client-config) | 1 |
 | [defaults-apply](#defaults-apply) | 1 |
 | [deployment-facts](#deployment-facts) | 1 |
 
@@ -556,6 +556,15 @@ Sample tasks: fold into `system/operations/{operation}` with the result inline, 
 | `GET /api/v1/samples` | - | - | - | - | decide | infra 1 |  |
 | `GET /api/v1/samples/{task_id}` | - | - | - | - | decide | 0 |  |
 
+### client-config
+
+The console's runtime bootstrap: `system/client-config`, or where the console first reads it.
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/config/client` | - | - | - | - | decide | ui 2, infra 1 |  |
+| `GET /api/v1/config/features` | - | - | - | - | decide | 0 |  |
+
 ### hyperdx
 
 The Search reads for the caller's org: under `orgs/{org}`, or a root of their own.
@@ -600,14 +609,6 @@ Usage reads the whole deployment or one org, and `orgs/{org}/usage` covers only 
 |---|---|---|---|---|---|---|---|
 | `GET /api/v1/usage` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/usage/overview` | - | - | - | - | decide | 0 |  |
-
-### client-config
-
-The console's runtime bootstrap: `system/client-config`, or where the console first reads it.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `GET /api/v1/config/client` | - | - | - | - | decide | ui 2, infra 1 |  |
 
 ### defaults-apply
 

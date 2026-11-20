@@ -2394,6 +2394,15 @@ class DFESettings(BaseModel):
             "DFE_ENGINE_CRYPTO_PROFILE."
         ),
     )
+    feature_flags: dict[str, bool] = Field(
+        default_factory=dict,
+        description=(
+            "Flags a deployment turns on or off. Each key is true or false, and a "
+            "key that is absent is off. Code reads one with feature_enabled; the UI "
+            "reads the object from GET /api/v1/config/features. "
+            "DFE_ENGINE_FEATURE_FLAGS, a JSON object."
+        ),
+    )
     e2e_server: bool = Field(
         default=False,
         description=(
@@ -2401,6 +2410,36 @@ class DFESettings(BaseModel):
             "(seed-admin). DFE_ENGINE_E2E_SERVER. Refused in a production posture."
         ),
     )
+
+    @field_validator("feature_flags", mode="before")
+    @classmethod
+    def _feature_flags_are_booleans(cls, value: Any) -> Any:
+        # JSON true/false only. A string or 1 would coerce under lax bool parsing
+        # and turn a typo into a live flag.
+        if not isinstance(value, dict):
+            raise ValueError("feature_flags must be an object whose values are true or false")
+        for key, flag in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("feature_flags keys must be non-empty strings")
+            if type(flag) is not bool:
+                raise ValueError(
+                    f"feature_flags[{key!r}] must be true or false, not {type(flag).__name__}"
+                )
+        return value
+
+    def feature_enabled(self, name: str) -> bool:
+        """True when the deployment turned ``name`` on.
+
+        A flag that is absent is off, so a check written before anyone sets the
+        flag stays on the existing path.
+
+        Args:
+            name: The flag key, as it appears in ``DFE_ENGINE_FEATURE_FLAGS``.
+
+        Returns:
+            The configured value, or False when the key is absent.
+        """
+        return self.feature_flags.get(name, False)
 
     @model_validator(mode="after")
     def _a_bus_needs_a_broker(self) -> DFESettings:
@@ -2789,6 +2828,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
 _ENV_JSON_FIELDS = {
     "DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS": "auth.source_provider_bindings",
     "DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS": "auth.local.seed_accounts",
+    "DFE_ENGINE_FEATURE_FLAGS": "feature_flags",
     "DFE_ENGINE_ORGS_SEED_ORGS": "orgs.seed_orgs",
 }
 

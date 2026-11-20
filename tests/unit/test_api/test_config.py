@@ -3,6 +3,7 @@
 from dfe_engine.auth.oidc.models import OIDCProvider
 
 CLIENT_CONFIG = "/api/v1/config/client"
+FEATURE_FLAGS = "/api/v1/config/features"
 
 
 def _auth_mode(client, headers) -> str:
@@ -42,6 +43,28 @@ def test_auth_mode_is_oidc_once_an_enabled_provider_is_registered(client, app, v
         "dex", OIDCProvider(type="generic", issuer="https://idp.example")
     )
     assert _auth_mode(client, viewer_headers) == "oidc"
+
+
+def test_feature_flags_refuse_an_anonymous_request(client):
+    resp = client.get(FEATURE_FLAGS)
+
+    assert resp.status_code == 401
+
+
+def test_feature_flags_are_the_configured_object(client, app, viewer_headers):
+    app.state.settings.feature_flags = {"rules_v2": True, "beta_search": False}
+
+    resp = client.get(FEATURE_FLAGS, headers=viewer_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"rules_v2": True, "beta_search": False}
+
+
+def test_feature_flags_are_empty_until_configured(client, viewer_headers):
+    resp = client.get(FEATURE_FLAGS, headers=viewer_headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {}
 
 
 def test_auth_mode_stays_jwt_for_a_disabled_provider(client, app, viewer_headers):

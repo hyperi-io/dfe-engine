@@ -1374,6 +1374,51 @@ class TestSourceProviderBindings:
         assert AuthSettings(source_provider_bindings=bindings).source_provider_bindings == bindings
 
 
+class TestFeatureFlags:
+    """DFE_ENGINE_FEATURE_FLAGS is a JSON object of boolean flags."""
+
+    def test_unset_means_every_flag_is_off(self):
+        settings = load_settings()
+
+        assert settings.feature_flags == {}
+        assert settings.feature_enabled("rules_v2") is False
+
+    def test_json_object_sets_each_flag(self, monkeypatch):
+        monkeypatch.setenv(
+            "DFE_ENGINE_FEATURE_FLAGS",
+            '{"rules_v2": true, "beta_search": false}',
+        )
+
+        settings = load_settings()
+
+        assert settings.feature_flags == {"rules_v2": True, "beta_search": False}
+        assert settings.feature_enabled("rules_v2") is True
+        assert settings.feature_enabled("beta_search") is False
+        assert settings.feature_enabled("missing") is False
+
+    def test_malformed_json_fails_loud(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENGINE_FEATURE_FLAGS", "{not-json")
+
+        with pytest.raises(ValueError, match="not valid JSON"):
+            load_settings()
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"rules_v2": "true"}',
+            '{"rules_v2": 1}',
+            '{"rules_v2": null}',
+            "[]",
+            "true",
+        ],
+    )
+    def test_only_an_object_of_booleans_is_accepted(self, monkeypatch, raw):
+        monkeypatch.setenv("DFE_ENGINE_FEATURE_FLAGS", raw)
+
+        with pytest.raises(ValueError, match="feature_flags"):
+            load_settings()
+
+
 class TestEverySettingIsRead:
     """A field nothing reads is inert: it parses, validates, and changes nothing.
 

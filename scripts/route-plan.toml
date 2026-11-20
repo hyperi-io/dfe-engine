@@ -111,6 +111,7 @@ routes = [
   { old = "POST /api/v1/cel/check", status = "decide", note = "compute-helpers" },
   { old = "POST /api/v1/cel/check-batch", status = "decide", note = "compute-helpers" },
   { old = "GET /api/v1/config/client", status = "decide", note = "client-config" },
+  { old = "GET /api/v1/config/features", status = "decide", note = "client-config" },
   { old = "GET /api/v1/deployment/admin-links", status = "unchanged" },
   { old = "GET /api/v1/field-maps", status = "decide", note = "fieldmap-defaults" },
   { old = "POST /api/v1/field-maps", status = "decide", note = "fieldmap-defaults" },
