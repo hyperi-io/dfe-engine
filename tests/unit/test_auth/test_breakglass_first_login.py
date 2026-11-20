@@ -894,4 +894,20 @@ class TestDeploymentHints:
         assert "patch secret" in rotation_store_command(
             KUBERNETES, namespace="dfe", secret_name="dfe-engine", secret_key="admin-password"
         )
-        assert "make up" in rotation_store_command(DOCKER)
+        assert "env/engine.env, then: make up" in rotation_store_command(DOCKER)
+
+    @pytest.mark.parametrize(
+        ("deployer_command", "expected"),
+        [
+            # A published compose install has no checkout, so it names its own way.
+            (
+                "re-run the install with DFE_ADMIN_PASSWORD set",
+                "re-run the install with DFE_ADMIN_PASSWORD set",
+            ),
+            # A checkout names none, and blank is the same as unset.
+            ("", "set DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD in env/engine.env, then: make up"),
+            ("   ", "set DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD in env/engine.env, then: make up"),
+        ],
+    )
+    def test_a_docker_deployer_s_own_rotation_command_wins(self, deployer_command, expected):
+        assert rotation_store_command(DOCKER, deployer_command=deployer_command) == expected

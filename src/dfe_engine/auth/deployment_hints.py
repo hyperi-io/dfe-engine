@@ -73,15 +73,20 @@ def rotation_store_command(
     namespace: str = "",
     secret_name: str = "",
     secret_key: str = "",
+    deployer_command: str = "",
 ) -> str:
     """The command that changes the admin password where it is kept, for the 501 body.
 
     The engine never writes the password into its own YAML: the store that injects
     it is the source, so a rotation the engine performed alone would be reverted by
-    the next boot reconcile.
+    the next boot reconcile. ``deployer_command`` is ``deployment.rotation_command``
+    and wins, for the install published as one compose file that has no checkout,
+    no ``env/engine.env`` and no ``make``.
     """
+    if deployer_command.strip():
+        return deployer_command.strip()
     if kind == DOCKER:
-        return f"set {ADMIN_PASSWORD_ENV} in .env, then: make up"
+        return f"set {ADMIN_PASSWORD_ENV} in env/engine.env, then: make up"
     if kind == KUBERNETES:
         ns = namespace or "<namespace>"
         return (

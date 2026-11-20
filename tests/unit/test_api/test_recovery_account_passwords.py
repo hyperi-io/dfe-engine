@@ -73,6 +73,7 @@ def _settings(
     auth_sub: str = "auth",
     secret_path: str = "",
     deploy_kind: Literal["kubernetes", "docker", "unknown"] = "kubernetes",
+    rotation_command: str = "",
 ) -> DFESettings:
     """One deployment shape. ``auth_sub`` names the live account store's directory."""
     for sub in ("sources", "services", "rules", "hunts", auth_sub, "schemas", "secrets"):
@@ -81,7 +82,9 @@ def _settings(
         env=env,
         config_dir=str(tmp_path),
         clickhouse=ClickHouseSettings(bootstrap_tables=False),
-        deployment=DeploymentSettings(target=deploy_kind, namespace="dfe"),
+        deployment=DeploymentSettings(
+            target=deploy_kind, namespace="dfe", rotation_command=rotation_command
+        ),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
@@ -353,14 +356,25 @@ class TestRotate:
         assert "reset" in message.lower()
 
     @pytest.mark.parametrize(
-        ("kind", "command"),
+        ("kind", "rotation_command", "command"),
         [
-            ("kubernetes", "kubectl -n dfe patch secret dfe-engine"),
-            ("docker", "make up"),
+            ("kubernetes", "", "kubectl -n dfe patch secret dfe-engine"),
+            # A checkout keeps the password in env/engine.env and re-reads it on `make up`.
+            ("docker", "", "env/engine.env, then: make up"),
+            # A published compose install has no checkout, so the deployer names its own way.
+            (
+                "docker",
+                "DFE_ADMIN_PASSWORD=<new-password> docker compose -f oci://example/dfe up -d",
+                "DFE_ADMIN_PASSWORD=<new-password> docker compose -f oci://example/dfe up -d",
+            ),
         ],
     )
-    def test_without_a_secret_path_it_names_where_to_change_it(self, tmp_path, kind, command):
-        settings = _settings(tmp_path, gitops=False, deploy_kind=kind)
+    def test_without_a_secret_path_it_names_where_to_change_it(
+        self, tmp_path, kind, rotation_command, command
+    ):
+        settings = _settings(
+            tmp_path, gitops=False, deploy_kind=kind, rotation_command=rotation_command
+        )
         with _booted(settings) as (app, client):
             resp = client.post(
                 f"{_ACCOUNTS}/admin/rotate-password",

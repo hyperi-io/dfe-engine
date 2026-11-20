@@ -981,6 +981,7 @@ async def rotate_password(
             namespace=settings.deployment.namespace,
             secret_name=local.admin_secret_name,
             secret_key=local.admin_secret_key,
+            deployer_command=settings.deployment.rotation_command,
         )
         raise ProblemError(
             501,
