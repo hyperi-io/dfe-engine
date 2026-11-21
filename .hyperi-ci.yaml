@@ -10,6 +10,7 @@ classification: product
 
 release:
   enabled: true
+  candidates: true
   channel: release
   # Private service: ship only the GHCR container image, never a wheel to PyPI.
   destinations:
