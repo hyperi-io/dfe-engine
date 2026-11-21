@@ -30,6 +30,7 @@ from tests.integration.conftest import (
     _resolve_tier,
     _spin_ch_on_docker,
     _truthy,
+    _worker_owner,
 )
 
 # The probe image, tag and digest apart so one Renovate regex covers them.
@@ -77,6 +78,24 @@ def test_same_named_tests_in_two_modules_do_not_collide():
     isolation = "tests/integration/test_ch_rbac_isolation.py::test_text_override_is_a_hard_error"
     reconcile = "tests/integration/test_ch_rbac_reconcile.py::test_text_override_is_a_hard_error"
     assert _container_name(isolation, "clickhouse") != _container_name(reconcile, "clickhouse")
+
+
+def test_one_module_held_by_two_xdist_workers_gets_two_container_names(monkeypatch):
+    """``module_ch_params`` is built once per xdist worker, and the name says which worker holds it.
+
+    The owning pid already tells two processes apart. The worker keeps the names
+    apart however the workers are run, and shows in ``docker ps`` as the Kafka and
+    OpenBao fixtures' do.
+    """
+    module = "tests/integration/test_schema/test_index_use_cases_ch.py"
+    names = {}
+    for worker in ("gw0", "gw1"):
+        monkeypatch.setenv("PYTEST_XDIST_WORKER", worker)
+        names[worker] = _container_name(_worker_owner(module), "clickhouse")
+
+    assert names["gw0"] != names["gw1"]
+    assert "-py-gw0-" in names["gw0"]
+    assert "-py-gw1-" in names["gw1"]
 
 
 def test_container_name_is_a_legal_docker_name():
