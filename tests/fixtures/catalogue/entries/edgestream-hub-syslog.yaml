@@ -1,0 +1,17 @@
+# Catalogue source edgestream-hub-syslog: the POST /sources write body that creates it.
+# See docs/catalogue.md.
+
+source: edgestream-hub-syslog
+display_name: EdgeStream Hub syslog
+description: Syslog events an EdgeStream Hub forwards, routed on the hub's @edgestream.event.src_type.
+match:
+  field: "@edgestream.event.src_type"
+  operator: equals
+  value: syslog_ng
+schema:
+  meta_schema: meta/edgestream/hub_syslog
+catalogue:
+  package: edgestream_hub
+  data_stream: syslog
+  intakes: [receiver]
+  framing: body
