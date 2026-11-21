@@ -74,6 +74,7 @@ def _transformed(name: str = "acme-logs", transport: str | None = None, **transf
         ),
         pytest.param({"engine": "external", "variant": "okta"}, "variant", id="variant"),
         pytest.param({"engine": "external", "mode": "agent"}, "mode", id="mode"),
+        pytest.param({"engine": "external", "conf": {"tz_offset": "+10:00"}}, "conf", id="conf"),
         pytest.param({"engine": "external", "env": {"A": "1"}}, "env", id="env"),
         pytest.param({"engine": "external", "files": ["geo.mmdb"]}, "files", id="files"),
         pytest.param({"engine": "external", "config_file": "x.toml"}, "config_file", id="config"),

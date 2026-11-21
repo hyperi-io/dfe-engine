@@ -13,6 +13,7 @@ Usage:
     source_dict = source.model_dump(mode="json")
 """
 
+import json
 import re
 from datetime import date
 from functools import cache, lru_cache
@@ -818,6 +819,51 @@ def _listed_once(values: list[str], field: str) -> list[str]:
     return values
 
 
+SOURCE_CONF_MAX_BYTES = 16 * 1024
+"""The most a transform's ``conf`` may serialise to, the cap dfe-transform-elastic holds it to."""
+
+SOURCE_CONF_MAX_DEPTH = 16
+"""How deep a transform's ``conf`` may nest, the top-level map counting as 1."""
+
+_SOURCE_CONF_SECRET_NAMES = frozenset({"secret", "password", "token", "api_key", "client_secret"})
+
+
+def _check_source_conf(conf: dict[str, Any]) -> None:
+    """Refuse a ``conf`` that is too big, nests too deep or names a credential.
+
+    ``conf`` is written in plain text into the transform's config, so a key that holds
+    a secret is refused at any depth, matching the app's own check at start.
+
+    Raises:
+        ValueError: Naming the offending key path, size or depth.
+    """
+    if not conf:
+        return
+    size = len(json.dumps(conf, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    if size > SOURCE_CONF_MAX_BYTES:
+        raise ValueError(f"conf is {size} bytes, over the {SOURCE_CONF_MAX_BYTES} byte limit")
+    _check_conf_value(conf, "conf", 1)
+
+
+def _check_conf_value(value: Any, path: str, level: int) -> None:
+    if isinstance(value, dict):
+        if level > SOURCE_CONF_MAX_DEPTH:
+            raise ValueError(f"{path} nests deeper than {SOURCE_CONF_MAX_DEPTH} levels")
+        for key, item in value.items():
+            key_path = f"{path}.{key}"
+            if str(key).lower() in _SOURCE_CONF_SECRET_NAMES:
+                raise ValueError(
+                    f"{key_path} names a secret, and conf is written into the transform's "
+                    "config in plain text. Secrets are not supported here"
+                )
+            _check_conf_value(item, key_path, level + 1)
+    elif isinstance(value, list):
+        if level > SOURCE_CONF_MAX_DEPTH:
+            raise ValueError(f"{path} nests deeper than {SOURCE_CONF_MAX_DEPTH} levels")
+        for at, item in enumerate(value):
+            _check_conf_value(item, f"{path}[{at}]", level + 1)
+
+
 class SourceTransform(ExternalPipeline):
     """Transform stage configuration: a catalogued transform app, or the customer's own pipeline.
 
@@ -854,6 +900,16 @@ class SourceTransform(ExternalPipeline):
             "How an agentless transform detects each event's source and what it does with "
             "one it cannot place. Read only when mode is agentless. Unset leaves the app's "
             "own defaults."
+        ),
+    )
+    conf: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Settings the transform's program reads for this source, written as the "
+            "integration documents them (dfe-transform-elastic sets them as _conf on each "
+            "event: tz_offset, tz_map and the like). A plain map of at most 16 KiB, with "
+            "no key named secret, password, token, api_key or client_secret at any depth. "
+            "Only an app whose manifest declares a conf_path takes it."
         ),
     )
     config_file: str | None = Field(default=None, description="Path to engine-specific config")
@@ -897,6 +953,7 @@ class SourceTransform(ExternalPipeline):
                 ("variant", self.variant),
                 ("mode", self.mode),
                 ("detect", self.detect),
+                ("conf", self.conf),
                 ("config_file", self.config_file),
                 ("env", self.env),
                 ("files", self.files),
@@ -908,6 +965,24 @@ class SourceTransform(ExternalPipeline):
                 f"an external transform is the customer's own pipeline, which the engine "
                 f"neither deploys nor configures, so it takes no {', '.join(given)}"
             )
+        return self
+
+    @field_validator("conf")
+    @classmethod
+    def _validate_conf(cls, v: dict[str, Any]) -> dict[str, Any]:
+        _check_source_conf(v)
+        return v
+
+    @model_validator(mode="after")
+    def _validate_conf_target(self) -> SourceTransform:
+        if not self.conf or self.is_external:
+            return self
+        # Imported at call time for the cycle _validate_engine describes.
+        from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, transform_service
+
+        app = APP_CATALOGUE.get(transform_service(self.engine))
+        if not (app and app.conf_path):
+            raise ValueError(f"transform engine {self.engine!r} takes no conf")
         return self
 
     @model_validator(mode="after")
