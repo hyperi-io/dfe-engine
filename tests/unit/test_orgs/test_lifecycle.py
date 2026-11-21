@@ -21,6 +21,7 @@ import pytest
 
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 from dfe_engine.orgs.registry import OrgRegistry
+from tests.unit.test_auth.factories import make_group_store
 
 
 class FakeFork:
@@ -160,3 +161,31 @@ async def test_an_answer_with_no_team_is_audited_as_such(registry, audit_events)
 
     (event,) = [e for e in audit_events if e["event"] == "org.hyperdx.provision_failed"]
     assert (event["org_name"], event["reason"]) == ("acme", "no_team")
+
+
+def _group_shapes(*, store) -> dict[str, tuple[list[str], str]]:
+    """Every stored group's roles and scope, by name."""
+    return {group.name: (group.roles, group.scope) for group in store.list()}
+
+
+@pytest.mark.asyncio
+async def test_create_org_makes_its_admin_and_viewer_groups(registry, tmp_path):
+    groups = make_group_store(directory=tmp_path / "groups")
+    manager = OrgLifecycleManager(registry, group_store=groups, hyperdx_client=None)
+    await manager.create_org("acme", admin_id="admin")
+    assert _group_shapes(store=groups) == {
+        "acme-admins": (["org_admin"], "org:acme"),
+        "acme-viewers": (["org_viewer"], "org:acme"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_delete_org_drops_its_groups_and_keeps_anothers(registry, tmp_path):
+    groups = make_group_store(directory=tmp_path / "groups")
+    manager = OrgLifecycleManager(registry, group_store=groups, hyperdx_client=None)
+    await manager.create_org("acme", admin_id="admin")
+    await manager.create_org("globex", admin_id="admin")
+    groups.add_member("acme-viewers", "kim")
+    await manager.delete_org("acme", admin_id="admin")
+    left = (sorted(_group_shapes(store=groups)), registry.get("acme"))
+    assert left == (["globex-admins", "globex-viewers"], None)

@@ -99,6 +99,22 @@ roles:
       - "service:read"
       - "org:read"
       - "usage:read"
+  org_admin:
+    description: "Administers one org's accounts and identity providers, holding an org viewer's reads. Bound only at an org's scope"
+    resource_type: core
+    permissions:
+      - "query:execute"
+      - "source:read"
+      - "sampler:read"
+      - "dashboard:read"
+      - "usage:read"
+      - "account:read"
+      - "account:write"
+      - "account:delete"
+      - "accounts:reset_password"
+      - "oidc:read"
+      - "oidc:write"
+      - "oidc:delete"
   org_viewer:
     description: "Org-restricted data viewer"
     resource_type: core

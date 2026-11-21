@@ -566,6 +566,40 @@ class TestUpdate:
 # ---------------------------------------------------------------------------
 
 
+class TestLinkRecords:
+    def test_a_link_record_lives_under_links_until_it_is_unlinked(self, store, tmp_path):
+        accounts = tmp_path / "accounts"
+        store.create("00u1", "")
+        store.update("00u1", linked_to="kaz")
+        linked = (
+            sorted(path.name for path in accounts.glob("*.yaml")),
+            sorted(path.name for path in (accounts / "links").glob("*.yaml")),
+            store.get("00u1").linked_to,
+            [account.username for account in store.scan()],
+        )
+        store.update("00u1", linked_to="")
+        freed = (
+            sorted(path.name for path in accounts.glob("*.yaml")),
+            sorted(path.name for path in (accounts / "links").glob("*.yaml")),
+        )
+        assert (linked, freed) == (
+            ([], ["00u1.yaml"], "kaz", ["00u1"]),
+            (["00u1.yaml"], []),
+        )
+
+    def test_a_link_records_name_cannot_be_created_again(self, store):
+        store.create("00u1", "")
+        store.update("00u1", linked_to="kaz")
+        with pytest.raises(ValueError, match="Account already exists: 00u1"):
+            store.create("00u1", "")
+
+    def test_deleting_a_link_record_removes_its_file(self, store, tmp_path):
+        store.create("00u1", "")
+        store.update("00u1", linked_to="kaz")
+        store.delete("00u1")
+        assert (store.get("00u1"), list((tmp_path / "accounts" / "links").iterdir())) == (None, [])
+
+
 class TestResetPassword:
     def test_new_password_works(self, store):
         store.create("alice", "oldpass")

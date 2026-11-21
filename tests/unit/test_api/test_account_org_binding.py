@@ -40,7 +40,7 @@ def _sign_in(client: TestClient, username: str) -> dict[str, str]:
 
 
 def _create(client: TestClient, admin_headers: dict[str, str], **fields):
-    body = {"username": "alice", "password": PASSWORD, **fields}
+    body = {"name": "Test User", "username": "alice", "password": PASSWORD, **fields}
     return client.post(ACCOUNTS, json=body, headers=admin_headers)
 
 
@@ -111,7 +111,12 @@ class TestALocalAccountIsBoundToItsOrg:
 
 
 def _tenant_viewer(app: FastAPI, client: TestClient, admin_headers, *, org: str, grants: list[str]):
-    """alice, bound to *org*, holding org_viewer system-wide over the orgs in *grants*."""
+    """alice, bound to *org*, holding org_viewer system-wide over the orgs in *grants*.
+
+    An account of an org other than yours holds no group reaching another org, so *org* is named your org where *grants* reach past it.
+    """
+    if (org) and (set(grants) != {org}):
+        app.state.org_registry.home.set(actor="test", name=org)
     assert _create(client, admin_headers, org=org).status_code == 201
     app.state.group_store.create("tenant-viewers", roles=["org_viewer"], members=["alice"])
     app.state.group_store.update("tenant-viewers", org_ids=grants)
@@ -196,6 +201,7 @@ class TestATenantIsolatedViewReadsOnlyTheSessionsOrg:
         orgs: None,
         reader: RecordingClient,
     ):
+        app.state.org_registry.home.set(actor="test", name="globex")
         assert _create(client, admin_headers, org="globex").status_code == 201
         app.state.group_store.add_member("dfe-viewers", "alice")
         app.state.account_store.update("alice", groups=["dfe-viewers"])

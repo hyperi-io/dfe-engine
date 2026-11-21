@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from ruamel.yaml import YAML
 
 from dfe_engine import yaml_utils
-from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.auth import breakglass
 from dfe_engine.auth.accounts import Account
@@ -37,6 +36,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from tests.support.orgs import name_your_org
+from tests.support.reauth import create_app_without_reauth
 
 
 def _settings(tmp_path: Path) -> DFESettings:
@@ -95,7 +95,7 @@ def _complete_setup(app) -> None:
 
 
 def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/auth/setup-status")
@@ -129,7 +129,7 @@ def _change_admin_password(client: TestClient, new_password: str) -> None:
 def test_the_forced_change_clears_default_credentials_without_a_restart(tmp_path):
     """Login, refresh and setup-status all answer from the admin's current password."""
     owner_password = secrets.token_urlsafe(16)
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             body = client.get("/api/v1/auth/setup-status").json()
@@ -159,11 +159,15 @@ def test_a_restart_keeps_the_owners_password_and_the_cleared_flag(tmp_path):
     settings = _settings(tmp_path)
     owner_password = secrets.token_urlsafe(16)
     try:
-        with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
+        with TestClient(
+            create_app_without_reauth(settings=settings), raise_server_exceptions=False
+        ) as client:
             _change_admin_password(client, owner_password)
         _registries.clear()
 
-        with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
+        with TestClient(
+            create_app_without_reauth(settings=settings), raise_server_exceptions=False
+        ) as client:
             stale = client.post(
                 "/api/v1/auth/login", json={"username": "admin", "password": SHIPPED_DEFAULT}
             )
@@ -180,7 +184,7 @@ def test_a_restart_keeps_the_owners_password_and_the_cleared_flag(tmp_path):
 
 def test_an_admin_issued_the_default_again_is_flagged_again(tmp_path):
     """A store write that issues the default puts the flag back on the next read."""
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             _change_admin_password(client, secrets.token_urlsafe(16))
@@ -198,7 +202,7 @@ def test_setup_status_carries_the_deploy_kind_and_fetch_command(tmp_path):
     settings = _settings(tmp_path)
     settings.deployment.target = "kubernetes"
     settings.deployment.namespace = "dfe"
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             body = client.get("/api/v1/auth/setup-status").json()
@@ -216,7 +220,7 @@ def test_setup_status_carries_the_deploy_kind_and_fetch_command(tmp_path):
 def test_default_credentials_clears_once_the_password_is_minted(tmp_path):
     settings = _settings(tmp_path)
     settings.auth.local.admin_password = MINTED_ADMIN
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             assert client.get("/api/v1/auth/setup-status").json()["default_credentials"] is False
@@ -231,7 +235,7 @@ def test_default_credentials_clears_once_the_password_is_minted(tmp_path):
 
 
 def test_login_on_the_default_password_flags_the_session(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             token = client.post(
@@ -250,7 +254,7 @@ def test_setup_status_reports_auth_steps_even_when_auth_is_disabled(tmp_path):
     ``bootstrap_auth`` runs unconditionally and ``POST /auth/login`` never
     checks the toggle, so the wizard must still call for the first real user.
     """
-    app = create_app(settings=_settings_auth_disabled(tmp_path))
+    app = create_app_without_reauth(settings=_settings_auth_disabled(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
@@ -263,7 +267,7 @@ def test_setup_status_reports_auth_steps_even_when_auth_is_disabled(tmp_path):
 
 
 def test_setup_status_step_details_carry_required_and_complete(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             name_your_org(app=app)
@@ -282,7 +286,7 @@ def test_setup_status_step_details_carry_required_and_complete(tmp_path):
 
 
 def test_setup_status_complete_when_all_required_steps_done(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             _complete_setup(app)
@@ -300,7 +304,7 @@ def test_setup_status_complete_when_all_required_steps_done(tmp_path):
 def test_setup_stays_complete_once_finished(tmp_path):
     """Deleting the last user, then restarting, never reopens the wizard."""
     settings = _settings(tmp_path)
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             _complete_setup(app)
@@ -315,7 +319,9 @@ def test_setup_stays_complete_once_finished(tmp_path):
             assert setup["completed_steps"] == ["organisations"]
         _registries.clear()
 
-        with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
+        with TestClient(
+            create_app_without_reauth(settings=settings), raise_server_exceptions=False
+        ) as client:
             assert client.get("/api/v1/auth/setup-status").json()["initial_setup"]["complete"]
     finally:
         _registries.clear()
@@ -323,7 +329,7 @@ def test_setup_stays_complete_once_finished(tmp_path):
 
 def test_setup_stays_open_until_it_finishes(tmp_path):
     """An org with no user records nothing, so deleting it leaves the wizard where it was."""
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             app.state.org_registry.create("acme", display_name="Acme")
@@ -339,7 +345,7 @@ def test_setup_stays_open_until_it_finishes(tmp_path):
 
 
 def test_setup_status_partial_completion(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             name_your_org(app=app)
@@ -354,7 +360,7 @@ def test_setup_status_partial_completion(tmp_path):
 
 
 def test_setup_status_returns_registries_while_incomplete(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # No real user yet, so the wizard still has a step to render these for.
@@ -371,7 +377,7 @@ def test_setup_status_returns_registries_while_incomplete(tmp_path):
 
 def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path):
     """The console's order: create the organisation, then the first user."""
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             owner_password = secrets.token_urlsafe(16)
@@ -402,7 +408,11 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
 
             user = client.post(
                 "/api/v1/auth/accounts",
-                json={"username": "alexops", "password": secrets.token_urlsafe(16)},
+                json={
+                    "name": "Test User",
+                    "username": "alexops",
+                    "password": secrets.token_urlsafe(16),
+                },
                 headers=admin,
             )
             assert user.status_code in (200, 201), user.text
@@ -421,7 +431,7 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
 
 def test_setup_status_never_returns_accounts(tmp_path):
     """The account list is not served pre-login -- only the first_user verdict is."""
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             app.state.account_store.create("alice", "a-strong-user-password")
@@ -436,7 +446,7 @@ def test_setup_status_never_returns_accounts(tmp_path):
 
 
 def test_setup_status_withholds_registries_once_complete(tmp_path):
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             _complete_setup(app)
@@ -453,7 +463,7 @@ def test_break_glass_logs_in_from_the_committed_hash(tmp_path):
     """The hash in governance settings is what the recovery login verifies against."""
     settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
     settings.auth.local.breakglass_password = MINTED_BREAKGLASS
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -470,7 +480,7 @@ def test_break_glass_logs_in_from_the_committed_hash(tmp_path):
 def test_disabled_break_glass_login_is_403_with_a_reason(tmp_path):
     settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
     settings.auth.local.breakglass_password = MINTED_BREAKGLASS
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             breakglass.set_enabled(_deploy_repo_crud(tmp_path), False, "tester")
@@ -493,7 +503,7 @@ def test_disabled_break_glass_login_is_403_with_a_reason(tmp_path):
 
 def test_setup_status_keeps_oidc_login_options_once_complete(tmp_path):
     """Post-setup the login screen still gets the enabled IdPs -- name + label only."""
-    app = create_app(settings=_settings(tmp_path))
+    app = create_app_without_reauth(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             app.state.oidc_provider_registry.create(
@@ -531,7 +541,7 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
     every file's parse from the last call, parsing again only a file that changed.
     """
     settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             name_your_org(app=app)

@@ -30,6 +30,7 @@ class TestAccountAttributes:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": username,
                 "password": secrets.token_urlsafe(16),
                 "email": f"{username}@example.com",
@@ -170,6 +171,7 @@ class TestAttributeNestingIsCapped:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "deepuser",
                 "password": secrets.token_urlsafe(16),
                 "email": "deepuser@example.com",

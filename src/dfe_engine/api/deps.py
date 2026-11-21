@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
-from fastapi import Depends, Request, status
+from fastapi import Depends, Header, Request, status
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 from scalo.api import ProblemError, permission
@@ -33,6 +33,7 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.identity_links import linked_person, linked_through
 from dfe_engine.auth.jit import (
     API_KEY_SUBJECT_PREFIX,
     JitAccountUnavailableError,
@@ -40,12 +41,14 @@ from dfe_engine.auth.jit import (
     JitNoRoleError,
     JitSubjectUnusableError,
 )
-from dfe_engine.auth.membership import groups_held, groups_held_by
-from dfe_engine.auth.models import held_grants, is_platform_role, platform_caller
+from dfe_engine.auth.membership import groups_held_by
+from dfe_engine.auth.models import ORG_ADMIN_ROLE, held_grants, is_platform_role, platform_caller
+from dfe_engine.auth.reauth import REAUTH_HEADER, ReauthKind, grant_allows, grant_target
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.http_errors import describe_http_error, failure_reference
+from dfe_engine.orgs.role_groups import org_role_groups_held
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.orgs.tenant_scope import org_tenant_ids, resolve_orgs
 from dfe_engine.secrets import DfeSecrets, build_secret_mirror, build_secrets
@@ -467,6 +470,9 @@ def _grants_of(groups: Iterable[Group]) -> GroupResolution:
         claimed = group.org_markers
         org_ids.update(claimed)
         for role in group.roles:
+            if (role == ORG_ADMIN_ROLE) and (not (scope_org)):
+                # Bound at system scope it would administer every org, so it grants nothing there.
+                continue
             roles.add(role)
             grant = ScopedGrant(role=role, scope=scope, org_ids=claimed)
             if grant not in seen_grants:
@@ -508,6 +514,14 @@ def bound_account(request: Request, user_id: str) -> Any:
     return account_for_session_subject(account_store, user_id)
 
 
+def is_own_account(*, request: Request, user: AuthContext, username: str) -> bool:
+    """Whether *username* is the caller's own account, whichever subject its session carries."""
+    if username == user.user_id:
+        return True
+    bound = bound_account(request, user.user_id)
+    return (bound is not None) and (bound.username == username)
+
+
 def get_role_config(request: Request) -> RoleConfig:
     """The role definitions ``authorize()`` reads: the live copy role writes refresh, else the shipped ones."""
     return live_role_config(request) or RoleConfig.load_builtin()
@@ -539,7 +553,7 @@ def resolve_live_grants_for_user(
 
     The account is the one :func:`account_for_session_subject` binds, so a subject that
     binds none, an API-key subject among them, resolves to nothing. The resolution's
-    ``groups`` are the ones the account holds (:func:`groups_held`). *groups* is every
+    ``groups`` are the ones the account holds (:func:`groups_held`) less any its org may not (:func:`org_role_groups_held`). *groups* is every
     stored group when the caller has listed them for this request. Otherwise they are
     listed here, once.
     """
@@ -554,18 +568,20 @@ def resolve_live_grants_for_user(
         account.source_provider,
         listed,
         bindings=provider_bindings(request),
+        identities=account.identities,
+    )
+    # Fail closed: however an org account came to hold a group, its grants stay inside its org.
+    held = org_role_groups_held(
+        account_org=account.org, groups=held, home_org=bound_org(account_org="", request=request)
     )
     return _grants_of(held)
 
 
-def resolve_live_groups_for_user(request: Request, user_id: str) -> list[str]:
-    """The groups the bound account holds (:func:`groups_held`), none when it binds none."""
-    account = bound_account(request, user_id)
-    if account is None:
-        return []
-    group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
-    groups = group_store.list() if group_store is not None else []
-    return groups_held(account, groups, bindings=provider_bindings(request))
+def _person_behind(*, record: Any, store: Any) -> Any:
+    """The account *record* stands for: itself, or the one a link record points at while that account still lists the sign-in."""
+    if not (record.is_link_record):
+        return record
+    return linked_person(record=record, store=store)
 
 
 def account_for_session_subject(store: Any, user_id: str):
@@ -578,13 +594,16 @@ def account_for_session_subject(store: Any, user_id: str):
     alone, so ``Bob`` never binds the local ``bob``. An API-key subject binds no
     account. Several subjects sanitise to one stem, and a subject can be
     another's stem, so an account that records another subject is not this
-    session's whichever lookup found it.
+    session's whichever lookup found it. A link record binds the account it points
+    at, one hop, and nothing once that account no longer lists the sign-in.
     """
     if user_id.startswith(API_KEY_SUBJECT_PREFIX):
         return None
     account = store.get(user_id)
     if account is not None:
-        return None if account.subject and account.subject != user_id else account
+        if account.subject and account.subject != user_id:
+            return None
+        return _person_behind(record=account, store=store)
     from dfe_engine.auth.jit import JitProvisioner
 
     stem = JitProvisioner.sanitise_username(user_id)
@@ -595,7 +614,7 @@ def account_for_session_subject(store: Any, user_id: str):
         return None
     if shadow.subject and shadow.subject != user_id:
         return None
-    return shadow
+    return _person_behind(record=shadow, store=store)
 
 
 def require_local_account_enabled(request: Request, user_id: str) -> Any:
@@ -635,6 +654,19 @@ def refuse_denied_account(account: Any) -> None:
     code, message = denied
     raise ProblemError(
         status.HTTP_401_UNAUTHORIZED, message, code=code, headers={"WWW-Authenticate": "Bearer"}
+    )
+
+
+def throttled(request: Request, wait: int) -> ProblemError:
+    """The 429 a sign-in or password check answers while its caller must wait, counted."""
+    metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
+    route = str(getattr(request.scope.get("route"), "path", "")) or "unknown"
+    metrics.sign_in_throttled(route)
+    return ProblemError(
+        429,
+        f"Too many failed attempts; try again in {wait} seconds",
+        code="too_many_attempts",
+        headers={"Retry-After": str(wait)},
     )
 
 
@@ -723,9 +755,11 @@ async def get_current_user(request: Request) -> AuthContext:
         # The token path's resolution, so a member an operator added by hand holds the group here too.
         live = resolve_live_grants_for_user(request, oidc_subject, groups=listed)
         logger.debug("OIDC auth", user_id=oidc_subject, groups=live.groups, roles=live.roles)
+        # A linked sign-in's session is its account's, as a token minted for it says.
+        linked = bound is not None and linked_through(account=bound, subject=oidc_subject)
         return AuthContext(
             org_id=bound_org(account_org=bound.org, request=request) if bound is not None else "",
-            user_id=oidc_subject,
+            user_id=bound.session_subject if linked else oidc_subject,
             email=oidc_email,
             roles=live.roles,
             grants=live.grants,
@@ -759,12 +793,23 @@ async def get_current_user(request: Request) -> AuthContext:
             }.get(reason, "Invalid API key")
             raise ProblemError(status.HTTP_401_UNAUTHORIZED, message, code="unauthorized")
         group_store = request.app.state.group_store
-        resolution = _resolve_group_grants(key_meta.groups, group_store)
+        key_groups = key_meta.groups
+        home = bound_org(account_org="", request=request)
+        if (key_meta.org) and (key_meta.org != home):
+            # An org-bound key holds only its org's admin or viewer groups, by name, as an org account does.
+            allowed = {
+                group.name
+                for group in org_role_groups_held(
+                    account_org=key_meta.org, groups=group_store.list(), home_org=home
+                )
+            }
+            key_groups = [name for name in key_groups if name in allowed]
+        resolution = _resolve_group_grants(key_groups, group_store)
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug(
             "API key auth",
             key_name=key_meta.name,
-            groups=key_meta.groups,
+            groups=key_groups,
             roles=roles,
         )
         return AuthContext(
@@ -772,7 +817,7 @@ async def get_current_user(request: Request) -> AuthContext:
             user_id=f"{API_KEY_SUBJECT_PREFIX}{key_meta.name}",
             roles=roles,
             grants=resolution.grants,
-            groups=key_meta.groups,
+            groups=key_groups,
             org_ids=org_ids,
             request_id=request_id,
             client_ip=client_ip,
@@ -968,6 +1013,32 @@ def allowed_at_system_or_own_org(request: Request, user: AuthContext, action: st
         True when some grant the caller holds allows ``action`` there.
     """
     return is_action_allowed(request, user, action) or bool(held_orgs(request, user, action))
+
+
+def reaches_org(*, action: str, org: str, request: Request, user: AuthContext) -> bool:
+    """Whether the caller may take *action* on what *org* owns: across every org, or in *org* when it is an org other than yours.
+
+    Empty *org*, or your org's name, is the platform's own, which only a caller acting across every org reaches.
+    """
+    if not (request.app.state.settings.auth.enabled):
+        return True
+    if reads_every_org(request, user, action):
+        return True
+    if (not (org)) or (org == bound_org(account_org="", request=request)):
+        return False
+    return org in {held.name for held in held_orgs(request, user, action)}
+
+
+def refuse_unreachable_org(
+    *, action: str, noun: str, org: str, request: Request, user: AuthContext
+) -> None:
+    """Refuse 403 when the caller may not take *action* on the *noun* of *org* (:func:`reaches_org`)."""
+    if reaches_org(action=action, org=org, request=request, user=user):
+        return
+    target = f"{noun} of org {org!r}" if org else f"the platform's {noun}"
+    reason = f"no role grants {action!r} over {target}"
+    audit_permission_denied(user.user_id, action, user.roles, reason)
+    raise AuthorizationError(f"Action '{action}' denied: {reason}")
 
 
 def reads_every_org(request: Request, user: AuthContext, action: str) -> bool:
@@ -1235,6 +1306,51 @@ def require_org_action(action: str):
         check_action(request, user, action, scope=Scope(type="org", id=org))
 
     return _check
+
+
+def refuse_without_grant(*, reauth: str, request: Request, target: str, user: AuthContext) -> None:
+    """Refuse 403 ``reauth_required`` unless *reauth* is the caller's live grant for *target*.
+
+    An API-key session carries none and needs none: nobody is there to re-enter a password.
+    """
+    settings = request.app.state.settings
+    if (not (settings.auth.enabled)) or (user.user_id.startswith(API_KEY_SUBJECT_PREFIX)):
+        return
+    authority = jwt_authority_for(settings)
+    if (reauth) and (
+        grant_allows(authority=authority, caller=user.user_id, target=target, token=reauth)
+    ):
+        return
+    raise ProblemError(403, "Re-enter your password to make this change", code="reauth_required")
+
+
+ReauthGrant = Annotated[
+    str,
+    Header(alias=REAUTH_HEADER, description="The grant POST /auth/reauth returned for this change"),
+]
+
+
+def require_reauth(*, kind: ReauthKind, param: str):
+    """FastAPI dependency factory: the caller's re-auth grant for the *kind* the path parameter *param* names (:func:`refuse_without_grant`)."""
+
+    async def _check(
+        request: Request,
+        reauth: ReauthGrant = "",
+        user: AuthContext = Depends(get_current_user),
+    ) -> None:
+        target = grant_target(kind=kind, name=str(request.path_params.get(param, "")))
+        refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+    return _check
+
+
+require_account_reauth = require_reauth(kind="account", param="username")
+require_api_key_reauth = require_reauth(kind="api_key", param="short_token")
+require_group_reauth = require_reauth(kind="group", param="name")
+require_provider_reauth = require_reauth(kind="provider", param="name")
+require_role_reauth = require_reauth(kind="role", param="name")
+require_scim_group_reauth = require_reauth(kind="group", param="group_id")
+require_scim_user_reauth = require_reauth(kind="account", param="user_id")
 
 
 def require_own_org_action(action: str):

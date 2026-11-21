@@ -46,17 +46,33 @@ from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api.conventions import apply_search
-from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action, secrets_store
+from dfe_engine.api.deps import (
+    CurrentUser,
+    ReauthGrant,
+    provider_bindings,
+    reaches_org,
+    reads_every_org,
+    refuse_unknown_orgs,
+    refuse_unreachable_org,
+    refuse_without_grant,
+    require_action,
+    require_own_org_action,
+    require_provider_reauth,
+    secrets_store,
+)
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.identity_links import unlink_provider
 from dfe_engine.auth.oidc.credential_env import (
     env_var_resolves,
     is_env_var_name,
     provider_secret_path,
 )
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
-from dfe_engine.auth.oidc.models import SyncStatus
+from dfe_engine.auth.oidc.models import SyncStatus, checked_email_domains
 from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import grant_target
+from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 from dfe_engine.http_errors import (
     describe_http_error,
@@ -65,9 +81,12 @@ from dfe_engine.http_errors import (
     referenced,
 )
 from dfe_engine.names import StoreName
+from dfe_engine.orgs.role_groups import usable_org_admins
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -92,6 +111,19 @@ _TENANT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
 
 # An RFC 6749 section 3.3 scope-token: printable ASCII except space, double quote and backslash.
 _SCOPE_TOKEN = re.compile(r"[\x21\x23-\x5B\x5D-\x7E]+\Z")
+
+_ORG_HELP = (
+    "The org whose provider this is: a registered org's name, or empty for a platform "
+    "provider. Its sign-ins land in that org as viewers and link only to that org's "
+    "accounts. An admin of that org manages it."
+)
+
+_TRUSTED_EMAIL_DOMAINS_HELP = (
+    "Email domains this provider vouches for, such as corp.com. A first sign-in whose "
+    "verified email is in one of them links to the one account holding that email: "
+    "at once for an account an identity provider owns, after the account's password "
+    "for a local one. Stored lowercased. Empty links nothing."
+)
 
 _SCOPES_HELP = (
     "OAuth scopes requested at login, one scope per entry; must include openid. One "
@@ -227,6 +259,7 @@ class CreateProviderRequest(BaseModel):
     type: Literal["generic", "google", "entra_id", "okta"] = Field(
         description="Provider type: generic, google, entra_id, okta"
     )
+    org: str = Field(default="", description=_ORG_HELP)
     enabled: bool = Field(default=True, description="Whether the provider serves logins")
     display_name: str = Field(default="", description="Human-readable label")
     issuer: str = Field(default="", description="OIDC issuer URL")
@@ -247,11 +280,19 @@ class CreateProviderRequest(BaseModel):
     )
     scopes: list[str] | None = Field(default=None, description=_SCOPES_HELP)
     groups: GroupResolutionRequest = Field(default_factory=GroupResolutionRequest)
+    trusted_email_domains: list[str] = Field(
+        default_factory=list, description=_TRUSTED_EMAIL_DOMAINS_HELP
+    )
 
     @field_validator("client_id_env", "client_secret_env")
     @classmethod
     def _env_name_only(cls, value: str) -> str:
         return _reject_non_env_name(value)
+
+    @field_validator("trusted_email_domains")
+    @classmethod
+    def _bare_domains(cls, value: list[str]) -> list[str]:
+        return checked_email_domains(domains=value)
 
     @field_validator("scopes", mode="before")
     @classmethod
@@ -267,6 +308,7 @@ class CreateProviderRequest(BaseModel):
 class UpdateProviderRequest(BaseModel):
     """Body for updating a provider, where an omitted field keeps its value."""
 
+    org: str | None = Field(None, description=f"Move the provider to another org. {_ORG_HELP}")
     enabled: bool | None = Field(None, description="Enable or disable the provider")
     display_name: str | None = Field(None, description="Human-readable label")
     issuer: str | None = Field(
@@ -289,11 +331,19 @@ class UpdateProviderRequest(BaseModel):
         "one leaves the scopes as they are.",
     )
     groups: GroupResolutionRequest | None = Field(None, description="Group resolution config")
+    trusted_email_domains: list[str] | None = Field(
+        None, description=f"Replace the trusted email domains. {_TRUSTED_EMAIL_DOMAINS_HELP}"
+    )
 
     @field_validator("client_id_env", "client_secret_env")
     @classmethod
     def _env_name_only(cls, value: str | None) -> str | None:
         return value if value is None else _reject_non_env_name(value)
+
+    @field_validator("trusted_email_domains")
+    @classmethod
+    def _bare_domains(cls, value: list[str] | None) -> list[str] | None:
+        return value if value is None else checked_email_domains(domains=value)
 
     @field_validator("scopes", mode="before")
     @classmethod
@@ -330,6 +380,7 @@ class ProviderResponse(BaseModel):
 
     name: str
     type: str
+    org: str = Field(description=_ORG_HELP)
     enabled: bool
     display_name: str
     issuer: str
@@ -339,6 +390,7 @@ class ProviderResponse(BaseModel):
     client_secret_path: str
     scopes: list[str] = Field(description="OAuth scopes requested at login")
     groups: GroupResolutionResponse
+    trusted_email_domains: list[str] = Field(description=_TRUSTED_EMAIL_DOMAINS_HELP)
     created_at: str
     last_sync_at: str
     last_sync_status: SyncStatus = Field(
@@ -450,12 +502,163 @@ class LoginConfigResponse(BaseModel):
 # -- Helpers --------------------------------------------------
 
 
+_GROUP_ENV_FIELDS = (
+    "api_token_env",
+    "client_secret_env",
+    "service_account_json_env",
+    "tenant_id_env",
+)
+
+
+def _env_sources(
+    *,
+    client_id_env: str | None,
+    client_secret_env: str | None,
+    groups: GroupResolutionRequest | GroupResolutionConfig | None,
+) -> dict[str, str]:
+    """Every env var name a provider body or stored provider names, by field."""
+    named = {"client_id_env": client_id_env or "", "client_secret_env": client_secret_env or ""}
+    if groups is not None:
+        for field in _GROUP_ENV_FIELDS:
+            named[f"groups.{field}"] = getattr(groups, field) or ""
+    return named
+
+
+def _refuse_env_sources(
+    *, named: dict[str, str], request: Request, stored: dict[str, str], user: Any
+) -> None:
+    """Refuse 422 ``env_source_refused`` when a caller who does not act across every org names an env var the provider does not already hold, since the engine would read its own environment for it."""
+    if reads_every_org(request, user, scopes_dict["oidc_write"]):
+        return
+    for field, env in sorted(named.items()):
+        if (env) and (env != stored.get(field, "")):
+            raise ProblemError(
+                422,
+                f"{field} names env var {env!r}, which only an admin of every org may set: "
+                "send the credential's value instead",
+                code="env_source_refused",
+            )
+
+
+def _refuse_repointed_env_sources(
+    *, body: UpdateProviderRequest, current: OIDCProvider, request: Request, user: Any
+) -> None:
+    """Refuse 422 ``env_source_held`` when a caller who does not act across every org moves where a provider sends credentials while it still reads one from an env var an admin of every org set."""
+    if reads_every_org(request, user, scopes_dict["oidc_write"]):
+        return
+    stored = _env_sources(
+        client_id_env=current.client_id_env,
+        client_secret_env=current.client_secret_env,
+        groups=current.groups,
+    )
+    # None is a field the body leaves out, which keeps its stored env var. Empty clears it.
+    sent = {"client_id_env": body.client_id_env, "client_secret_env": body.client_secret_env}
+    if body.groups is not None:
+        sent.update((f"groups.{field}", getattr(body.groups, field)) for field in _GROUP_ENV_FIELDS)
+    held = [field for field, env in stored.items() if (env) and (sent.get(field) != "")]
+    moved = (body.issuer is not None) and (body.issuer != current.issuer)
+    if body.groups is not None:
+        moved = (moved) or any(
+            getattr(body.groups, field) != getattr(current.groups, field)
+            for field in ("domain", "okta_domain", "tenant_id")
+        )
+    if (held) and (moved):
+        raise ProblemError(
+            422,
+            f"The provider reads {held[0]} from an env var an admin of every org set, so its "
+            "issuer and directory may not change: clear the env var sources first",
+            code="env_source_held",
+        )
+
+
+def _refuse_stranded_sign_ins(*, name: str, org: str, request: Request) -> None:
+    """Refuse 422 ``provider_in_use`` when moving provider *name* to *org* would leave accounts it signs in unreachable, since strict pairing would refuse their next sign-in."""
+    home = (request.app.state.org_registry.home_name_known()) or ""
+    reached = {org} if org else {"", home}
+    for account in request.app.state.account_store.scan():
+        stamped = name in {
+            account.oidc_id,
+            account.source_provider,
+            *(identity.provider for identity in account.identities),
+        }
+        if (stamped) and (account.org not in reached):
+            raise ProblemError(
+                422,
+                f"Provider {name!r} signs in accounts the move would leave unreachable: "
+                "move or remove them first",
+                code="provider_in_use",
+            )
+
+
+def _refuse_reserved_name(*, name: str, org: str, request: Request) -> None:
+    """Refuse 422 ``provider_name_reserved`` for an org's provider named after a stamp sign-ins arrive under from outside that org."""
+    if not (org):
+        return
+    bindings = provider_bindings(request)
+    reserved = {
+        request.app.state.settings.auth.proxy_provider,
+        SCIM_SOURCE_PROVIDER,
+        *bindings,
+        *bindings.values(),
+    }
+    stamped = any(
+        (account.org != org)
+        and (
+            name
+            in {
+                account.oidc_id,
+                account.source_provider,
+                *(identity.provider for identity in account.identities),
+            }
+        )
+        for account in request.app.state.account_store.scan()
+    )
+    linked = any(group.source_provider == name for group in request.app.state.group_store.list())
+    if (name in reserved) or (stamped) or (linked):
+        raise ProblemError(
+            422,
+            f"Provider name {name!r} is reserved: sign-ins already arrive under it from "
+            f"outside org {org!r}",
+            code="provider_name_reserved",
+        )
+
+
+def _refuse_domain_of_another_org(
+    *, domains: list[str], name: str, org: str, registry: OIDCProviderRegistry
+) -> None:
+    """Refuse 422 ``domain_taken`` when a provider of another org already trusts one of *domains*, since a domain belongs to one org."""
+    wanted = set(domains)
+    for other_name, other in registry.list():
+        clash = sorted(wanted & set(other.trusted_email_domains))
+        if (other_name != name) and (other.org != org) and (clash):
+            raise ProblemError(
+                422,
+                f"Email domain {clash[0]!r} is trusted by another organisation's provider, "
+                "and a domain belongs to one organisation",
+                code="domain_taken",
+            )
+
+
+def _require_reachable_provider(
+    *, action: str, name: str, request: Request, user: Any
+) -> OIDCProvider:
+    """The provider *name*, 404 when it is missing or the caller may not take *action* on its org, so another org's providers stay hidden."""
+    provider = _get_registry(request).get(name)
+    reachable = (provider is not None) and (
+        reaches_org(action=action, org=provider.org, request=request, user=user)
+    )
+    if (provider is None) or (not (reachable)):
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
+    return provider
+
+
 def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse:
     """Convert an OIDCProvider model to a ProviderResponse."""
     p = provider
     return ProviderResponse(
         name=name,
         type=p.type,
+        org=p.org,
         enabled=p.enabled,
         display_name=p.display_name,
         issuer=p.issuer,
@@ -480,6 +683,7 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
             api_token_path=p.groups.api_token_path,
             okta_domain=p.groups.okta_domain,
         ),
+        trusted_email_domains=p.trusted_email_domains,
         created_at=p.created_at,
         last_sync_at=p.last_sync_at,
         last_sync_status=p.last_sync_status,
@@ -487,10 +691,8 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
     )
 
 
-def _get_registry(request: Request):
+def _get_registry(request: Request) -> OIDCProviderRegistry:
     """Return OIDCProviderRegistry from app state."""
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-
     registry: OIDCProviderRegistry = request.app.state.oidc_provider_registry
     return registry
 
@@ -663,11 +865,22 @@ async def _refresh_rp(request: Request) -> None:
 # -- Endpoints ------------------------------------------------
 
 
+async def require_new_provider_reauth(
+    body: CreateProviderRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the sign-in provider the body creates."""
+    target = grant_target(kind="provider", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
 @router.post(
     "",
     response_model=ProviderResponse,
     status_code=201,
-    dependencies=[Depends(require_action(scopes_dict["oidc_write"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["oidc_write"])),
+        Depends(require_new_provider_reauth),
+    ],
 )
 async def create_provider(
     body: CreateProviderRequest,
@@ -680,9 +893,31 @@ async def create_provider(
     """
     from dfe_engine.auth.oidc.models import OIDCProvider
 
+    refuse_unreachable_org(
+        action=scopes_dict["oidc_write"],
+        noun="OIDC providers",
+        org=body.org,
+        request=request,
+        user=user,
+    )
+    refuse_unknown_orgs(request, [body.org])
     registry = _get_registry(request)
     if registry.get(body.name) is not None:
         raise ProblemError(409, f"OIDC provider '{body.name}' already exists", code="conflict")
+    _refuse_domain_of_another_org(
+        domains=body.trusted_email_domains, name=body.name, org=body.org, registry=registry
+    )
+    _refuse_reserved_name(name=body.name, org=body.org, request=request)
+    _refuse_env_sources(
+        named=_env_sources(
+            client_id_env=body.client_id_env,
+            client_secret_env=body.client_secret_env,
+            groups=body.groups,
+        ),
+        request=request,
+        stored={},
+        user=user,
+    )
 
     client_secret_path = (
         provider_secret_path(field="client_secret", provider_name=body.name)
@@ -692,6 +927,7 @@ async def create_provider(
     group_paths = _group_secret_paths(groups=body.groups, name=body.name)
     fields: dict[str, Any] = {
         "type": body.type,
+        "org": body.org,
         "enabled": body.enabled,
         "display_name": body.display_name,
         "issuer": body.issuer,
@@ -702,6 +938,7 @@ async def create_provider(
         # Empty takes the provider type's default scopes.
         "scopes": " ".join(body.scopes) if body.scopes is not None else "",
         "groups": _group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
+        "trusted_email_domains": body.trusted_email_domains,
         "created_at": datetime.now(UTC).isoformat(),
     }
     # The rules run before the model's validators, so a pair both refuse answers 422 on its field.
@@ -748,7 +985,7 @@ ProvidersList = Annotated[
 @router.get(
     "",
     response_model=Page[ProviderResponse],
-    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["oidc_read"]))],
 )
 async def list_providers(
     user: CurrentUser,
@@ -756,9 +993,14 @@ async def list_providers(
     query: ProvidersList,
     search: str | None = Query(None, description="Search in provider name/display name"),
 ):
-    """List OIDC providers (admin only), paginated."""
+    """List the OIDC providers the caller manages, paginated: every one across orgs, else its orgs' own."""
     registry = _get_registry(request)
-    rows = [_provider_to_response(name, p).model_dump() for name, p in registry.list()]
+    action = scopes_dict["oidc_read"]
+    rows = [
+        _provider_to_response(name, p).model_dump()
+        for name, p in registry.list()
+        if reaches_org(action=action, org=p.org, request=request, user=user)
+    ]
     rows = apply_search(rows, search, ["name", "display_name"])
     rows = sort_by_order(rows, query.order_by)
     summaries = [ProviderResponse.model_validate(row) for row in rows]
@@ -768,25 +1010,27 @@ async def list_providers(
 @router.get(
     "/{name}",
     response_model=ProviderResponse,
-    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["oidc_read"]))],
 )
 async def get_provider(
     name: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Get a single OIDC provider by name (admin only)."""
-    registry = _get_registry(request)
-    provider = registry.get(name)
-    if provider is None:
-        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
+    """Get a single OIDC provider by name, 404 for one of an org the caller does not manage."""
+    provider = _require_reachable_provider(
+        action=scopes_dict["oidc_read"], name=name, request=request, user=user
+    )
     return _provider_to_response(name, provider)
 
 
 @router.put(
     "/{name}",
     response_model=ProviderResponse,
-    dependencies=[Depends(require_action(scopes_dict["oidc_write"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["oidc_write"])),
+        Depends(require_provider_reauth),
+    ],
 )
 async def update_provider(
     name: str,
@@ -796,16 +1040,47 @@ async def update_provider(
 ):
     """Update an OIDC provider configuration (admin only).
 
-    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
+    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
     """
+    action = scopes_dict["oidc_write"]
     registry = _get_registry(request)
-    current = registry.get(name)
-    if current is None:
-        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
+    current = _require_reachable_provider(action=action, name=name, request=request, user=user)
+    org = current.org if body.org is None else body.org
+    if org != current.org:
+        refuse_unreachable_org(
+            action=action, noun="OIDC providers", org=org, request=request, user=user
+        )
+        refuse_unknown_orgs(request, [org])
+        _refuse_reserved_name(name=name, org=org, request=request)
+        _refuse_stranded_sign_ins(name=name, org=org, request=request)
+    _refuse_env_sources(
+        named=_env_sources(
+            client_id_env=body.client_id_env,
+            client_secret_env=body.client_secret_env,
+            groups=body.groups,
+        ),
+        request=request,
+        stored=_env_sources(
+            client_id_env=current.client_id_env,
+            client_secret_env=current.client_secret_env,
+            groups=current.groups,
+        ),
+        user=user,
+    )
+    _refuse_repointed_env_sources(body=body, current=current, request=request, user=user)
+    if (body.trusted_email_domains is not None) or (org != current.org):
+        domains = (
+            current.trusted_email_domains
+            if body.trusted_email_domains is None
+            else body.trusted_email_domains
+        )
+        _refuse_domain_of_another_org(domains=domains, name=name, org=org, registry=registry)
 
     stale_paths = []
     env_problems = []
     update_fields: dict[str, object] = {}
+    if body.org is not None:
+        update_fields["org"] = body.org
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
     if body.display_name is not None:
@@ -820,6 +1095,8 @@ async def update_provider(
         update_fields["client_secret_env"] = body.client_secret_env
     if body.scopes is not None:
         update_fields["scopes"] = " ".join(body.scopes)
+    if body.trusted_email_domains is not None:
+        update_fields["trusted_email_domains"] = body.trusted_email_domains
     if body.client_secret:
         update_fields["client_secret_path"] = provider_secret_path(
             field="client_secret", provider_name=name
@@ -864,7 +1141,9 @@ async def update_provider(
         )
 
     rule_problems = []
-    if body.model_dump(exclude={"display_name", "enabled"}, exclude_none=True):
+    if body.model_dump(
+        exclude={"display_name", "enabled", "org", "trusted_email_domains"}, exclude_none=True
+    ):
         candidate = current.model_copy(update=update_fields)
         problems = field_problems(
             provider=candidate, sent_group_fields=_sent_group_fields(groups=body.groups)
@@ -896,7 +1175,10 @@ async def update_provider(
 @router.delete(
     "/{name}",
     response_model=DetachResponse,
-    dependencies=[Depends(require_action(scopes_dict["oidc_delete"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["oidc_delete"])),
+        Depends(require_provider_reauth),
+    ],
 )
 async def delete_provider(
     name: str,
@@ -909,17 +1191,18 @@ async def delete_provider(
     still set to the deleted provider name. Accounts owned by the provider
     (``source_provider``) or last logged in through it (``oidc_id``) are
     soft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields
-    cleared. The provider's stored credentials ARE removed: nothing is left that
-    can authenticate as a detached provider.
+    cleared. A sign-in linked through it to another account is unlinked and that
+    account's sessions end, but the account stays. The provider's stored credentials
+    ARE removed: nothing is left that can authenticate as a detached provider.
     """
     from dfe_engine.auth.accounts import soft_delete_account
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.protected_accounts import ProtectedAccountError
 
     registry = _get_registry(request)
-    provider = registry.get(name)
-    if provider is None:
-        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
+    provider = _require_reachable_provider(
+        action=scopes_dict["oidc_delete"], name=name, request=request, user=user
+    )
 
     # Find groups that reference this provider
     group_store: GroupStore = request.app.state.group_store
@@ -935,14 +1218,34 @@ async def delete_provider(
                 )
             )
 
-    # Soft-delete accounts tied to this provider before the YAML is gone.
+    # Soft-delete accounts tied to this provider before the YAML is gone. An org's provider reaches only that org's.
     account_store = request.app.state.account_store
+    org = provider.org
+    owned = [
+        account
+        for account in account_store.list()
+        if ((account.source_provider == name) or (account.oidc_id == name))
+        and (account.enabled)
+        and (not (account.is_link_record))
+        and ((not (org)) or (account.org == org))
+    ]
+    if (org) and (not (reads_every_org(request, user, scopes_dict["oidc_delete"]))):
+        admins = usable_org_admins(
+            accounts=account_store.list(),
+            bindings=provider_bindings(request),
+            groups=group_store.list(),
+            org=org,
+        )
+        if (admins) and (set(admins) <= {account.username for account in owned}):
+            raise ProblemError(
+                409,
+                f"Cannot delete provider {name!r}: every admin of org {org!r} signs in through it",
+                code="last_org_admin",
+            )
+    # A sign-in linked through it leaves its account, which the provider does not own.
+    unlink_provider(org=org, provider=name, store=account_store)
     disabled_accounts: list[DisabledAccountInfo] = []
-    for account in account_store.list():
-        if account.source_provider != name and account.oidc_id != name:
-            continue
-        if not account.enabled:
-            continue
+    for account in owned:
         previous = account.username
         try:
             updated = soft_delete_account(account_store, previous)
@@ -974,7 +1277,10 @@ async def delete_provider(
 @router.post(
     "/{name}/sync",
     response_model=SyncResponse,
-    dependencies=[Depends(require_action(scopes_dict["oidc_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["oidc_write"])),
+        Depends(require_provider_reauth),
+    ],
 )
 async def sync_provider_groups(
     name: str,
@@ -1017,7 +1323,7 @@ async def sync_provider_groups(
     "/{name}/test",
     response_model=TestResponse,
     openapi_extra=scalo_extra(verb="test"),
-    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["oidc_read"]))],
 )
 async def test_provider(
     name: str,
@@ -1027,10 +1333,9 @@ async def test_provider(
     """Test connectivity to an OIDC provider (admin only)."""
     from dfe_engine.auth.oidc.adapters import get_adapter
 
-    registry = _get_registry(request)
-    provider = registry.get(name)
-    if provider is None:
-        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
+    provider = _require_reachable_provider(
+        action=scopes_dict["oidc_read"], name=name, request=request, user=user
+    )
 
     adapter = get_adapter(provider, secrets=getattr(request.app.state, "dfe_secrets", None))
     success, message = await adapter.test_connection()
@@ -1041,7 +1346,7 @@ async def test_provider(
     "/{name}/verify-login",
     response_model=LoginConfigResponse,
     openapi_extra=scalo_extra(verb="verify-login"),
-    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["oidc_read"]))],
 )
 async def verify_login_config(
     name: str,
@@ -1055,10 +1360,9 @@ async def verify_login_config(
     generic providers. Checks: the client_id resolves, the client_secret
     resolves, and the issuer's discovery document is reachable and well-formed.
     """
-    registry = _get_registry(request)
-    provider = registry.get(name)
-    if provider is None:
-        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
+    provider = _require_reachable_provider(
+        action=scopes_dict["oidc_read"], name=name, request=request, user=user
+    )
 
     from dfe_engine.auth.oidc.credential_env import credential_check
 

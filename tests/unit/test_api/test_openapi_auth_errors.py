@@ -28,6 +28,7 @@ PUBLIC_OPERATIONS = frozenset(
         "GET /api/v1/auth/setup-status",
         "GET /api/v1/auth/oidc/{provider}/login",
         "GET /api/v1/auth/oidc/{provider}/callback",
+        "POST /api/v1/auth/oidc/link",
         "GET /api/v1/scim/v2/ServiceProviderConfig",
         "GET /api/v1/scim/v2/ResourceTypes",
         "GET /api/v1/scim/v2/Schemas",
@@ -36,6 +37,9 @@ PUBLIC_OPERATIONS = frozenset(
 
 # Public, but it refuses a bad login itself, so it declares both statuses by hand.
 LOGIN = "POST /api/v1/auth/login"
+
+# Public routes that check a password themselves, so they declare the 401 a wrong one gets.
+PASSWORD_CHECKS = frozenset({LOGIN, "POST /api/v1/auth/oidc/link"})
 
 # The committed spec lists the sigma routes and test_openapi_spec_committed.py keeps it equal to the app.
 COMMITTED_SPEC = json.loads(
@@ -136,7 +140,7 @@ def test_every_public_operation_is_real_and_declares_neither(spec):
     assert PUBLIC_OPERATIONS <= operations.keys(), sorted(PUBLIC_OPERATIONS - operations.keys())
     declared = sorted(
         f"{key} -> {status}"
-        for key in PUBLIC_OPERATIONS - {LOGIN}
+        for key in PUBLIC_OPERATIONS - PASSWORD_CHECKS
         for status in AUTH_STATUSES
         if status in operations[key].get("responses", {})
     )

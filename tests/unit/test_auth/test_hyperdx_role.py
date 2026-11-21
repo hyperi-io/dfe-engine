@@ -31,6 +31,7 @@ SHIPPED = {
     "infra_admin": (ADMIN, VIEWER),
     "infra_viewer": (VIEWER, VIEWER),
     "ingest_admin": (VIEWER, VIEWER),
+    "org_admin": (VIEWER, VIEWER),
     "org_viewer": (VIEWER, VIEWER),
 }
 

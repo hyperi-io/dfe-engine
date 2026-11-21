@@ -4,6 +4,7 @@ import sys
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TypedDict
 
 import bcrypt
 import pytest
@@ -17,6 +18,7 @@ from dfe_engine.auth.accounts import Account, AccountStore, _dummy_hash, soft_de
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from tests.support.present import present
+from tests.unit.test_auth.factories import make_account
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -65,6 +67,81 @@ def provider(
 ) -> LocalAuthProvider:
     account_store, group_store = stores
     return LocalAuthProvider(account_store, group_store)
+
+
+KAZ = "kaz@corp.com"
+
+
+class AccountNameCase(TypedDict):
+    id: str
+    expected: str
+    identifier: str
+    stored: list[Account]
+
+
+ACCOUNT_NAME_CASES: list[AccountNameCase] = [
+    {"id": "an_account_name_is_itself", "identifier": "viewer", "stored": [], "expected": "viewer"},
+    {
+        "id": "a_vouched_local_email",
+        "identifier": KAZ,
+        "stored": [make_account(email=KAZ, email_verified=True, username="kaz")],
+        "expected": "kaz",
+    },
+    {
+        "id": "case_and_spaces_are_ignored",
+        "identifier": "KAZ@Corp.com",
+        "stored": [make_account(email=f" {KAZ} ", email_verified=True, username="kaz")],
+        "expected": "kaz",
+    },
+    {
+        "id": "a_local_email_from_before_the_flag",
+        "identifier": KAZ,
+        "stored": [make_account(email=KAZ, username="kaz")],
+        "expected": "kaz",
+    },
+    {
+        "id": "a_self_set_email_names_nobody",
+        "identifier": KAZ,
+        "stored": [make_account(email=KAZ, email_verified=False, username="kaz")],
+        "expected": KAZ,
+    },
+    {
+        "id": "two_holders_name_nobody",
+        "identifier": KAZ,
+        "stored": [
+            make_account(email=KAZ, email_verified=True, username="kaz"),
+            make_account(email=KAZ, email_verified=True, username="kaz2"),
+        ],
+        "expected": KAZ,
+    },
+    {
+        "id": "an_idp_accounts_email_names_nobody",
+        "identifier": KAZ,
+        "stored": [
+            make_account(
+                email=KAZ,
+                email_verified=True,
+                external=True,
+                source_provider="okta",
+                username="00u1",
+            )
+        ],
+        "expected": KAZ,
+    },
+    {"id": "an_unknown_email_names_nobody", "identifier": KAZ, "stored": [], "expected": KAZ},
+]
+
+
+class TestAccountName:
+    @pytest.mark.parametrize(
+        "case", ACCOUNT_NAME_CASES, ids=[case["id"] for case in ACCOUNT_NAME_CASES]
+    )
+    def test_matches_expected(self, stores: tuple[AccountStore, GroupStore], case: AccountNameCase):
+        account_store, group_store = stores
+        for account in case["stored"]:
+            account_store.put(account=account)
+        provider = LocalAuthProvider(account_store, group_store)
+        assert provider.account_name(case["identifier"]) == case["expected"]
 
 
 # ---------------------------------------------------------------------------

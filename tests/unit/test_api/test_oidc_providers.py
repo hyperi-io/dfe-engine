@@ -25,10 +25,14 @@ from tests.unit.test_api.oidc_providers_cases import (
     CREATE_PROVIDER_UNSET_ENV_CASES,
     SWITCHED_SECRET,
     SWITCHED_SECRET_ENV,
+    TRUSTED_EMAIL_DOMAINS_CASES,
+    TRUSTED_EMAIL_DOMAINS_REFUSED_CASES,
     UNSET_SECRET_ENV,
     UPDATE_PROVIDER_SECRET_SOURCE_CASES,
     UPDATE_TENANT_ID_ENV_CASES,
     CreateProviderUnsetEnvCase,
+    TrustedEmailDomainsCase,
+    TrustedEmailDomainsRefusedCase,
     UpdateProviderSecretSourceCase,
     UpdateTenantIdEnvCase,
 )
@@ -204,6 +208,87 @@ class TestCreateProvider:
                 "stored": True,
             },
         )
+
+
+class TestTrustedEmailDomains:
+    @pytest.mark.parametrize(
+        "case",
+        TRUSTED_EMAIL_DOMAINS_CASES,
+        ids=[case["id"] for case in TRUSTED_EMAIL_DOMAINS_CASES],
+    )
+    def test_create(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        case: TrustedEmailDomainsCase,
+    ):
+        resp = _create_provider(
+            admin_headers=admin_headers, client=client, trusted_email_domains=case["sent_domains"]
+        )
+        stored = app.state.oidc_provider_registry.get("test-provider").trusted_email_domains
+        assert (resp.status_code, resp.json()["trusted_email_domains"], stored) == (
+            201,
+            case["expected_domains"],
+            case["expected_domains"],
+        )
+
+    @pytest.mark.parametrize(
+        "case",
+        TRUSTED_EMAIL_DOMAINS_CASES,
+        ids=[case["id"] for case in TRUSTED_EMAIL_DOMAINS_CASES],
+    )
+    def test_update(
+        self, admin_headers: dict[str, str], client: TestClient, case: TrustedEmailDomainsCase
+    ):
+        _create_provider(
+            admin_headers=admin_headers, client=client, trusted_email_domains=["old.example"]
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/test-provider",
+            headers=admin_headers,
+            json={"trusted_email_domains": case["sent_domains"]},
+        )
+        assert (resp.status_code, resp.json()["trusted_email_domains"]) == (
+            200,
+            case["expected_domains"],
+        )
+
+    @pytest.mark.parametrize(
+        "case",
+        TRUSTED_EMAIL_DOMAINS_REFUSED_CASES,
+        ids=[case["id"] for case in TRUSTED_EMAIL_DOMAINS_REFUSED_CASES],
+    )
+    def test_refused(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        case: TrustedEmailDomainsRefusedCase,
+    ):
+        resp = _create_provider(
+            admin_headers=admin_headers, client=client, trusted_email_domains=case["sent_domains"]
+        )
+        stored = app.state.oidc_provider_registry.get("test-provider")
+        assert (resp.status_code, _field_errors(resp), stored) == (
+            422,
+            ["trusted_email_domains"],
+            None,
+        )
+
+    def test_an_update_of_domains_alone_skips_the_field_rules(
+        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
+    ):
+        # Written past the API: an api-mode Okta provider missing every directory field the rules require.
+        app.state.oidc_provider_registry.create(
+            "legacy", make_oidc_provider(groups={"mode": "api"}, type="okta")
+        )
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/legacy",
+            headers=admin_headers,
+            json={"trusted_email_domains": ["corp.com"]},
+        )
+        assert (resp.status_code, resp.json()["trusted_email_domains"]) == (200, ["corp.com"])
 
 
 class TestListProviders:

@@ -90,6 +90,22 @@ class AccountExistsError(ValueError):
     """An account is already stored under the name, including one created a moment ago."""
 
 
+class LinkedIdentity(BaseModel):
+    """An IdP sign-in linked to an account, with what its IdP last asserted."""
+
+    key: str
+    """The link record's account name: the sign-in's JIT stem."""
+    provider: str
+    """The OIDC provider the sign-in comes through."""
+    subject: str
+    """The IdP ``sub`` claim."""
+    email: str = ""
+    groups: list[str] = Field(default_factory=list)
+    """The identifiers the IdP last asserted, which link groups under ``provider``."""
+    linked_at: str = ""
+    last_login_at: str = ""
+
+
 class Account(BaseModel):
     """A local user account."""
 
@@ -133,7 +149,7 @@ class Account(BaseModel):
     attributes: dict[str, Any] = Field(default_factory=dict)
     """Free-form NON-sensitive attributes (nested JSON, KVP is the floor).
 
-    Stored inline on the account and round-trips through both backends. Never put
+    Stored inline on the account and round-trips through the store. Never put
     secrets here - a broad account read returns this blob. Sensitive attributes
     live in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
     password_change_required: bool = False
@@ -161,11 +177,30 @@ class Account(BaseModel):
 
     Written when the account is renamed to ``{uuid}-deleted``. Empty on an account
     that has never been soft-deleted."""
+    email_verified: bool | None = None
+    """Whether ``email`` is vouched for, so a first IdP sign-in may link here by it.
+
+    True: an admin set it, or an IdP trusted for its domain asserted it verified. False: the
+    account owner set it, or the IdP did not vouch. None: written before the field existed."""
+    linked_to: str = ""
+    """Set on a link record: the account its IdP sign-in belongs to. A link record holds no groups and is never listed."""
+    identities: list[LinkedIdentity] = Field(default_factory=list)
+    """The IdP sign-ins linked to this account."""
+
+    @property
+    def is_link_record(self) -> bool:
+        """Whether this record only points an IdP sign-in at another account."""
+        return bool(self.linked_to)
 
     @property
     def is_soft_deleted(self) -> bool:
         """Whether this account was anonymized by soft-delete and should read as gone."""
         return bool(self.previous_username) or self.username.endswith("-deleted")
+
+    @property
+    def session_subject(self) -> str:
+        """The ``sub`` a session token for this account carries, which the per-request lookup binds back to it."""
+        return self.subject or self.username
 
     def session_marker(self) -> str:
         """The value a session token minted for this account now carries.
@@ -202,6 +237,8 @@ class AccountStore:
     def __init__(self, accounts_dir: Path, *, admin_name: str = "") -> None:
         self._dir = Path(accounts_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
+        # Link records sit apart, so the accounts directory holds only people. Made on the first one.
+        self._links = self._dir / "links"
         self.protected = resolve_floor(admin_name)
         self._ignores_case = _ignores_case(self._dir)
         _dummy_hash()
@@ -221,6 +258,7 @@ class AccountStore:
         name: str = "",
         org: str = "",
         change_required: bool = False,
+        email_verified: bool | None = None,
     ) -> Account:
         """Create a new account.
 
@@ -234,6 +272,7 @@ class AccountStore:
             org: The registered org the account belongs to, empty for none.
             change_required: The password is issued, not the owner's own, so the
                 owner must replace it before the API serves them.
+            email_verified: Whether *email* is vouched for (:attr:`Account.email_verified`).
 
         Returns:
             The newly created Account.
@@ -248,8 +287,8 @@ class AccountStore:
         if not VALID_NAME.match(username):
             raise InvalidNameError(f"Invalid account name: {username!r}")
         path = self._path(username)
-        if (twin := case_twin(self._dir, username)) is not None:
-            raise AccountExistsError(f"Account already exists: {twin}")
+        if (taken := self.taken_name(username)) is not None:
+            raise AccountExistsError(f"Account already exists: {taken}")
         account = _new_account(
             username,
             password,
@@ -259,12 +298,26 @@ class AccountStore:
             name=name,
             org=org,
             change_required=change_required,
+            email_verified=email_verified,
         )
         try:
             self._write_new(path, account)
         except FileExistsError as exc:
             raise AccountExistsError(f"Account already exists: {username}") from exc
         return account
+
+    def taken_name(self, username: str) -> str | None:
+        """The stored account or link record a new account named *username* clashes with, matched ignoring case. An invalid name clashes with none."""
+        if not VALID_NAME.match(username):
+            return None
+        for directory in (self._dir, self._links):
+            if (twin := case_twin(directory, username)) is not None:
+                return twin
+        # case_twin reports only another case, so the exact name is looked up in both directories.
+        name = self._path(username).name
+        if ((self._dir / name).exists()) or ((self._links / name).exists()):
+            return username
+        return None
 
     def put(self, account: Account, *, allow_protected: bool = False) -> Account:
         """Upsert a complete account (used to restore from the durable deploy repo).
@@ -334,7 +387,8 @@ class AccountStore:
         Yields:
             Each stored Account, ordered by filename.
         """
-        for path in sorted(self._dir.glob("*.yaml")):
+        paths = [*self._dir.glob("*.yaml"), *self._links.glob("*.yaml")]
+        for path in sorted(paths, key=_file_name):
             try:
                 yield self._read(path)
             except FileNotFoundError:
@@ -345,7 +399,7 @@ class AccountStore:
 
         Permitted fields: ``enabled``, ``blocked``, ``disabled_at``,
         ``blocked_at``, ``groups``, ``email``, ``phone``, ``name``, ``org``, plus
-        the external-identity stamps. Updating ``username`` or ``password_hash``
+        the external-identity stamps and links. Updating ``username`` or ``password_hash``
         directly is not permitted (use :meth:`reset_password` to change the
         password). Re-enabling or unblocking always clears the matching
         ``*_at`` field. Disabling or blocking always writes a new stamp.
@@ -510,19 +564,27 @@ class AccountStore:
         """
         return self._dir / f"{store_key(username)}.yaml"
 
+    def _home(self, *, account: Account) -> Path:
+        """The file *account* belongs in: under links/ for a link record, beside the people otherwise."""
+        directory = self._links if account.is_link_record else self._dir
+        return directory / f"{store_key(account.username)}.yaml"
+
     def _stored(self, username: str) -> Path | None:
-        """The file holding the account stored under exactly *username*, or None.
+        """The file holding the account stored under exactly *username*, a person's or a link record's, or None.
 
         Raises:
             KeyError: No account can hold *username*, so it is looked up nowhere.
         """
-        path = self._path(username)
-        if not path.exists():
-            return None
-        # A case-blind filesystem opens bob.yaml for Bob, so the entry's own name must match.
-        if self._ignores_case and path.name not in os.listdir(self._dir):
-            return None
-        return path
+        name = self._path(username).name
+        for directory in (self._dir, self._links):
+            path = directory / name
+            if not (path.exists()):
+                continue
+            # A case-blind filesystem opens bob.yaml for Bob, so the entry's own name must match.
+            if self._ignores_case and name not in os.listdir(directory):
+                continue
+            return path
+        return None
 
     def _read(self, path: Path) -> Account:
         """Load an Account from a YAML file.
@@ -536,9 +598,13 @@ class AccountStore:
         return Account.model_validate(data)
 
     def _write(self, path: Path, account: Account) -> None:
-        """Persist an Account to YAML, omitting the username field."""
+        """Persist an Account to YAML, omitting the username field, moving it from *path* when it became or stopped being a link record."""
+        home = self._home(account=account)
+        home.parent.mkdir(exist_ok=True)
         data = account.model_dump(exclude={"username"})
-        yaml_dump(data, path)
+        yaml_dump(data, home)
+        if home != path:
+            path.unlink(missing_ok=True)
 
     def _write_new(self, path: Path, account: Account) -> None:
         """Persist a new Account to *path*, which the filesystem refuses if any file holds it.
@@ -564,7 +630,7 @@ class AccountStore:
 
 
 # Fields update() may change. username and password_hash are excluded (the
-# password changes only via reset_password). Shared by both store backends.
+# password changes only via reset_password).
 _UPDATABLE_FIELDS = (
     "enabled",
     "blocked",
@@ -581,12 +647,20 @@ _UPDATABLE_FIELDS = (
     "phone",
     "name",
     "org",
+    "email_verified",
+    "linked_to",
+    "identities",
 )
 
 
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+
+def _file_name(path: Path) -> str:
+    """The sort key that orders account files by name across both directories."""
+    return path.name
 
 
 def discard_created(store: AccountStore, created: Account) -> None:
@@ -615,6 +689,14 @@ def discard_created(store: AccountStore, created: Account) -> None:
         )
 
 
+def delete_link_records(store: AccountStore, account: Account) -> None:
+    """Delete the link record of each sign-in linked to *account*, so none outlives it."""
+    for identity in account.identities:
+        record = store.get(identity.key)
+        if (record is not None) and (record.linked_to == account.username):
+            store.delete(identity.key)
+
+
 def anonymized_soft_delete_username() -> str:
     """A one-use account name: a UUID with ``-deleted`` as the trailing marker.
 
@@ -627,8 +709,9 @@ def anonymized_soft_delete_username() -> str:
 def soft_delete_account(store: AccountStore, username: str) -> Account:
     """Disable *username* and rename it to an anonymized ``{uuid}-deleted`` id.
 
-    Clears contact and subject fields so the record no longer identifies the
-    person. Ownership stamps (``source_provider``, ``oidc_id``) stay for audit.
+    Clears contact and subject fields and the linked sign-ins, whose link records
+    are deleted, so the record no longer identifies the person. Ownership stamps
+    (``source_provider``, ``oidc_id``) stay for audit.
 
     Raises:
         KeyError: No account is stored under *username*.
@@ -653,6 +736,7 @@ def soft_delete_account(store: AccountStore, username: str) -> Account:
             "name": "",
             "subject": "",
             "attributes": {},
+            "identities": [],
             **_session_end(existing),
             "updated_at": _now(),
         }
@@ -660,6 +744,7 @@ def soft_delete_account(store: AccountStore, username: str) -> Account:
     store.put(rewritten)
     # Old key must go. The account now lives only under the anonymized name.
     store.delete(username)
+    delete_link_records(store, existing)
     return rewritten
 
 
@@ -748,6 +833,7 @@ def _new_account(
     name: str,
     org: str,
     change_required: bool,
+    email_verified: bool | None,
 ) -> Account:
     """The record both stores write for a new account."""
     now = _now()
@@ -758,6 +844,7 @@ def _new_account(
         enabled=True,
         groups=groups or [],
         email=email,
+        email_verified=email_verified,
         phone=phone,
         name=name,
         org=org,

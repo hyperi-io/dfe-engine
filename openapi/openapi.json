@@ -436,6 +436,20 @@
         "summary": "Retire Bootstrap Admin",
         "description": "Retire the bootstrap admin: disable it and record the fact in the deploy repo.\n\nThe deployment mints the admin password and the engine reissues it whenever\nthe injected value changes, so until it is retired anyone able to write the\nSecret or ``.env`` can issue themselves the admin at the next boot. Retiring\nends the reseed: the account stays disabled, the password may be deleted, and\n``breakglass`` is the recovery path.\n\nThe console keeps the bootstrap admin. Retiring it is an operator's policy\nchoice made here. Refused unless the deployment already has an enabled\nadmin-role account of its own -- ``retire_admin_available`` on the setup status\nis the same predicate. Returns the setup status, which now\nreports ``admin_retired``. Reversal is not an API: remove ``admin_retired``\nfrom ``governance/settings/auth.yaml`` in the deploy repo and restart.",
         "operationId": "auth.setup.retire-admin",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -459,6 +473,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -491,6 +515,97 @@
             "setup"
           ],
           "verb": "retire-admin",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          }
+        }
+      }
+    },
+    "/api/v1/auth/reauth": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Reauth",
+        "description": "Re-enter your password to earn a grant for editing one account, which every edit of it needs.\n\n403 ``invalid_password`` on a wrong password, counted against the sign-in throttle. 409 ``reauth_via_idp`` for a caller with no local password, who re-signs in at its identity provider instead.",
+        "operationId": "auth.reauth",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReauthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReauthResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "auth",
+          "resource": "auth",
+          "hierarchy": [
+            "auth"
+          ],
+          "verb": "reauth",
           "read_only": false,
           "cli": {
             "hidden": false,
@@ -633,7 +748,17 @@
             }
           },
           "303": {
-            "description": "Login started with return_to: redirect there with the engine token in the URL fragment, or with the refusal's code (#error=<code>&provider=...) when the login is refused."
+            "description": "Login started with return_to: redirect there with the engine token in the URL fragment, or with the refusal's code (#error=<code>&provider=...) when the login is refused. A sign-in that links to a local account comes back with #error=link_required&link_ticket=...&account=...&provider=... instead."
+          },
+          "409": {
+            "description": "link_required: the sign-in's trusted email matches a local account. The body's link_ticket and that account's password go to POST /auth/oidc/link, and account names it.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -674,14 +799,227 @@
         }
       }
     },
+    "/api/v1/auth/oidc/link": {
+      "post": {
+        "tags": [
+          "OIDC Login"
+        ],
+        "summary": "Oidc Link",
+        "description": "Link the sign-in a ``link_required`` callback held to its local account, on that account's password, and sign it in.\n\nWrong passwords count against the account's sign-in throttle (``auth.login_throttle``), as a password login's do. The answer is the callback's, and from then on the sign-in reaches the account without a password.",
+        "operationId": "auth.oidc.link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcCallbackResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "link_ticket_invalid (expired or not this engine's), a wrong password, link_stale (the account or the sign-in changed since the ticket), or the account is disabled, blocked or would hold no role",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The ticket's provider is no longer registered and enabled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed attempts for this account or from this address; Retry-After gives the seconds to wait",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-scalo": {
+          "group": "auth",
+          "resource": "oidc",
+          "hierarchy": [
+            "auth",
+            "oidc"
+          ],
+          "verb": "link",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oidc/reauth": {
+      "post": {
+        "tags": [
+          "OIDC Login"
+        ],
+        "summary": "Oidc Reauth",
+        "description": "Start a fresh sign-in at your own identity provider, which earns a grant for changing one account or group.\n\nThe IdP is asked to take your credentials again (``prompt=login``, ``max_age=0``), and the callback answers with the grant instead of a session.",
+        "operationId": "auth.oidc.reauth",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcReauthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcLoginResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "reauth_via_password: the caller has no identity-provider sign-in, so it confirms with its password at POST /auth/reauth",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "auth",
+          "resource": "oidc",
+          "hierarchy": [
+            "auth",
+            "oidc"
+          ],
+          "verb": "reauth",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          }
+        }
+      }
+    },
     "/api/v1/auth/accounts": {
       "post": {
         "tags": [
           "Accounts"
         ],
         "summary": "Create Account",
-        "description": "Create a new local user account (admin only).",
+        "description": "Create a new local user account: an admin of an org other than yours creates it in that org only.",
         "operationId": "auth.accounts.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -771,7 +1109,7 @@
           "Accounts"
         ],
         "summary": "List Accounts",
-        "description": "List accounts (admin only), paginated. No password hashes returned.",
+        "description": "List the accounts the caller administers, paginated: every account across orgs, else its orgs' own. No password hashes returned.",
         "operationId": "auth.accounts.list",
         "parameters": [
           {
@@ -915,10 +1253,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Ordering over created_at, updated_at, username, each optionally followed by desc",
+              "description": "Ordering over created_at, org, updated_at, username, each optionally followed by desc",
               "title": "Order By"
             },
-            "description": "Ordering over created_at, updated_at, username, each optionally followed by desc"
+            "description": "Ordering over created_at, org, updated_at, username, each optionally followed by desc"
           }
         ],
         "responses": {
@@ -993,6 +1331,115 @@
             "positional": []
           },
           "action": "account:read"
+        }
+      }
+    },
+    "/api/v1/auth/accounts/availability": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get Account Availability",
+        "description": "Whether a new account could take *username* and hold *email*, judged as account create judges them.",
+        "operationId": "auth.accounts.availability",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "An email a new account would hold",
+              "default": "",
+              "title": "Email"
+            },
+            "description": "An email a new account would hold"
+          },
+          {
+            "name": "username",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "A name a new account would take",
+              "default": "",
+              "title": "Username"
+            },
+            "description": "A name a new account would take"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountAvailabilityResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "auth",
+          "resource": "accounts",
+          "hierarchy": [
+            "auth",
+            "accounts"
+          ],
+          "verb": "availability",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "account:write"
         }
       }
     },
@@ -1164,7 +1611,7 @@
           "Accounts"
         ],
         "summary": "Get Account",
-        "description": "Get a single account by username (admin only).\n\nSoft-deleted (anonymized) accounts answer 404 the same as a missing name.",
+        "description": "Get a single account by username (admin only).\n\nSoft-deleted (anonymized) accounts, and those the caller does not administer, answer 404 the same as a missing name.",
         "operationId": "auth.accounts.get",
         "parameters": [
           {
@@ -1267,6 +1714,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -1379,6 +1838,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -1578,6 +2049,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -1682,6 +2165,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -1863,6 +2358,135 @@
         ]
       }
     },
+    "/api/v1/auth/accounts/{username}/identities/{key}": {
+      "delete": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Unlink Identity",
+        "description": "Unlink an IdP sign-in from an account (admin only).\n\nThe sign-in's record becomes an account of its own, which its next sign-in judges on its own groups. Every session of the account ends, so one opened through the sign-in does not outlive the link. Taking away the groups the sign-in linked needs the roles they carry, as removing a group does.",
+        "operationId": "auth.accounts.identities.delete",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such account, or it lists no sign-in under key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "last_admin: the sign-in gives the last usable account its system admin role",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "auth",
+          "resource": "identities",
+          "hierarchy": [
+            "auth",
+            "accounts",
+            "identities"
+          ],
+          "verb": "delete",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "account:write"
+        }
+      }
+    },
     "/api/v1/auth/accounts/{username}/attributes": {
       "get": {
         "tags": [
@@ -1971,6 +2595,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -2165,6 +2801,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -2259,6 +2907,20 @@
         "summary": "Create Group",
         "description": "Create a new RBAC group at a scope.",
         "operationId": "auth.groups.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2613,6 +3275,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -2714,6 +3388,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -2800,6 +3486,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -2913,6 +3611,18 @@
               "type": "string",
               "title": "Username"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -3098,6 +3808,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -3292,6 +4014,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -3384,8 +4118,22 @@
           "API Keys"
         ],
         "summary": "Create Api Key",
-        "description": "Create a new API key. Returns the full key exactly once.\n\n422 ``unknown_org`` when ``org`` names no registered org.",
+        "description": "Create a new API key. Returns the full key exactly once.\n\n422 ``unknown_org`` when ``org`` names no registered org, ``org_role_only`` when a key bound to an org other than yours names a group outside that org's admin and viewer roles.",
         "operationId": "auth.api-keys.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -3651,6 +4399,18 @@
               "type": "string",
               "title": "Short Token"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -3894,6 +4654,20 @@
         "summary": "Create Role",
         "description": "Create a new RBAC role granting no more than the caller holds.",
         "operationId": "auth.roles.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -4255,6 +5029,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -4357,6 +5143,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -4435,6 +5233,20 @@
         "summary": "Create Provider",
         "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).",
         "operationId": "auth.oidc-providers.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -4524,7 +5336,7 @@
           "OIDC Providers"
         ],
         "summary": "List Providers",
-        "description": "List OIDC providers (admin only), paginated.",
+        "description": "List the OIDC providers the caller manages, paginated: every one across orgs, else its orgs' own.",
         "operationId": "auth.oidc-providers.list",
         "parameters": [
           {
@@ -4689,7 +5501,7 @@
           "OIDC Providers"
         ],
         "summary": "Get Provider",
-        "description": "Get a single OIDC provider by name (admin only).",
+        "description": "Get a single OIDC provider by name, 404 for one of an org the caller does not manage.",
         "operationId": "auth.oidc-providers.get",
         "parameters": [
           {
@@ -4781,7 +5593,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
         "operationId": "auth.oidc-providers.apply",
         "parameters": [
           {
@@ -4792,6 +5604,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -4883,7 +5707,7 @@
           "OIDC Providers"
         ],
         "summary": "Delete Provider",
-        "description": "Detach an OIDC provider and soft-delete its accounts (admin only).\n\nDoes NOT delete groups -- they become orphaned with their source_provider\nstill set to the deleted provider name. Accounts owned by the provider\n(``source_provider``) or last logged in through it (``oidc_id``) are\nsoft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields\ncleared. The provider's stored credentials ARE removed: nothing is left that\ncan authenticate as a detached provider.",
+        "description": "Detach an OIDC provider and soft-delete its accounts (admin only).\n\nDoes NOT delete groups -- they become orphaned with their source_provider\nstill set to the deleted provider name. Accounts owned by the provider\n(``source_provider``) or last logged in through it (``oidc_id``) are\nsoft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields\ncleared. A sign-in linked through it to another account is unlinked and that\naccount's sessions end, but the account stays. The provider's stored credentials\nARE removed: nothing is left that can authenticate as a detached provider.",
         "operationId": "auth.oidc-providers.delete",
         "parameters": [
           {
@@ -4894,6 +5718,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -4988,6 +5824,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -15836,7 +16684,7 @@
           "queries"
         ],
         "summary": "Execute View",
-        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context -- it cannot be overridden by the client. It is the org the\nsession's account is bound to, and a view taking it runs only when the caller's\ngroups grant that org or it reads every org (``granted_bound_org``).",
+        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context -- it cannot be overridden by the client. It is the org the\nsession's account is bound to, and a view taking it runs only when the caller's\ngroups grant that org or it reads every org (``granted_bound_org``). Any other\nview needs ``query:execute`` at system scope.",
         "operationId": "queries.views.execute",
         "parameters": [
           {
@@ -20855,6 +21703,20 @@
         "summary": "Create User",
         "description": "Provision a user. IdP-owned. Local password is randomised when omitted.\n\nA password the IdP does send is held to the same length floor as every other\npassword the API sets, and one under it is refused rather than replaced.",
         "operationId": "scim.v2.users.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -20876,6 +21738,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21027,6 +21899,18 @@
               "type": "string",
               "title": "User Id"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -21118,6 +22002,18 @@
               "type": "string",
               "title": "User Id"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -21209,6 +22105,18 @@
               "type": "string",
               "title": "User Id"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -21363,6 +22271,20 @@
         "summary": "Create Group",
         "description": "Provision a group with its member set (member Account.groups kept in sync).",
         "operationId": "scim.v2.groups.create",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -21384,6 +22306,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21535,6 +22467,18 @@
               "type": "string",
               "title": "Group Id"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -21626,6 +22570,18 @@
               "type": "string",
               "title": "Group Id"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -21717,6 +22673,18 @@
               "type": "string",
               "title": "Group Id"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -35404,6 +36372,25 @@
         "title": "APIKeyResponse",
         "description": "API key metadata -- key_hash is NEVER included."
       },
+      "AccountAvailabilityResponse": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Why the email cannot be used, empty when it can or none was given",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Why the username cannot be taken, empty when it can or none was given",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "AccountAvailabilityResponse",
+        "description": "Why creating an account with these values would be refused, empty where it would not."
+      },
       "AccountGitPending": {
         "properties": {
           "pr_url": {
@@ -35543,16 +36530,54 @@
             "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty makes it a root account, bound to your org (GET /system/organisation), or to none while no org is yours. The binding grants nothing itself: an org-bound view also needs the org among those its groups grant.",
             "default": ""
           },
+          "org_display_name": {
+            "type": "string",
+            "title": "Org Display Name",
+            "description": "The display name of the org the account is bound to, which for a root account is your org, else that org's name when it has none. Empty while it is bound to none.",
+            "default": ""
+          },
           "external": {
             "type": "boolean",
             "title": "External",
             "description": "True when the account authenticates through an identity provider"
+          },
+          "admin": {
+            "type": "boolean",
+            "title": "Admin",
+            "description": "True when a system-wide group gives the account the admin role, so it has full access to every org. The account's own read reports false while password_change_required is set.",
+            "default": false
           },
           "oidc_id": {
             "type": "string",
             "title": "Oidc Id",
             "description": "OIDC provider name last used to log this account in, empty if none",
             "default": ""
+          },
+          "oidc_type": {
+            "type": "string",
+            "title": "Oidc Type",
+            "description": "The type of the provider oidc_id names, empty when it names no registered provider",
+            "default": ""
+          },
+          "email_verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Verified",
+            "description": "Whether the email is vouched for, so a first IdP sign-in with it links to this account: true when an admin set it or a trusted identity provider verified it, false when the account owner set it or the provider did not vouch, null when it was stored before this was recorded"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/LinkedIdentityResponse"
+            },
+            "type": "array",
+            "title": "Identities",
+            "description": "IdP sign-ins linked to this account, each reaching it without a password"
           },
           "password_change_required": {
             "type": "boolean",
@@ -38882,9 +39907,9 @@
           },
           "name": {
             "type": "string",
+            "minLength": 1,
             "title": "Name",
-            "description": "Display name",
-            "default": ""
+            "description": "Display name"
           },
           "org": {
             "type": "string",
@@ -38896,10 +39921,11 @@
         "type": "object",
         "required": [
           "username",
-          "password"
+          "password",
+          "name"
         ],
         "title": "CreateAccountRequest",
-        "description": "What a console sends to create an account.\n\nOnly the credentials are required. The setup wizard creates the first user\nfrom a form that collects no contact details, so a required field here is a\ndeployment that cannot get into its own console."
+        "description": "What a console sends to create an account: the credentials and a display name, with the contact fields optional."
       },
       "CreateArtifactRequest": {
         "properties": {
@@ -39085,6 +40111,12 @@
             "title": "Type",
             "description": "Provider type: generic, google, entra_id, okta"
           },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org whose provider this is: a registered org's name, or empty for a platform provider. Its sign-ins land in that org as viewers and link only to that org's accounts. An admin of that org manages it.",
+            "default": ""
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
@@ -39144,6 +40176,14 @@
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionRequest"
+          },
+          "trusted_email_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Trusted Email Domains",
+            "description": "Email domains this provider vouches for, such as corp.com. A first sign-in whose verified email is in one of them links to the one account holding that email: at once for an account an identity provider owns, after the account's password for a local one. Stored lowercased. Empty links nothing."
           }
         },
         "type": "object",
@@ -41157,6 +42197,14 @@
             "type": "array",
             "title": "Members"
           },
+          "linked_members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Linked Members",
+            "description": "Accounts that hold the group through an IdP sign-in its link matches, beside the stored members. Read-only: writing members never sets them."
+          },
           "scope": {
             "type": "string",
             "title": "Scope"
@@ -42996,6 +44044,55 @@
         "title": "LinkStatusModel",
         "description": "A link, with how the content in the file set compares to the artefact."
       },
+      "LinkedIdentityResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "The sign-in's key, which unlinking names"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "The OIDC provider it signs in through"
+          },
+          "provider_type": {
+            "type": "string",
+            "title": "Provider Type",
+            "description": "The provider's type (google, entra_id, okta or generic), empty once it is no longer registered",
+            "default": ""
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "description": "The IdP subject (sub)"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "The email its IdP last asserted",
+            "default": ""
+          },
+          "linked_at": {
+            "type": "string",
+            "title": "Linked At",
+            "default": ""
+          },
+          "last_login_at": {
+            "type": "string",
+            "title": "Last Login At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "provider",
+          "subject"
+        ],
+        "title": "LinkedIdentityResponse",
+        "description": "An IdP sign-in linked to an account, which reaches it without a password."
+      },
       "LogEntryModel": {
         "properties": {
           "sha": {
@@ -43178,7 +44275,7 @@
           "username": {
             "type": "string",
             "title": "Username",
-            "description": "Account name (admin, operator, viewer)"
+            "description": "Account name, or the email of a local account"
           },
           "password": {
             "type": "string",
@@ -43893,6 +44990,11 @@
             "title": "Type",
             "default": "generic"
           },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "default": ""
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
@@ -43935,6 +45037,13 @@
           },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionConfig"
+          },
+          "trusted_email_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Trusted Email Domains"
           },
           "created_at": {
             "type": "string",
@@ -44223,6 +45332,27 @@
         "title": "OidcCallbackResponse",
         "description": "Engine token minted after a successful IdP callback."
       },
+      "OidcLinkRequest": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "The local account's password"
+          },
+          "ticket": {
+            "type": "string",
+            "title": "Ticket",
+            "description": "The link_ticket a link_required callback answered with"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password",
+          "ticket"
+        ],
+        "title": "OidcLinkRequest",
+        "description": "Body for linking a held IdP sign-in to its local account with that account's password."
+      },
       "OidcLoginResponse": {
         "properties": {
           "authorization_url": {
@@ -44241,6 +45371,34 @@
         "type": "object",
         "title": "OidcLoginResponse",
         "description": "JSON body for GET .../login when ``redirect=false``."
+      },
+      "OidcReauthRequest": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReauthKind",
+            "description": "What the target names",
+            "default": "account"
+          },
+          "return_to": {
+            "type": "string",
+            "title": "Return To",
+            "description": "Where the callback sends the browser, with the grant in the URL fragment (#reauth_grant=...&expires_in=...) or the refusal's code (#error=<code>&provider=...). A relative path, or an absolute URL on this API's origin or a CORS-allowed origin."
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
+            "title": "Target",
+            "description": "The account, group, role, sign-in provider or API key you are about to change"
+          }
+        },
+        "type": "object",
+        "required": [
+          "return_to",
+          "target"
+        ],
+        "title": "OidcReauthRequest",
+        "description": "The account or group you are about to change, and where the sign-in hands its grant back."
       },
       "Operation_TaskInfo_Any_": {
         "properties": {
@@ -47132,6 +48290,11 @@
             "type": "string",
             "title": "Type"
           },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org whose provider this is: a registered org's name, or empty for a platform provider. Its sign-ins land in that org as viewers and link only to that org's accounts. An admin of that org manages it."
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled"
@@ -47171,6 +48334,14 @@
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionResponse"
           },
+          "trusted_email_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Trusted Email Domains",
+            "description": "Email domains this provider vouches for, such as corp.com. A first sign-in whose verified email is in one of them links to the one account holding that email: at once for an account an identity provider owns, after the account's password for a local one. Stored lowercased. Empty links nothing."
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -47208,6 +48379,7 @@
         "required": [
           "name",
           "type",
+          "org",
           "enabled",
           "display_name",
           "issuer",
@@ -47217,6 +48389,7 @@
           "client_secret_path",
           "scopes",
           "groups",
+          "trusted_email_domains",
           "created_at",
           "last_sync_at",
           "last_sync_status",
@@ -47704,6 +48877,65 @@
           "lifecycle_read",
           "config_write"
         ]
+      },
+      "ReauthKind": {
+        "type": "string",
+        "enum": [
+          "account",
+          "api_key",
+          "group",
+          "provider",
+          "role"
+        ]
+      },
+      "ReauthRequest": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReauthKind",
+            "description": "What the target names",
+            "default": "account"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Your own password"
+          },
+          "target": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$",
+            "title": "Target",
+            "description": "The account, group, role, sign-in provider or API key you are about to change"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password",
+          "target"
+        ],
+        "title": "ReauthRequest",
+        "description": "Your own password, and the account you are about to edit."
+      },
+      "ReauthResponse": {
+        "properties": {
+          "grant": {
+            "type": "string",
+            "title": "Grant",
+            "description": "Send it as the X-DFE-Reauth header on every edit of that account"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "description": "Seconds the grant stays valid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "grant",
+          "expires_in"
+        ],
+        "title": "ReauthResponse",
+        "description": "A grant for editing one account."
       },
       "RelinkResult": {
         "properties": {
@@ -55400,6 +56632,18 @@
       },
       "UpdateProviderRequest": {
         "properties": {
+          "org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org",
+            "description": "Move the provider to another org. The org whose provider this is: a registered org's name, or empty for a platform provider. Its sign-ins land in that org as viewers and link only to that org's accounts. An admin of that org manages it."
+          },
           "enabled": {
             "anyOf": [
               {
@@ -55509,6 +56753,21 @@
               }
             ],
             "description": "Group resolution config"
+          },
+          "trusted_email_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trusted Email Domains",
+            "description": "Replace the trusted email domains. Email domains this provider vouches for, such as corp.com. A first sign-in whose verified email is in one of them links to the one account holding that email: at once for an account an identity provider owns, after the account's password for a local one. Stored lowercased. Empty links nothing."
           }
         },
         "type": "object",

@@ -33,8 +33,9 @@ _.create_table, _.deploy_target, _.desired_partitions, _.desired_replication_fac
 _.directory_setting, _.editable, _.expires_in, _.explain_queries, _.field_count, _.groups_skipped
 _.has_schema, _.header_fields, _.highest, _.highest_7d, _.highest_7d_label, _.hunt_count
 _.json_column, _.json_derived_count, _.landed_in_default, _.mapping_count, _.member_count
-_.min_interval_seconds, _.orphaned_groups, _.peak_memory, _.pending_reconcile, _.per_source_apps
-_.preferences, _.principal, _.principals, _.processes, _.provider_idle_scaling
+_.min_interval_seconds, _.oidc_type, _.org_display_name, _.orphaned_groups, _.peak_memory
+_.pending_reconcile, _.per_source_apps, _.preferences, _.principal, _.principals, _.processes
+_.provider_idle_scaling
 _.provider_max_replica_memory_gb, _.provider_min_replica_memory_gb, _.provider_replicas
 _.python_version, _.queued, _.read_rows, _.relinked, _.requested_fire, _.rule_errors, _.runnable
 _.runnable_intakes, _.runnable_reason, _.sampled, _.service_account_json, _.services_config_dir
@@ -49,7 +50,7 @@ _.create_table, _.current_step, _.current_table_topic_type, _.desired_partitions
 _.desired_replication_factor, _.estimated_cost, _.estimated_improvement, _.estimated_rows
 _.existing_schema, _.explain_duration_ms, _.field_mappings, _.has_transform, _.hinted_columns
 _.hyperdx_source_error, _.hyperdx_source_teams, _.hyperdx_team_api_key_env, _.hyperdx_team_id
-_.inherits, _.initial_setup, _.last_completed_at, _.last_login_at, _.match_ratio
+_.inherits, _.initial_setup, _.last_completed_at, _.last_login_at, _.linked_at, _.match_ratio
 _.matched_searchable, _.module_name, _.next_cursor, _.number, _.oidc_providers, _.parser_config
 _.pending_steps, _.placeholder, _.poll_interval_seconds, _.previous_deployed_versions, _.principal
 _.projected_per_day, _.proposed_columns, _.proposed_indices, _.proposed_query, _.proposed_schema

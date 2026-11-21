@@ -15,10 +15,10 @@ from fastapi.testclient import TestClient
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
-from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.yaml_health import WRITE_FAILURES
 from tests.support.accounts import admin_on_its_own_password
+from tests.support.reauth import create_app_without_reauth
 
 STATUS = "/api/v1/system/status"
 GROUPS = "/api/v1/auth/groups"
@@ -67,7 +67,7 @@ def test_the_status_report_needs_system_read(client: TestClient, viewer_headers:
 
 def test_a_refused_write_is_counted_on_the_engines_metrics(api_settings, admin_headers):
     manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
-    app = create_app(settings=api_settings, metrics_manager=manager)
+    app = create_app_without_reauth(settings=api_settings, metrics_manager=manager)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             admin_on_its_own_password(app)

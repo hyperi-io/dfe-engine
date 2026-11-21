@@ -320,7 +320,7 @@ def audit_jit_login_refused(user_id: str, source_provider: str, reason: str) -> 
         source_provider: OIDC provider name that asserted it.
         reason: ``protected_account``, ``local_account``, ``provider_mismatch``,
             ``subject_mismatch``, ``api_key_subject``, ``account_disabled``,
-            ``account_blocked`` or ``no_role_granted``.
+            ``account_blocked``, ``no_role_granted`` or ``link_stale``.
     """
     logger.warning(
         "auth.jit.login_refused",
@@ -363,6 +363,32 @@ def audit_jit_failed(user_id: str, exc: BaseException) -> None:
         exc: The failure provisioning raised.
     """
     logger.warning("auth.jit.provision_failed", user_id=user_id, **describe_http_error(exc))
+
+
+def audit_identity_link_skipped(*, reason: str, source_provider: str, user_id: str) -> None:
+    """Emit a warning when a first IdP sign-in matched accounts by email but was not linked to any, so it got its own account."""
+    logger.warning(
+        "auth.identity.link_skipped",
+        reason=reason,
+        source_provider=source_provider,
+        user_id=user_id,
+    )
+
+
+def audit_identity_linked(*, account: str, method: str, source_provider: str, user_id: str) -> None:
+    """Emit an event when an IdP sign-in is linked to an account, ``method`` being ``verified_email`` or ``password``."""
+    logger.info(
+        "auth.identity.linked",
+        account=account,
+        method=method,
+        source_provider=source_provider,
+        user_id=user_id,
+    )
+
+
+def audit_identity_unlinked(*, account: str, admin_id: str, key: str) -> None:
+    """Emit an event when an admin unlinks an IdP sign-in, leaving its record a standalone account."""
+    logger.info("auth.identity.unlinked", account=account, admin_id=admin_id, key=key)
 
 
 def audit_resource_change(

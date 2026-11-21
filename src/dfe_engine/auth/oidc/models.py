@@ -23,9 +23,11 @@ Group resolution modes:
     api          -- Groups fetched from the provider's admin API on a schedule.
 """
 
+import re
+from collections.abc import Iterable
 from typing import Annotated, Literal, Self, get_args
 
-from pydantic import BaseModel, Field, WithJsonSchema, model_validator
+from pydantic import BaseModel, Field, WithJsonSchema, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # Group sync status
@@ -77,6 +79,24 @@ _LEGACY_DEFAULT_SCOPES = ("email", "groups", "openid", "profile")
 
 # okta and generic still default to that set, so only these types fail a login on it.
 _LEGACY_REPAIRED_TYPES = frozenset({"entra_id", "google"})
+
+_EMAIL_DOMAIN = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}\Z")
+
+
+def _folded_domains(*, domains: Iterable[str]) -> list[str]:
+    """The domains stripped and casefolded, blanks and repeats dropped, in first-seen order."""
+    folded = (domain.strip().casefold() for domain in domains)
+    return list(dict.fromkeys(domain for domain in folded if domain))
+
+
+def checked_email_domains(*, domains: Iterable[str]) -> list[str]:
+    """The domains folded, refused unless each is a bare domain such as ``corp.com``."""
+    folded = _folded_domains(domains=domains)
+    refused = [domain for domain in folded if not (_EMAIL_DOMAIN.match(domain))]
+    if refused:
+        names = ", ".join(repr(domain) for domain in refused)
+        raise ValueError(f"must be bare domains such as 'corp.com', not {names}")
+    return folded
 
 
 class GroupResolutionConfig(BaseModel):
@@ -176,6 +196,9 @@ class OIDCProvider(BaseModel):
     type: _ProviderType = "generic"
     """Provider implementation type."""
 
+    org: str = ""
+    """The org whose provider this is: its sign-ins land in that org as viewers and link only to that org's accounts. Empty is a platform provider."""
+
     enabled: bool = True
     """Whether this provider is active."""
 
@@ -215,6 +238,11 @@ class OIDCProvider(BaseModel):
     groups: GroupResolutionConfig = Field(default_factory=GroupResolutionConfig)
     """Group resolution configuration for this provider."""
 
+    trusted_email_domains: list[str] = Field(default_factory=list)
+    """Email domains this provider vouches for, so a first sign-in can link to the account holding its email.
+
+    The email must also be verified (``email_verified``, or ``xms_edov`` from Entra). Empty links nothing."""
+
     created_at: str = ""
     """ISO 8601 UTC timestamp of initial creation."""
 
@@ -228,6 +256,12 @@ class OIDCProvider(BaseModel):
 
     sync_error: str = ""
     """Error message from the most recent failed sync, if any."""
+
+    @field_validator("trusted_email_domains")
+    @classmethod
+    def _fold_trusted_email_domains(cls, value: list[str]) -> list[str]:
+        """Store the domains casefolded and once each, so a sign-in's domain matches by equality."""
+        return _folded_domains(domains=value)
 
     @model_validator(mode="after")
     def _fill_default_scopes(self) -> Self:

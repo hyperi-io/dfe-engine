@@ -29,7 +29,13 @@ from dfe_engine.auth.membership import (
 )
 from tests.support.present import present
 from tests.unit.test_auth.factories import make_account_store
-from tests.unit.test_auth.membership_cases import MEMBERSHIP_MIRROR_CASES, MembershipMirrorCase
+from tests.unit.test_auth.membership_cases import (
+    GROUPS_HELD_LINKED_CASES,
+    LINKED_SIGN_IN_GROUPS,
+    MEMBERSHIP_MIRROR_CASES,
+    GroupsHeldLinkedCase,
+    MembershipMirrorCase,
+)
 
 
 class TestSyncAccountGroupsForMembershipChange:
@@ -203,6 +209,15 @@ class TestGroupsHeld:
             _group("by-link", source_id="g-1", source_provider="entra"),
         ]
         assert groups_held(account, groups, bindings={}) == ["by-hand", "by-link"]
+
+    @pytest.mark.parametrize(
+        "case", GROUPS_HELD_LINKED_CASES, ids=[case["id"] for case in GROUPS_HELD_LINKED_CASES]
+    )
+    def test_linked_sign_ins(self, case: GroupsHeldLinkedCase):
+        held = groups_held(
+            account=case["account"], bindings=case["bindings"], groups=LINKED_SIGN_IN_GROUPS
+        )
+        assert held == case["expected_groups"]
 
 
 class TestGroupsHeldAfter:

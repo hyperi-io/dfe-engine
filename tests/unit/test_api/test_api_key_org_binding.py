@@ -80,6 +80,8 @@ class TestAnApiKeyIsBoundToAnOrg:
         orgs: None,
         reader: RecordingClient,
     ):
+        # A key bound to any org but yours may not be minted with a group reaching acme at all.
+        app.state.org_registry.home.set(actor="test", name="globex")
         created = _key(client, admin_headers, app, org="globex")
         assert created.status_code == 201, created.text
 

@@ -47,10 +47,11 @@ sequenceDiagram
 5. Under **Manage**, select **Token configuration**, then **Add groups claim**. Tick **Security groups** and select **Save**. Leave each token's value at the default, the group ID. Switching it to sAMAccountName, cloud display names or role claims breaks DFE's group links.
 6. Do not add a `groups` permission or scope. Entra adds the claim from step 5, and asking for a `groups` scope fails the sign-in.
 
-Two optional extras, for when the operator asks:
+Three optional extras, for when the operator asks:
 
 - Group names on the Graph path, which otherwise returns each group's id with a blank name: **API permissions > Add a permission > Microsoft Graph > Delegated permissions > GroupMember.Read.All**, then **Grant admin consent for <tenant>**. DFE links on the id, so sign-in works without it.
 - An app-only fallback: the Microsoft Graph application permission **GroupMember.Read.All** with admin consent. DFE then reads a user's groups with the app's secret when Graph turns down the user's token, and the operator can run a group sync.
+- Linking sign-ins to existing DFE accounts by email: **Token configuration > Add optional claim**, token type **ID**, tick **email** and **xms_edov**, then **Add**. Entra sends no `email_verified`, so DFE treats an Entra email as verified only when `xms_edov` is true.
 
 ## Send these to the operator
 
@@ -100,7 +101,7 @@ Create the provider with `POST /api/v1/auth/oidc-providers`. The `name` becomes 
 }
 ```
 
-`token_claim` reads the `groups` claim, and the overage lookup runs with no setting. The app-only fallback is the one thing that needs `groups.tenant_id`, and it uses the login client secret unless `groups.client_secret` is set. Leave `scopes` unset: the default is `openid email profile`. The client secret goes to the secret store and the provider keeps its path, never the value.
+`token_claim` reads the `groups` claim, and the overage lookup runs with no setting. The app-only fallback is the one thing that needs `groups.tenant_id`, and it uses the login client secret unless `groups.client_secret` is set. Leave `scopes` unset: the default is `openid email profile`. The client secret goes to the secret store and the provider keeps its path, never the value. Set `trusted_email_domains` to your users' email domains and have the admin add the `xms_edov` claim: DFE admits only a sign-in whose verified email is in one of them, and links it to an existing account holding that email: see [rbac-sign-in.md, Linked sign-ins](../rbac-sign-in.md#linked-sign-ins).
 
 Link each DFE group by setting two fields in its group file: `source_provider` to `<provider-name>`, the name the provider was created with, and `source_id` to an object id the admin sent. A group file with a `source_id` and no `source_provider` loads unlinked, with a warning naming it in the engine log, and no sign-in reaches it through that id: see [rbac-groups.md, section 4.4](../rbac-groups.md#44-group-sync-process).
 
@@ -119,6 +120,8 @@ Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_F
 - Add a redirect URI: <https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri>
 - Add a client secret: <https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials>
 - Groups claim and the 200-group limit: <https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims>
+- The `xms_edov` claim: <https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference>
+- Why an unverified email must not identify a user: <https://learn.microsoft.com/en-us/entra/identity-platform/migrate-off-email-claim-authorization>
 - Issuer and discovery: <https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc>
 - `transitiveMemberOf` permissions: <https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof>
 - Error codes: <https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes>

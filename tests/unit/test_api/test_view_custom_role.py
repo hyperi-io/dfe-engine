@@ -35,6 +35,8 @@ def test_a_custom_role_holding_query_execute_runs_a_view(
     assert (
         client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers).status_code == 201
     )
+    # An org account holds only its org's admin or viewer group, so the runner is a root account of your org.
+    app.state.org_registry.home.set(actor="test", name="acme")
     role = client.post(
         "/api/v1/auth/roles",
         json={"name": "view_runner", "permissions": ["query:execute"], "scoped": True},
@@ -45,7 +47,12 @@ def test_a_custom_role_holding_query_execute_runs_a_view(
     app.state.group_store.update("runners", org_ids=["acme"])
     created = client.post(
         "/api/v1/auth/accounts",
-        json={"username": "runner", "password": PASSWORD, "groups": ["runners"], "org": "acme"},
+        json={
+            "name": "Test User",
+            "username": "runner",
+            "password": PASSWORD,
+            "groups": ["runners"],
+        },
         headers=admin_headers,
     )
     assert created.status_code == 201, created.text

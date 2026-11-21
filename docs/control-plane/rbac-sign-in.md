@@ -121,13 +121,37 @@ A sign-in through `X-Oidc-Groups` resolves its roles the way a token does, from 
 
 The linked groups are the sign-in allowlist as well. An IdP sign-in, through the OIDC callback or `X-Oidc-Groups`, is admitted when the account it binds to would hold a role, from a group its identifiers link to or a group with the account in its member list. A linked group with no role, which is every group the sync creates until an admin gives it one, admits nobody.
 
+An OIDC callback sign-in also needs an email the IdP verified, in a domain the provider's `trusted_email_domains` lists, or it gets `401 email_untrusted` and writes nothing. A provider with no trusted domains admits nobody.
+
 Anyone else gets `401 no_role_granted` (a sign-in the console started, with `return_to`, goes back to the console with that code in the URL fragment instead) and an `auth.jit.login_refused` audit event. A first sign-in leaves no account. An existing account records the groups its IdP asserts at that sign-in and has every session ended, as a logout ends them, so an issued token answers `401 session_ended` on any route, refresh included. The local admin or the break-glass account (section 3.5) links the first group, and adding an account to a group by hand admits someone the IdP groups do not cover, which is the one way in through a `manual`-mode provider.
 
 An admin sets `source_id` and `source_provider` together through the groups API or dfe-ui's group form ([section 4.4](rbac-groups.md#44-group-sync-process)). `source_provider` names the provider with the logins the link answers. Where a `token_claim` provider's claim holds names (Okta's default, dex, Keycloak), `source_id` is the name the IdP sends. For Entra it is the object ID.
 
 A groups claim sent as one string is split on commas, never on whitespace (`src/dfe_engine/auth/oidc/rp.py`), and `X-Oidc-Groups` is split on commas. So a string claim of `SOC Analysts` is the one group `SOC Analysts`. A `source_id` containing a comma matches an array claim on the relying-party path and nothing else.
 
+## Linked sign-ins
+
+One account can take several sign-ins: its own password or IdP, plus IdP sign-ins linked to it. A linked sign-in's session is the account's, so disabling, blocking or logging out the account covers all of them. Each sign-in's IdP groups are recorded on its own entry, and the account holds the groups every entry links to.
+
+A sign-in links on its first login through the OIDC callback when all of these hold:
+
+- The IdP vouches for the email: `email_verified` is true, or `xms_edov` from Entra, which sends no `email_verified` (see [idp-setup/entra.md](idp-setup/entra.md)). An address read from `preferred_username` or `upn` never counts.
+- The provider's `trusted_email_domains` lists the email's domain.
+- Exactly one account holds the email, ignoring case, among accounts whose email is vouched for: an admin set it, a trusted IdP verified it, or it is a local account's email from before linking existed. An email a user set on their own account through `PUT /api/v1/auth/accounts/me` never counts, so nobody can claim another person's address. The local admin, break-glass and soft-deleted accounts never count. With two holders the sign-in is refused, after an `auth.identity.link_skipped` audit event.
+
+An account an IdP owns links at once. A local account links only after its password: the callback answers `409 link_required` with `account` and a `link_ticket` (the console's hand-back carries them in the URL fragment), and `POST /api/v1/auth/oidc/link` with the ticket and the password links and signs in. The ticket lasts 10 minutes and authenticates nothing else. Wrong passwords count against the account's sign-in throttle. Either way the sign-in must leave the account holding a role, and a disabled or blocked account refuses it.
+
+A sign-in through `X-Oidc-*` headers never links, because the headers carry no proof, but it follows a link made through the callback.
+
+A first callback sign-in that does not link while another account holds its email is refused with `email_held` and writes nothing, so one email is one account. An email that account's owner set themselves never blocks, so nobody can lock a colleague out of their identity provider. Trusting the provider's domain lets the sign-in link instead.
+
+Trust a domain only on a provider whose directory you control. An IdP that lets its users set their own email would let them claim another person's account.
+
+Each linked sign-in also has a small link record under the account store's `links/` directory, named after the sign-in, which points at its account so a returning sign-in finds it in one read. An account's `identities` lists its linked sign-ins. `DELETE /api/v1/auth/accounts/{username}/identities/{key}` unlinks one, ends every session of the account and leaves the sign-in an account of its own. Deleting the account deletes its links, and deleting a provider unlinks every sign-in through it. Creating or editing an account refuses an email another linkable account holds (`409 email_taken`). Other accounts that share an email are left as they are.
+
 ## Local accounts and role changes
+
+A local account signs in with its username, or with its email when exactly one local account holds that email vouched for, as linking counts it. Failed sign-ins by email count against the account name's throttle.
 
 For a local account the group files are the authority. The API routes keep the account's `groups` list in step, but that list grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or dfe-infra's `authConfig.groupsConfigMap` value seeded a changed file in at pod start. The engine's auth never reads the deploy repo's `governance/rbac/groups` or `governance/rbac/roles`, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) holds the groups its record says the IdP asserts as well, so a group an operator adds it to by hand sits beside those.
 

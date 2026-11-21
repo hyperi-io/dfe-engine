@@ -44,7 +44,7 @@ def scoped_setup(client: TestClient, app, admin_headers: dict[str, str]):
             account_store.create(username, f"pw-{username}")
 
     for name, roles, members in (
-        ("acme-admins", ["admin"], ["orgadmin"]),
+        ("acme-ops", ["admin"], ["orgadmin"]),
         ("acme-analysts", ["data_analyst"], ["orguser"]),
     ):
         resp = client.post(
@@ -94,7 +94,8 @@ class TestOrgGroupVisibility:
         )
         assert resp.status_code == 200
         names = {g["name"] for g in resp.json()["items"]}
-        assert names == {"acme-admins", "acme-analysts"}
+        # Creating acme made its admin and viewer groups too.
+        assert names == {"acme-admins", "acme-analysts", "acme-ops", "acme-viewers"}
 
 
 class TestOrgLocalAdmin:

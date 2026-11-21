@@ -32,15 +32,26 @@ from pydantic import BaseModel, Field
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
 from dfe_engine.api.conventions import apply_search
-from dfe_engine.api.deps import CurrentUser, refuse_unknown_orgs, require_platform_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    ReauthGrant,
+    bound_org,
+    refuse_unknown_orgs,
+    refuse_without_grant,
+    require_api_key_reauth,
+    require_platform_action,
+)
 from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
 from dfe_engine.auth.audit import audit_api_key_change
 from dfe_engine.auth.membership import groups_named
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import grant_target
 from dfe_engine.names import StoreName
+from dfe_engine.orgs.role_groups import org_role_breach
 
 if TYPE_CHECKING:
     from dfe_engine.auth.api_keys import APIKey
+
 
 router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 
@@ -112,11 +123,22 @@ def _response_fields(key_meta: APIKey) -> dict:
 # -- Endpoints ------------------------------------------------
 
 
+async def require_new_api_key_reauth(
+    body: CreateAPIKeyRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the API key the body creates."""
+    target = grant_target(kind="api_key", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
 @router.post(
     "",
     response_model=APIKeyCreatedResponse,
     status_code=201,
-    dependencies=[Depends(require_platform_action(scopes_dict["api_key_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["api_key_write"])),
+        Depends(require_new_api_key_reauth),
+    ],
 )
 async def create_api_key(
     body: CreateAPIKeyRequest,
@@ -125,7 +147,7 @@ async def create_api_key(
 ):
     """Create a new API key. Returns the full key exactly once.
 
-    422 ``unknown_org`` when ``org`` names no registered org.
+    422 ``unknown_org`` when ``org`` names no registered org, ``org_role_only`` when a key bound to an org other than yours names a group outside that org's admin and viewer roles.
     """
     from dfe_engine.auth.api_keys import APIKeyStore
 
@@ -133,9 +155,20 @@ async def create_api_key(
     if store.get(body.name) is not None:
         raise ProblemError(409, f"API key '{body.name}' already exists", code="conflict")
     # The key's session takes every role its groups carry, so minting it hands them out.
-    for group in groups_named(body.groups, request.app.state.group_store.list()):
+    named = groups_named(body.groups, request.app.state.group_store.list())
+    for group in named:
         check_role_assignment(request, user, group.roles, scope_of(group))
     refuse_unknown_orgs(request, [body.org])
+    breach = org_role_breach(
+        account_org=body.org, groups=named, home_org=bound_org(account_org="", request=request)
+    )
+    if breach is not None:
+        raise ProblemError(
+            422,
+            f"API key {body.name!r} is bound to org {body.org!r}, and an org key holds only "
+            f"its own org's admin or viewer group, so group {breach!r} is refused",
+            code="org_role_only",
+        )
     expires_at = body.expires_at
     ttl_days = request.app.state.settings.auth.api_key_default_ttl_days
     if expires_at is None and ttl_days > 0:
@@ -191,7 +224,10 @@ async def list_api_keys(
 @router.delete(
     "/{short_token}",
     status_code=204,
-    dependencies=[Depends(require_platform_action(scopes_dict["api_key_delete"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["api_key_delete"])),
+        Depends(require_api_key_reauth),
+    ],
 )
 async def revoke_api_key(
     short_token: str,

@@ -50,6 +50,7 @@ from dfe_engine.settings import (
 )
 from tests.support.accounts import session_token
 from tests.support.orgs import name_your_org
+from tests.support.reauth import waive_reauth
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_BREAKGLASS = secrets.token_urlsafe(16)
@@ -112,7 +113,7 @@ def _settings(
 @contextlib.contextmanager
 def _booted(settings: DFESettings) -> Generator[tuple[FastAPI, TestClient]]:
     """A started engine. Leaving the block stops it, as a pod being replaced does."""
-    app = create_app(settings=settings)
+    app = waive_reauth(create_app(settings=settings))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             yield app, client

@@ -94,7 +94,7 @@ source_provider: "<provider-name>"
 source_id: "<Okta group name>"
 ```
 
-A linked group admits its members once it holds a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta turns it down.
+A linked group admits its members once it holds a role, and until one does no Okta user can sign in, so link the first group as the local admin or the break-glass account. Set `trusted_email_domains` to your users' email domains: DFE admits only a sign-in whose verified email is in one, and links it to an existing account holding that email. Okta answers `email_verified` from its userinfo endpoint, which DFE then reads at each sign-in ([rbac-sign-in.md, Linked sign-ins](../rbac-sign-in.md#linked-sign-ins)). Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Okta turns it down.
 
 ## Okta references
 

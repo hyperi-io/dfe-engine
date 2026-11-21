@@ -35,7 +35,7 @@ def orgadmin(
         assert resp.status_code == 201, resp.text
     app.state.account_store.create("orgadmin", "pw-orgadmin-123456")
     for body in (
-        {"name": "acme-admins", "roles": ["admin"], "scope": "org:acme", "members": ["orgadmin"]},
+        {"name": "acme-ops", "roles": ["admin"], "scope": "org:acme", "members": ["orgadmin"]},
         {"name": "acme-eng", "roles": ["data_viewer"], "scope": "org:acme"},
         {"name": "globex-analysts", "roles": ["data_analyst"], "scope": "org:globex"},
         {

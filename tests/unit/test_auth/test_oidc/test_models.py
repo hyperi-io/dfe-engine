@@ -46,6 +46,11 @@ class TestOIDCProviderDefaults:
         assert provider.last_sync_status == ""
         assert provider.sync_error == ""
         assert provider.groups == GroupResolutionConfig()
+        assert provider.trusted_email_domains == []
+
+    def test_a_stored_provider_loads_its_trusted_domains_folded(self):
+        provider = OIDCProvider.model_validate({"trusted_email_domains": ["Corp.COM ", "corp.com"]})
+        assert provider.trusted_email_domains == ["corp.com"]
 
 
 GOOGLE_SCOPES = (

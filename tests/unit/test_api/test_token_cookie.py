@@ -33,7 +33,10 @@ class _CallbackRp:
 
     async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
         return NormalizedIdentity(
-            subject="alice@example.com", email="alice@example.com", groups=["dfe-admins"]
+            email_verified=True,
+            subject="alice@example.com",
+            email="alice@example.com",
+            groups=["dfe-admins"],
         )
 
 

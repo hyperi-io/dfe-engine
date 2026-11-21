@@ -11,9 +11,17 @@ from typing import Any
 
 from dfe_engine.auth.oidc.models import OIDCProvider
 
+# The domains the stub relying parties' test identities carry, so their sign-ins pass the trusted-domain check.
+TEST_EMAIL_DOMAINS = ("acme.test", "example.com", "example.test")
+
 
 def serve_provider(app: Any, name: str = "stub") -> None:
-    """Store *name* enabled in the app's provider registry, as an RP built from it would have found it."""
+    """Store *name* enabled in the app's provider registry, trusted for the test email domains, as an RP built from it would have found it."""
     app.state.oidc_provider_registry.create(
-        name, OIDCProvider(type="generic", issuer="https://idp.example")
+        name,
+        OIDCProvider(
+            issuer="https://idp.example",
+            trusted_email_domains=list(TEST_EMAIL_DOMAINS),
+            type="generic",
+        ),
     )

@@ -59,7 +59,12 @@ def _group(app, members: list[str] | None = None) -> None:
 
 def _create_account(client, app, admin, viewer) -> Outcome:
     password = secrets.token_urlsafe(16)
-    body = {"username": ACCOUNT, "password": password, "groups": ["dfe-viewers"]}
+    body = {
+        "name": "Test User",
+        "username": ACCOUNT,
+        "password": password,
+        "groups": ["dfe-viewers"],
+    }
     resp = client.post("/api/v1/auth/accounts", json=body, headers=admin)
     return Outcome(resp.status_code, [password, _hash(app, ACCOUNT)])
 
