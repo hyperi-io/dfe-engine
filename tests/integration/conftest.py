@@ -567,16 +567,33 @@ def ch_params(request, local_tier_notice):
         yield params
 
 
+def _worker_owner(nodeid: str) -> str:
+    """The owner of a container the xdist worker running *nodeid* holds, for the container's name.
+
+    xdist hands one module's tests to several workers, and each builds the module's
+    fixtures for itself, so the name has to say which worker holds this one.
+    """
+    return f"{nodeid}-{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
+
+
 @pytest.fixture(scope="module")
 def module_ch_params(request, local_tier_notice):
-    """``ch_params`` held for a whole module, for tests that load one large data set and query it many times."""
-    with _resolved_ch_params(request) as params:
+    """``ch_params`` held for a whole module, for tests that load one large data set and query it many times.
+
+    Under xdist each worker running the module's tests gets a server of its own on the
+    remote tier, named for it. ``DFE_TEST_KEEP`` shares one stable server instead, and
+    the module's tests divide it among the workers themselves.
+    """
+    with _resolved_ch_params(request, owner=_worker_owner(request.node.nodeid)) as params:
         yield params
 
 
 @contextmanager
-def _resolved_ch_params(request) -> Generator[dict]:
-    """The ClickHouse ``ch_params`` resolves, held for the lifetime of *request*'s scope."""
+def _resolved_ch_params(request, *, owner: str | None = None) -> Generator[dict]:
+    """The ClickHouse ``ch_params`` resolves, held for the lifetime of *request*'s scope.
+
+    *owner* names any container this starts, the node id of *request* when not given.
+    """
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     tier = _resolve_tier()
     teardown = None
@@ -599,7 +616,7 @@ def _resolved_ch_params(request) -> Generator[dict]:
         else:
             spec = "local"
         params, teardown = _spin_ch_on_docker(
-            spec, keep=_truthy("DFE_TEST_KEEP"), test=request.node.nodeid
+            spec, keep=_truthy("DFE_TEST_KEEP"), test=owner or request.node.nodeid
         )
 
     try:
