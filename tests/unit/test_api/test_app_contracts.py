@@ -1082,6 +1082,41 @@ class TestWritingCustomEnv:
         assert resp.json()["reload"] == "restart"
         assert gc.head_revision() == resp.json()["commit_sha"]
 
+    def test_a_published_compose_install_refuses_an_env_value_nothing_would_deliver(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # A Compose file published without a checkout names no env directory and has no chart.
+        gc = _wire(app, tmp_path)
+        app.state.settings.deployment.target = "docker"
+        app.state.settings.deployment.app_config_dir = str(tmp_path / "app-config")
+        app.state.settings.deployment.app_env_dir = ""
+        _deploy(client, admin_headers)
+        head = gc.head_revision()
+
+        resp = _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": "kept"})
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "env_not_delivered"
+        assert resp.json()["path"] == "extraEnv.DFE_LOADER_HOUSE_KEY"
+        assert gc.head_revision() == head
+        assert list(tmp_path.glob(f"**/*{appconfig.CUSTOM_ENV_SUFFIX}")) == []
+
+    def test_a_published_compose_install_still_takes_an_env_removal(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        app.state.settings.deployment.target = "docker"
+        app.state.settings.deployment.app_config_dir = str(tmp_path / "app-config")
+        app.state.settings.deployment.app_env_dir = str(tmp_path / "app-env")
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": "kept"})
+        app.state.settings.deployment.app_env_dir = ""
+
+        resp = _write(client, admin_headers, {"extraEnv.DFE_LOADER_HOUSE_KEY": None})
+
+        assert resp.status_code == 200, resp.text
+        assert "no container reads" in resp.json()["custom_env"]
+
     def test_removing_the_last_custom_key_empties_the_file(
         self, client, app, admin_headers, tmp_path
     ):

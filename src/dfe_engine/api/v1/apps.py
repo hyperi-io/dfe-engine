@@ -1307,13 +1307,15 @@ def _checked_changes(
     doc: dict,
     *,
     chart_deployed: bool = True,
+    env_delivered: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split a request into config paths and environment keys, refusing what the app would.
 
     Every refusal happens here, before the overlay document is touched at all, so
     a rejected write leaves the deploy repo on the revision the caller read.
-    ``doc`` is the overlay as read, which decides what its chart sets, and
-    ``chart_deployed`` whether a chart sets anything at all.
+    ``doc`` is the overlay as read, which decides what its chart sets,
+    ``chart_deployed`` whether a chart sets anything at all, and ``env_delivered``
+    whether anything carries an ``extraEnv`` value to the container.
 
     A `config.*` path the contract does not declare is carried through unchecked:
     there is nothing to check it against, and the read route already reports such
@@ -1336,6 +1338,16 @@ def _checked_changes(
             reason = contract.check_env_value(value)
             if reason:
                 raise _refuse(400, "invalid_env_value", path, reason)
+            if value is not None and not env_delivered:
+                raise _refuse(
+                    409,
+                    "env_not_delivered",
+                    path,
+                    f"nothing in this deployment carries {key} to the {service} container: "
+                    "it has no chart and no app environment directory, as in a Docker install "
+                    "published as one Compose file. Set it in the Compose file that runs the "
+                    "container instead",
+                )
             names = contract.chart_env_names(service, doc, chart_deployed=chart_deployed)
             decides = names.get(key)
             if decides:
@@ -1393,10 +1405,24 @@ def _restored(doc: dict, changes: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _env_delivered(request: Request) -> bool:
+    """Whether something carries an ``extraEnv`` value to the container.
+
+    The app's chart does on Kubernetes, and a directory the deployer names does on
+    Compose. A Compose install published as one file names none, so a value written
+    there would sit in the deploy repo and reach no container.
+    """
+    if _deploy_target(request) is not DeployTarget.DOCKER:
+        return True
+    return appconfig.custom_env_dir(request.app.state.settings) is not None
+
+
 def _custom_env_delivery(request: Request, env_changes: dict[str, Any]) -> str:
     """How the custom environment in this write reaches the app's container."""
     if not env_changes:
         return ""
+    if not _env_delivered(request):
+        return "no app environment directory is named, so no container reads the removed keys"
     if appconfig.custom_env_dir(request.app.state.settings) is None:
         return "the app's own chart renders extraEnv onto the container"
     return (
@@ -1443,7 +1469,9 @@ def set_app_config(
     setting directly under either never needs one.
 
     409 where the deployment already decides the value: a config path the chart
-    derives, or an `extraEnv` name the chart sets for this app.
+    derives, or an `extraEnv` name the chart sets for this app. 409 `env_not_delivered`
+    for an `extraEnv` value on a Docker deployment that names no app environment
+    directory, because nothing would carry it to the container.
     """
     app = _resolve(service, instance)
     gc = _gitcrud(request)
@@ -1455,6 +1483,7 @@ def set_app_config(
         _restored(doc, body.changes),
         doc,
         chart_deployed=_chart_deployed(request),
+        env_delivered=_env_delivered(request),
     )
     if not config_changes and not env_changes:
         return ConfigWriteResult(changed=False)
