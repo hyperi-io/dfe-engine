@@ -13,6 +13,7 @@
         "name": "Events ingested",
         "source": "all_sources",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "select": [
           {
             "aggFn": "count",
@@ -101,10 +102,10 @@
       "w": 4,
       "h": 3,
       "config": {
-        "name": "Ingest lag p95 (ms)",
+        "name": "Ingest lag p95",
         "source": "all_sources",
         "displayType": "number",
-        "numberFormat": { "output": "number", "mantissa": 0 },
+        "numberFormat": { "output": "duration", "factor": 0.001 },
         "select": [
           {
             "aggFn": "quantile",
@@ -126,9 +127,10 @@
       "w": 4,
       "h": 3,
       "config": {
-        "name": "Ingest lag max (ms)",
+        "name": "Ingest lag max",
         "source": "all_sources",
         "displayType": "number",
+        "numberFormat": { "output": "duration", "factor": 0.001 },
         "select": [
           {
             "aggFn": "max",
@@ -196,9 +198,10 @@
       "w": 12,
       "h": 6,
       "config": {
-        "name": "Ingest lag percentiles (ms)",
+        "name": "Ingest lag percentiles",
         "source": "all_sources",
         "displayType": "line",
+        "numberFormat": { "output": "duration", "factor": 0.001 },
         "granularity": "auto",
         "select": [
           {

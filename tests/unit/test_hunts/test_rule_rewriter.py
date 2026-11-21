@@ -328,6 +328,21 @@ class TestReadsTheStatement:
     @pytest.mark.parametrize(
         "sql",
         [
+            "SELECT * FROM t WHERE b = 1",
+            "SELECT a FROM t",
+            "SELECT a FROM t WHERE _timestamp > now() OR b = 1",
+            "SELECT a FROM t JOIN u ON t.id = u.id WHERE b = 1",
+            "SELECT a FROM t WHERE (b = 1",
+        ],
+    )
+    def test_warnings_show_in_the_console_so_carry_no_typed_dash(self, rewriter, sql):
+        result = rewriter.parse_user_sql(sql)
+        assert result.warnings
+        assert [w for w in result.warnings if "--" in w] == []
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
             "SELECT a FROM t WHERE b = 'unterminated",
             "SELECT a FROM t WHERE (b = 1",
             "INSERT INTO t SELECT * FROM u",

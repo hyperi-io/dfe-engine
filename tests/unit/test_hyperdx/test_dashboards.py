@@ -197,11 +197,49 @@ def test_every_throughput_tile_names_all_sources():
     ] == []
 
 
-def test_the_lag_percentile_tile_rounds_to_whole_milliseconds():
-    """A quantile is a float, so the tile needs a format or it shows 10137.149999999994."""
-    config = _throughput_tiles()["lag-p95"]["config"]
+# A tile with no numberFormat prints the raw value: 283560, or a quantile's 10137.149999999994.
+COUNT = {"output": "number", "thousandSeparated": True}
 
-    assert config["numberFormat"] == {"output": "number", "mantissa": 0}
+# HyperDX reads a `duration` input as seconds, so a millisecond value needs the factor.
+MILLISECONDS = {"output": "duration", "factor": 0.001}
+
+FORMATTED_TILES = [
+    ("dfe-throughput.json", "events-total", COUNT),
+    ("dfe-throughput.json", "lag-p95", MILLISECONDS),
+    ("dfe-throughput.json", "lag-max", MILLISECONDS),
+    ("dfe-throughput.json", "lag-percentiles", MILLISECONDS),
+    ("dfe-pipeline-health.json", "records-received", COUNT),
+    ("dfe-pipeline-health.json", "records-delivered", COUNT),
+    ("dfe-pipeline-health.json", "kafka-lag-max", COUNT),
+    ("dfe-pipeline-health.json", "buffer-rows", COUNT),
+    ("dfe-pipeline-health.json", "collector-queue", COUNT),
+    ("dfe-kafka.json", "kafka-lag-now", COUNT),
+    ("dfe-clickhouse-overview.json", "queries-duration", MILLISECONDS),
+]
+
+
+@pytest.mark.parametrize(
+    ("filename", "tile_id", "expected"),
+    FORMATTED_TILES,
+    ids=[f"{filename}:{tile_id}" for filename, tile_id, _ in FORMATTED_TILES],
+)
+def test_count_and_millisecond_tiles_carry_their_format(filename, tile_id, expected):
+    tiles = {tile["id"]: tile for tile in _dashboards()[filename]["tiles"]}
+
+    assert tiles[tile_id]["config"]["numberFormat"] == expected
+
+
+def test_a_duration_tile_does_not_name_a_unit_in_its_title():
+    """The formatter prints the unit ("5.84s"), so a title that also says (ms) contradicts it."""
+    titled = [
+        f"{filename}:{tile['id']}"
+        for filename, dashboard in _dashboards().items()
+        for tile in dashboard["tiles"]
+        if tile["config"].get("numberFormat", {}).get("output") == "duration"
+        and "(ms)" in tile["config"]["name"]
+    ]
+
+    assert titled == []
 
 
 def test_throughput_byte_tiles_never_serialise_json():
