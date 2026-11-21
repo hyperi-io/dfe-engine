@@ -16,8 +16,8 @@ import time
 
 import pytest
 
-from dfe_engine.schema.lock import SchemaLock, holder_name
-from dfe_engine.schema.plan import LOCK_ID, render_one
+from dfe_engine.schema.lock import holder_name
+from tests.support.engine_stack import hold_schema_lease
 
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
@@ -40,19 +40,6 @@ def _create_source(stack, name: str) -> None:
     assert created.status_code in (200, 201), created.text
 
 
-def _held_by(ch_client, database: str, holder: str) -> SchemaLock:
-    lock = SchemaLock(
-        ch_client,
-        database=database,
-        table=render_one(LOCK_ID, data_database=database).name,
-        holder=holder,
-        lease_seconds=300,
-    )
-    # A claim held up by a server stall is a missed attempt, so taking the lease here waits.
-    assert lock.acquire(wait_seconds=10.0) is True
-    return lock
-
-
 def _table_exists(client, database: str, table: str) -> bool:
     rows = client.query(
         "SELECT 1 FROM system.tables WHERE database = {db:String} AND name = {tbl:String}",
@@ -64,7 +51,7 @@ def _table_exists(client, database: str, table: str) -> bool:
 def test_a_source_deploy_waits_for_the_schema_lease(ch_client, stack):
     name = "syslog-leased"
     _create_source(stack, name)
-    holder = _held_by(ch_client, stack.database, "pod-a")
+    holder = hold_schema_lease(ch_client, stack.database, "pod-a")
     seen_while_held: list[bool] = []
 
     def finish_the_holders_apply() -> None:
@@ -95,7 +82,7 @@ def test_a_source_deploy_that_outwaits_the_lease_answers_503_and_applies_nothing
     name = "syslog-locked"
     _create_source(stack, name)
     monkeypatch.setattr(stack.client.app.state.settings.clickhouse, "bootstrap_wait_seconds", 0.0)
-    _held_by(ch_client, stack.database, "pod-a")
+    hold_schema_lease(ch_client, stack.database, "pod-a")
 
     deployed = stack.client.post(f"/api/v1/sources/{name}/deploy", headers=stack.headers)
 

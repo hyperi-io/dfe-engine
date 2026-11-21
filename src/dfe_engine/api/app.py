@@ -223,6 +223,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     source_registry = get_source_registry_optional()
     # The admin's default TTL override, so the boot renders what the console set.
     ttl_settings = effective_settings(settings, gitcrud)
+
+    # One loop brings every table that follows the default TTL to the committed value:
+    # after the schema pass below, and after every change of the default. It reads the
+    # deploy repo and the registry when a pass runs, so neither is fixed at this point.
+    from dfe_engine.api.deps import get_clickhouse_client
+    from dfe_engine.governance.ch import ReconcileTrigger
+    from dfe_engine.schema.retention import (
+        CONVERGE_ATTRIBUTE,
+        ConvergePass,
+        converge_default_ttl,
+        request_converge,
+    )
+
+    def converge_retention_now() -> ConvergePass:
+        registry = get_source_registry_optional()
+        return converge_default_ttl(
+            get_clickhouse_client(settings),
+            settings=settings,
+            crud=app.state.gitcrud,
+            load_sources=registry.get_all_sources if registry is not None else tuple,
+        )
+
+    setattr(
+        app.state,
+        CONVERGE_ATTRIBUTE,
+        ReconcileTrigger(converge_retention_now, reconcile="retention"),
+    )
     # Each pass reads the registry when it runs, so a retried pass sees later deploys and an unreadable registry fails only the source passes, never the boot.
     # Without a registry no source write ever rebuilds all_sources, so boot builds it over the landing table alone (`tuple` loads no sources).
     run_schema_pass = functools.partial(
@@ -233,6 +260,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     )
     schema_state = run_schema_pass()
     tables_bootstrapped = schema_state.converged
+    if tables_bootstrapped:
+        request_converge(app.state)
 
     # After the bootstrap, which is what makes the landing table exist: the seed records the source as deployed, and that must not be claimed before it is true.
     from dfe_engine.source.core_sources import seed_core_sources
@@ -257,6 +286,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         def schema_converged() -> None:
             seed_core(tables_bootstrapped=True)
+            request_converge(app.state)
             # The pass re-applied the dfe-schemas roles over the engine's budgets, and a
             # reconcile that got through before it found no projection tables to fill.
             for name in TRIGGER_ATTRIBUTES:
@@ -724,6 +754,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if schema_retry is not None:
         # A pass seeds the core sources through the registry, so it ends before the registries close.
         await asyncio.to_thread(schema_retry.close, 10.0)
+    retention_converge = getattr(app.state, CONVERGE_ATTRIBUTE, None)
+    if retention_converge is not None:
+        # A pass reads the registry and the deploy repo, so it ends before they close.
+        await asyncio.to_thread(retention_converge.close, 10.0)
     autostart_tasks = getattr(app.state, "synthetic_autostart", [])
     for task in autostart_tasks:
         task.cancel()

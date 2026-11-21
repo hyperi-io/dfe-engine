@@ -81,7 +81,7 @@ from dfe_engine.schema.retention import (
     LiveStatus,
     SourceLiveOutcome,
     apply_pinned_defaults,
-    reconcile_default_ttl,
+    request_converge,
 )
 from dfe_engine.source.flow import runs_per_source_apps
 from dfe_engine.source.models import Source
@@ -105,18 +105,6 @@ def _gitcrud(request: Request) -> GitCrud:
     if gc is None:
         raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
-
-
-def _ttl_reconcile_failed(exc: Exception) -> ProblemError:
-    """The 502 for a stored TTL override that ClickHouse did not take."""
-    return backend_failure(
-        502,
-        "reconcile_failed",
-        "override stored; applying it to ClickHouse failed, and the engine log has "
-        "ClickHouse's reason. Sending the same value again applies it",
-        exc,
-        event="default TTL stored but not applied",
-    )
 
 
 def _cloud_error(exc: Exception) -> ProblemError:
@@ -575,30 +563,6 @@ class RetentionUpdate(BaseModel):
     )
 
 
-class RetentionReconcileSummary(BaseModel):
-    """What applying the new default did to the live tables."""
-
-    core_tables_altered: list[str] = Field(
-        description="database.table: <old> -> <new> days, for each engine table whose TTL moved."
-    )
-    source_tables_altered: list[str] = Field(
-        description="database.table for each deployed source's table the apply altered."
-    )
-    sources_reconciled: int = Field(description="Deployed sources whose table was brought current.")
-    sources_skipped: int = Field(
-        description=(
-            "Deployed sources left to their next deploy: table absent, build failed "
-            "or ClickHouse refused."
-        )
-    )
-
-
-class RetentionUpdateResponse(RetentionStatus):
-    """The default TTL after the change, and what applying it did."""
-
-    reconcile: RetentionReconcileSummary
-
-
 def _retention_status(request: Request, settings: Any) -> RetentionStatus:
     gc = _optional_gitcrud(request)
     state = resolve_state(gc, settings)
@@ -623,15 +587,9 @@ def get_retention(user: CurrentUser, request: Request, settings: Settings) -> Re
 
 @router.put(
     "/retention",
-    response_model=RetentionUpdateResponse,
+    response_model=RetentionStatus,
     dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
     responses={
-        502: {
-            "description": (
-                "reconcile_failed: the value is stored, and applying it to ClickHouse "
-                "failed; sending the same value again applies it"
-            ),
-        },
         503: {
             "description": "not_configured: gitops is off, so there is nowhere to store the value",
         },
@@ -642,15 +600,14 @@ def put_retention(
     user: CurrentUser,
     request: Request,
     settings: Settings,
-    sources: SourceReg,
-) -> RetentionUpdateResponse:
-    """Store the override in the deploy repo, then apply it to every table that follows it.
+) -> RetentionStatus:
+    """Store the override in the deploy repo and return, leaving the tables to a background pass.
 
-    The engine's own tables and every deployed source's table are brought to the new
-    effective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or
-    ``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A
-    ClickHouse failure answers 502 with the override ALREADY committed. Sending the
-    same value again applies it.
+    The pass brings the engine's own tables and every deployed source's table to the
+    stored value with ``ALTER TABLE ... MODIFY TTL`` (or ``REMOVE TTL`` for 0). A table
+    that declares its own TTL is left alone. The pass runs again until every table
+    has it, so a ClickHouse that is down when the value is stored gets it once it is
+    back, and a restart does not lose it.
     """
     gc = _gitcrud(request)
     set_stored(gc, body.default_ttl_days, user.user_id)
@@ -664,30 +621,8 @@ def put_retention(
         days=status.default_ttl_days,
         origin=status.origin,
     )
-    try:
-        outcome = reconcile_default_ttl(
-            get_clickhouse_client(settings),
-            settings=effective_settings(settings, gc),
-            sources=sources.get_all_sources(),
-        )
-    # The override is committed by now, so any ClickHouse failure has to say so rather than 500.
-    except Exception as exc:
-        raise _ttl_reconcile_failed(exc) from exc
-    if outcome.sources_skipped:
-        logger.warning(
-            "default TTL: sources left to their next deploy", count=outcome.sources_skipped
-        )
-    return RetentionUpdateResponse(
-        **status.model_dump(),
-        reconcile=RetentionReconcileSummary(
-            core_tables_altered=outcome.core_altered,
-            source_tables_altered=[
-                f"{t.database}.{t.table}" for t in outcome.report.tables if t.action == "altered"
-            ],
-            sources_reconciled=outcome.sources_reconciled,
-            sources_skipped=outcome.sources_skipped,
-        ),
-    )
+    request_converge(request.app.state)
+    return status
 
 
 # -- Your organisation ----------------------------------------
@@ -880,12 +815,6 @@ class SystemDefaultsPatch(BaseModel):
         return stripped
 
 
-class SystemDefaultsUpdate(SystemDefaults):
-    """The defaults after the patch. reconcile is set only when ttl_days was named."""
-
-    reconcile: RetentionReconcileSummary | None = None
-
-
 def _system_defaults(request: Request, settings: Any) -> SystemDefaults:
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
@@ -920,17 +849,6 @@ def _system_defaults(request: Request, settings: Any) -> SystemDefaults:
     )
 
 
-def _reconcile_summary(outcome: Any) -> RetentionReconcileSummary:
-    return RetentionReconcileSummary(
-        core_tables_altered=outcome.core_altered,
-        source_tables_altered=[
-            f"{t.database}.{t.table}" for t in outcome.report.tables if t.action == "altered"
-        ],
-        sources_reconciled=outcome.sources_reconciled,
-        sources_skipped=outcome.sources_skipped,
-    )
-
-
 @router.get(
     "/defaults",
     response_model=SystemDefaults,
@@ -943,17 +861,11 @@ def get_defaults(user: CurrentUser, request: Request, settings: Settings) -> Sys
 
 @router.patch(
     "/defaults",
-    response_model=SystemDefaultsUpdate,
+    response_model=SystemDefaults,
     dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
     responses={
         422: {
             "description": "validation_error: a named value cannot be stored",
-        },
-        502: {
-            "description": (
-                "reconcile_failed: ttl_days is stored, and applying it to ClickHouse failed; "
-                "sending the same value again applies it"
-            ),
         },
         503: {
             "description": "not_configured: gitops is off, so there is nowhere to store the value",
@@ -965,14 +877,14 @@ def patch_defaults(
     user: CurrentUser,
     request: Request,
     settings: Settings,
-    sources: SourceReg,
-) -> SystemDefaultsUpdate:
+) -> SystemDefaults:
     """Store the named defaults. Only ttl_days is applied to live tables.
 
     Omitted fields are left alone. null clears that override. Common-header type,
     version and engine are what a source inherits the next time it is deployed.
     This request does not rewrite them onto live tables. A patch that names
-    ttl_days stores it and then runs the same reconcile as PUT /retention.
+    ttl_days stores it and returns, and the same background pass as PUT /retention
+    applies it.
     """
     gc = _gitcrud(request)
     named = body.model_fields_set
@@ -1007,22 +919,9 @@ def patch_defaults(
         common_header_type=status.common_header_type.effective,
         engine=status.engine.effective,
     )
-    reconcile = None
     if "ttl_days" in named:
-        try:
-            outcome = reconcile_default_ttl(
-                get_clickhouse_client(settings),
-                settings=effective_settings(settings, gc),
-                sources=sources.get_all_sources(),
-            )
-        except Exception as exc:
-            raise _ttl_reconcile_failed(exc) from exc
-        if outcome.sources_skipped:
-            logger.warning(
-                "default TTL: sources left to their next deploy", count=outcome.sources_skipped
-            )
-        reconcile = _reconcile_summary(outcome)
-    return SystemDefaultsUpdate(**status.model_dump(), reconcile=reconcile)
+        request_converge(request.app.state)
+    return status
 
 
 class ApplyDefaultsRequest(BaseModel):

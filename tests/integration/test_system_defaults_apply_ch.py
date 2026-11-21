@@ -24,7 +24,12 @@ from scalo.logger import logger
 
 from dfe_engine.gitcrud.table_defaults import commit_patch
 from dfe_engine.schema.schema_loader import SchemaLoader
-from tests.support.engine_stack import default_header, deploy_source
+from tests.support.engine_stack import (
+    converged,
+    default_header,
+    deploy_source,
+    live_ttl_days,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
@@ -45,15 +50,6 @@ def _table(ch_client, database: str, table: str) -> tuple[str, str]:
     ).result_rows
     assert rows, f"{database}.{table} does not exist"
     return str(rows[0][0]), str(rows[0][1])
-
-
-def _live_ttl_days(ch_client, database: str, table: str) -> int | None:
-    _, engine_full = _table(ch_client, database, table)
-    _, sep, clause = engine_full.partition(" TTL ")
-    if not sep:
-        return None
-    _, sep, rest = clause.partition("toIntervalDay(")
-    return int(rest.split(")", 1)[0]) if sep else None
 
 
 def _columns(ch_client, database: str, table: str) -> dict[str, str]:
@@ -85,6 +81,8 @@ def _drift(stack) -> dict[str, dict]:
 def _patch(stack, body: dict) -> None:
     resp = stack.client.patch(DEFAULTS, headers=stack.headers, json=body)
     assert resp.status_code == 200, resp.text
+    if "ttl_days" in body:
+        converged(stack)
 
 
 def test_apply_pins_a_new_version_and_its_deploy_moves_the_ttl(ch_client, stack):
@@ -92,13 +90,13 @@ def test_apply_pins_a_new_version_and_its_deploy_moves_the_ttl(ch_client, stack)
     deploy_source(
         name="syslog-ttl", schema={"meta_schema": "meta/syslog", "ttl_days": 90}, stack=stack
     )
-    # The default reconcile leaves a table whose source pins its own TTL alone.
+    # The default-TTL pass leaves a table whose source pins its own TTL alone.
     _patch(stack, {"ttl_days": 91})
-    assert _live_ttl_days(ch_client, db, "syslog-ttl") == 90
+    assert live_ttl_days(ch_client, db, "syslog-ttl") == 90
 
     body = _apply(stack, "syslog-ttl")
 
-    assert _live_ttl_days(ch_client, db, "syslog-ttl") == 90
+    assert live_ttl_days(ch_client, db, "syslog-ttl") == 90
     assert body["updated"] == [{"source": "syslog-ttl", "version": "2.0.0"}]
     assert body["live"] == [
         {
@@ -118,7 +116,7 @@ def test_apply_pins_a_new_version_and_its_deploy_moves_the_ttl(ch_client, stack)
 
     deployed = _deploy(stack, "syslog-ttl")
 
-    assert _live_ttl_days(ch_client, db, "syslog-ttl") == 91
+    assert live_ttl_days(ch_client, db, "syslog-ttl") == 91
     assert deployed["ttl_change"]["move"] == "90 -> 91"
     assert "syslog-ttl" not in _drift(stack)
 
@@ -215,7 +213,7 @@ def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
 def test_plan_and_dry_run_show_the_ttl_move_and_that_it_deletes_rows(ch_client, stack):
     db = stack.database
     deploy_source(name="syslog-plan", stack=stack)
-    # Stored without the reconcile a PATCH runs, so the table keeps its 90 days.
+    # Stored without asking for the pass a PATCH asks for, so the table keeps its 90 days.
     commit_patch(stack.crud, actor="test", ttl_days=30)
 
     plan = stack.client.post("/api/v1/sources/syslog-plan/plan", headers=stack.headers)
@@ -223,7 +221,7 @@ def test_plan_and_dry_run_show_the_ttl_move_and_that_it_deletes_rows(ch_client, 
         "/api/v1/sources/syslog-plan/deploy", headers=stack.headers, params={"dry_run": "true"}
     )
 
-    assert _live_ttl_days(ch_client, db, "syslog-plan") == 90
+    assert live_ttl_days(ch_client, db, "syslog-plan") == 90
     assert plan.status_code == 200, plan.text
     change = plan.json()["ttl_change"]
     assert change is not None
@@ -268,7 +266,7 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
     finally:
         logger.remove(handler_id)
 
-    assert _live_ttl_days(ch_client, db, "syslog-good") == 91
+    assert live_ttl_days(ch_client, db, "syslog-good") == 91
     assert body["updated"] == []
     assert body["unchanged"] == [
         {"source": "syslog-bad", "version": "1.0.0"},
@@ -293,14 +291,14 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
 def test_a_redeploy_moves_an_existing_tables_ttl(ch_client, stack):
     db = stack.database
     deploy_source(name="syslog-redeploy", stack=stack)
-    assert _live_ttl_days(ch_client, db, "syslog-redeploy") == 90
-    # Stored without the reconcile a PATCH runs, so only the deploy can move the table.
+    assert live_ttl_days(ch_client, db, "syslog-redeploy") == 90
+    # Stored without asking for the pass a PATCH asks for, so only the deploy can move the table.
     commit_patch(stack.crud, actor="test", ttl_days=60)
 
     resp = stack.client.post("/api/v1/sources/syslog-redeploy/deploy", headers=stack.headers)
 
     assert resp.status_code == 200, resp.text
-    assert _live_ttl_days(ch_client, db, "syslog-redeploy") == 60
+    assert live_ttl_days(ch_client, db, "syslog-redeploy") == 60
     assert resp.json()["statements_applied"] >= 1
     assert resp.json()["ttl_change"]["move"] == "90 -> 60"
     assert resp.json()["ttl_change"]["expires_rows"] is True
@@ -359,7 +357,7 @@ def test_a_pin_held_for_review_is_reported_and_reaches_no_table(ch_client, stack
     assert resp.headers["X-DFE-Review-Required"] == "true"
     assert [entry["source"] for entry in body["live"]] == ["syslog-on"]
     assert body["live"][0]["status"] == "altered"
-    assert _live_ttl_days(ch_client, db, "syslog-held") == 90
-    assert _live_ttl_days(ch_client, db, "syslog-on") == 91
+    assert live_ttl_days(ch_client, db, "syslog-held") == 90
+    assert live_ttl_days(ch_client, db, "syslog-on") == 91
     # main still holds the version the table was deployed from
     assert crud.get("sources", "syslog-held")["current"] == "1.0.0"

@@ -23,8 +23,8 @@ through shows.
 """
 
 import threading
-from collections.abc import Callable
-from typing import Any, Literal
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, Protocol
 
 from scalo.logger import logger
 
@@ -49,8 +49,8 @@ ReconcileOutcome = Literal["ok", "partial", "failed"]
 - ``failed``: it raised -- ClickHouse unreachable, say -- and runs again after a back-off.
 """
 
-ReconcileKind = Literal["rbac", "service_roles"]
-"""Which reconcile a trigger runs: the full RBAC set, or the service roles alone."""
+ReconcileKind = Literal["rbac", "service_roles", "retention"]
+"""Which reconcile a trigger runs: the full RBAC set, the service roles alone, or the default TTL."""
 
 # Long enough to fold the writes of one request and a UI saving several records
 # into one run, short beside the run itself.
@@ -63,7 +63,20 @@ RETRY_INITIAL_SECONDS = 5.0
 # five minutes and a dead one costs one failed run in that time.
 RETRY_MAX_SECONDS = 300.0
 
-_DESCRIBED: dict[str, str] = {"rbac": "CH RBAC", "service_roles": "CH service-role"}
+_DESCRIBED: dict[str, str] = {
+    "rbac": "CH RBAC",
+    "service_roles": "CH service-role",
+    "retention": "default TTL",
+}
+
+
+class Reconciled(Protocol):
+    """What a run returns. A run that lists errors did not get through, and is run again."""
+
+    @property
+    def errors(self) -> Sequence[str]:
+        """One entry for each statement or table the run could not apply."""
+        ...
 
 
 class ReconcileMetrics:
@@ -168,7 +181,7 @@ class ReconcileTrigger:
     carried is still unapplied, and nothing else would ask again.
 
     Args:
-        run: the reconcile, returning its result. It runs on the trigger's thread.
+        run: the reconcile, returning what it did. It runs on the trigger's thread.
         metrics: where each run's outcome, and each retry, is counted.
         reconcile: which reconcile ``run`` is, for the retry counter and the logs.
         settle_seconds: how long a run waits for the rest of a burst.
@@ -178,7 +191,7 @@ class ReconcileTrigger:
 
     def __init__(
         self,
-        run: Callable[[], ReconcileResult],
+        run: Callable[[], Reconciled],
         *,
         metrics: ReconcileMetrics | None = None,
         reconcile: ReconcileKind = "rbac",
@@ -420,6 +433,7 @@ __all__ = [
     "WORKER_THREAD_NAME",
     "ProjectionSkips",
     "ReconcileKind",
+    "Reconciled",
     "ReconcileMetrics",
     "ReconcileOutcome",
     "ReconcileTrigger",

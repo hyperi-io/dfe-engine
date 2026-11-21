@@ -8,9 +8,10 @@
 
 """Who may read and set the default TTL, what a PUT accepts, and where the value is read.
 
-Every path here is decided before ClickHouse is reached. An admin's PUT applying
-the new TTL to live tables is proven against a real server in
-``tests/integration/test_system_retention_ch.py``.
+Every path here is decided before ClickHouse is reached, and a PUT never reaches it
+at all: it stores the value and asks for a background pass. That pass converging live
+tables is proven against a real server in ``tests/integration/test_system_retention_ch.py``
+and ``tests/integration/test_retention_converge_ch.py``.
 """
 
 import pytest
@@ -104,7 +105,7 @@ class TestPutRetentionRefusals:
         assert resp.json()["code"] == "not_configured"
 
 
-class TestPutRetentionWhenClickHouseRefuses:
+class TestPutRetentionWithClickHouseDown:
     @pytest.fixture
     def unreachable_clickhouse(self, api_settings):
         """Point the app at a port nothing listens on, with no retry to wait through."""
@@ -120,15 +121,16 @@ class TestPutRetentionWhenClickHouseRefuses:
         yield
         ClickHouseManager.reset_instance()
 
-    def test_the_override_is_kept_and_the_failure_named(
+    def test_the_override_is_stored_and_the_put_answers_without_waiting_on_it(
         self, unreachable_clickhouse, admin_headers, app, client, tmp_path
     ):
         gc = _wire(app, tmp_path)
 
         resp = client.put(URL, headers=admin_headers, json={"default_ttl_days": 30})
 
-        assert resp.status_code == 502, resp.text
-        assert resp.json()["code"] == "reconcile_failed"
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["stored"] == 30
+        assert "reconcile" not in resp.json()
         assert gc.get("gov_settings", "retention")["default_ttl_days"] == 30
         assert client.get(URL, headers=admin_headers).json()["origin"] == "override"
 

@@ -15,23 +15,25 @@ default and refuses a later change as drift, so a change reaches it only through
 leaves ``ttl_days`` unset, and :func:`reconcile_source_ttls` applies it through
 the same :class:`~dfe_engine.schema.applier.SchemaApplier` a deploy uses.
 
-The engine runs the source pass on every start. An admin's change of the default
-runs both, through :func:`reconcile_default_ttl`. The default each pass applies is
-``settings.clickhouse.default_ttl_days``, so a caller hands in settings carrying the
-effective value (:func:`dfe_engine.gitcrud.retention.effective_settings`).
+:func:`converge_default_ttl` is the one pass that applies the default. It runs at
+start and after every change of the default, under the schema lease it keeps renewed,
+and reads the committed value once it holds the lease. The default each reconcile
+applies is ``settings.clickhouse.default_ttl_days``, so a caller hands in settings
+carrying the effective value (:func:`dfe_engine.gitcrud.retention.effective_settings`).
 
 Pinning the table defaults onto chosen sources moves their deployed tables through
 :func:`apply_pinned_defaults`, which uses the same per-table apply as the source pass.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
 from dfe_schemas.clickhouse import parse_engine
 from scalo.logger import logger
 
-from dfe_engine.gitcrud.retention import with_default_ttl_days
+from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.retention import desired_days, effective_settings, with_default_ttl_days
 from dfe_engine.schema.applier import (
     ApplyReport,
     LiveTable,
@@ -43,10 +45,12 @@ from dfe_engine.schema.applier import (
     read_table,
 )
 from dfe_engine.schema.derived_registry import derived_reference_root
+from dfe_engine.schema.lock import renewed_lease
 from dfe_engine.schema.plan import build_plan, platform_probe
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError
 from dfe_engine.schema.schema_loader import SchemaLoadError
+from dfe_engine.settings import DFESettings
 from dfe_engine.source.deployment import SourceDeploymentStore
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry, TypeRegistryError
@@ -81,6 +85,14 @@ class RetentionReconcile:
     sources_reconciled: int = 0
     # Deployed sources left to their next deploy: table absent, build failed or ClickHouse refused.
     sources_skipped: int = 0
+    # "database.table" for each source table the reconcile could not bring to the TTL, for
+    # a reason a later pass may clear: ClickHouse refused it, or the source did not build.
+    # An absent table is skipped but not listed, because its deploy creates it.
+    failed: list[str] = field(default_factory=list)
+
+
+def _no_step() -> None:
+    """The step before each table, for a pass with no lease to extend."""
 
 
 def default_followers(settings: Any) -> frozenset[str]:
@@ -101,8 +113,16 @@ def _ttl(rendered: Any) -> bool:
     return ttl is not None and ttl.days is not None
 
 
-def reconcile_core_ttls(client: Any, *, settings: Any) -> list[str]:
+def reconcile_core_ttls(
+    client: Any, *, settings: Any, before_table: Callable[[], None] = _no_step
+) -> list[str]:
     """Bring each core table that follows the default TTL to it, and change nothing else.
+
+    Args:
+        client: A live ClickHouse client.
+        settings: Settings carrying the default to apply.
+        before_table: Called before each table, so a caller holding the schema lease
+            can extend it. Whatever it raises ends the pass.
 
     Returns:
         ``database.table: <live> -> <new>`` for each table altered. An absent table
@@ -119,6 +139,7 @@ def reconcile_core_ttls(client: Any, *, settings: Any) -> list[str]:
     for rendered in plan.tables():
         if rendered.id not in followers:
             continue
+        before_table()
         move = applier.reconcile_ttl(rendered)
         if move:
             logger.info(f"{rendered.database}.{rendered.name}: default TTL {move} days")
@@ -194,11 +215,19 @@ class SourceTables:
 
 
 def reconcile_source_ttls(
-    client: Any, *, settings: Any, sources: list[Source]
+    client: Any,
+    *,
+    settings: Any,
+    sources: Iterable[Source],
+    before_table: Callable[[], None] = _no_step,
 ) -> RetentionReconcile:
     """Apply every deployed source's table under the deployment default TTL.
 
-    One source failing is logged and counted as skipped. It never stops the rest.
+    One source failing is logged, counted as skipped and listed in ``failed``, so a
+    later pass runs again for it. It never stops the rest.
+
+    *before_table* is called before each table, so a caller holding the schema lease
+    can extend it. Whatever it raises ends the pass.
     """
     tables = SourceTables(client, settings=settings)
     database = tables.database
@@ -213,6 +242,7 @@ def reconcile_source_ttls(
         if not (version) or (version not in source.versions):
             continue
         table = source.table_name
+        before_table()
         try:
             if not (tables.applier.table_exists(database, table)):
                 logger.warning(f"{database}.{table}: absent, TTL left to the next deploy")
@@ -222,13 +252,18 @@ def reconcile_source_ttls(
         except _TABLE_ERRORS as exc:
             logger.warning(f"{database}.{table}: TTL left to the next deploy: {exc}")
             outcome.sources_skipped += 1
+            outcome.failed.append(f"{database}.{table}")
             continue
         outcome.sources_reconciled += 1
     return outcome
 
 
 def reconcile_default_ttl(
-    client: Any, *, settings: Any, sources: list[Source]
+    client: Any,
+    *,
+    settings: Any,
+    sources: Iterable[Source],
+    before_table: Callable[[], None] = _no_step,
 ) -> RetentionReconcile:
     """Bring every table that follows the default TTL to it: the core tables, then the sources.
 
@@ -236,10 +271,111 @@ def reconcile_default_ttl(
         SchemaApplyError: ClickHouse refused a core-table statement or could not be read.
         SchemaPlanError: The manifest could not be rendered.
     """
-    core_altered = reconcile_core_ttls(client, settings=settings)
-    outcome = reconcile_source_ttls(client, settings=settings, sources=sources)
+    core_altered = reconcile_core_ttls(client, settings=settings, before_table=before_table)
+    outcome = reconcile_source_ttls(
+        client, settings=settings, sources=sources, before_table=before_table
+    )
     outcome.core_altered = core_altered
     return outcome
+
+
+@dataclass(frozen=True, slots=True)
+class ConvergePass:
+    """What one pass of :func:`converge_default_ttl` did.
+
+    Attributes:
+        days: The TTL the pass applied, 0 for none.
+        outcome: What the core and source reconciles did.
+        renewals: How many times the pass extended the schema lease.
+    """
+
+    days: int
+    outcome: RetentionReconcile
+    renewals: int
+
+    @property
+    def errors(self) -> list[str]:
+        """The source tables the pass could not bring to the TTL, which the loop runs again to clear."""
+        return list(self.outcome.failed)
+
+
+def converge_default_ttl(
+    client: Any,
+    *,
+    settings: DFESettings,
+    crud: GitCrud | None,
+    load_sources: Callable[[], Iterable[Source]],
+) -> ConvergePass:
+    """Bring every table that follows the default TTL to the committed desired value.
+
+    The pass holds the schema lease and extends it before each table and after the
+    last, so a pass longer than one lease stays the only applier, and one that lost the
+    lease runs again. It reads the desired value and the
+    sources once it holds the lease, so a pass that waited behind another applier
+    applies what is committed at its turn, never what was committed when it asked.
+    Every table is compared with its live TTL, so a pass converges whatever an
+    earlier one left half done.
+
+    Args:
+        client: A live ClickHouse client.
+        settings: The deployment's settings.
+        crud: The deploy repo holding the override, or None without gitops.
+        load_sources: Reads the registry's sources when the pass has the lease.
+
+    Returns:
+        What the pass did. A source table it could not bring to the TTL is in ``errors``.
+
+    Raises:
+        RetentionUnreadable: The override cannot be read as a TTL. No table is altered.
+        SchemaLockBusyError: Another applier held the lease for the whole wait.
+        SchemaLeaseLostError: Another applier took the lease mid-pass.
+        SchemaLockError: The lease could not be read or written.
+        SchemaApplyError: ClickHouse refused a core-table statement or could not be read.
+        SchemaPlanError: The manifest could not be rendered.
+    """
+    with renewed_lease(
+        client,
+        data_database=settings.clickhouse.effective_data_database,
+        wait_seconds=settings.clickhouse.bootstrap_wait_seconds,
+    ) as lease:
+        days = desired_days(crud, settings)
+        outcome = reconcile_default_ttl(
+            client,
+            settings=with_default_ttl_days(effective_settings(settings, crud), days),
+            sources=load_sources(),
+            before_table=lease.renew,
+        )
+        # A table that outlasts the lease is only noticed at the next renewal, so the last one is checked here.
+        lease.renew()
+    logger.info(
+        "default TTL applied",
+        days=days,
+        core_altered=len(outcome.core_altered),
+        source_tables_altered=sum(1 for t in outcome.report.tables if t.action == "altered"),
+        failed=len(outcome.failed),
+        lease_renewals=lease.renewals,
+    )
+    return ConvergePass(days=days, outcome=outcome, renewals=lease.renewals)
+
+
+# Where the app's lifespan puts the trigger that runs :func:`converge_default_ttl`.
+CONVERGE_ATTRIBUTE = "retention_converge"
+
+
+def request_converge(state: Any) -> None:
+    """Ask the app's trigger for a convergence pass, and return without waiting for it.
+
+    Args:
+        state: The FastAPI ``app.state`` the lifespan put the trigger on. An app that
+            never started one keeps the stored value, and its next start applies it.
+    """
+    trigger = getattr(state, CONVERGE_ATTRIBUTE, None)
+    if trigger is None:
+        logger.warning(
+            "default TTL stored but no pass runs in this process; the next start applies it"
+        )
+        return
+    trigger.request()
 
 
 @dataclass(frozen=True, slots=True)
