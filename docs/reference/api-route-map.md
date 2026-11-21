@@ -12,9 +12,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 9 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 54 | Kept as it is |
-| decide | 130 | Not placed yet: see its question |
+| decide | 128 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 324 | |
+| total | 322 | |
 
 ## Questions
 
@@ -22,7 +22,7 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|
 | [apps-depth](#apps-depth) | 22 |
 | [groups-scope](#groups-scope) | 11 |
-| [compute-helpers](#compute-helpers) | 10 |
+| [compute-helpers](#compute-helpers) | 8 |
 | [detection-rules](#detection-rules) | 8 |
 | [hunts-orgs](#hunts-orgs) | 7 |
 | [synthetic-data](#synthetic-data) | 7 |
@@ -363,8 +363,6 @@ A compute-only helper that owns no resource: an action on the resource it serves
 | `POST /api/v1/authoring/scaffold` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/cel/check` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/cel/check-batch` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/transforms/compile` | - | - | - | - | decide | ui 2 |  |
-| `POST /api/v1/transforms/test` | - | - | - | - | decide | ui 2 |  |
 
 ### detection-rules
 

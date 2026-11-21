@@ -240,8 +240,6 @@ There is no progress stream: poll the operation, and read `metadata` for progres
 | POST | `/rules` | Create hunt rule |
 | POST | `/rules/validate` | Validate rule |
 | POST | `/rules/preview` | Compile a rule condition and check it as a save would, writing nothing |
-| POST | `/transforms/compile` | Compile VRL/CEL transform |
-| POST | `/transforms/test` | Test transform against sample data |
 | GET | `/system/version` | Stack, engine, ui and every pinned app's version (the console footer) |
 | GET | `/system/deployment` | Profile, transports, whether compiled routing reaches the running apps, and versions -- what a pane must not guess |
 | GET | `/deployment/admin-links` | The admin UIs this deployment runs: name, purpose, URL and `up`/`down`/`unknown`. `admin` and `infra_admin` only (`deployment:admin_links:read`) |
