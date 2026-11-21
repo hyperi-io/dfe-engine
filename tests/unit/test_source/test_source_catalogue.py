@@ -120,8 +120,10 @@ def _elastic_agent_event(*, entry: sc.CatalogueEntry) -> dict[str, Any]:
     }
 
 
-def _routes_to_label(*, entry: sc.CatalogueEntry, intake: sc.CatalogueIntake | None) -> bool:
-    """Whether the source created from *entry* on *intake* labels its own Elastic Agent event."""
+def _label_of(
+    *, entry: sc.CatalogueEntry, event: dict[str, Any], intake: sc.CatalogueIntake | None
+) -> Any:
+    """The ``_source`` the receiver rules of the source created from *entry* on *intake* give *event*."""
     write = sc.write_request_for(entry=entry, intake=intake)
     source = source_from_write(source_name=entry.name, write=write)
     rule_set = RuleSet(targets=list(RULE_TARGETS), rules=source_rules(source))
@@ -129,8 +131,13 @@ def _routes_to_label(*, entry: sc.CatalogueEntry, intake: sc.CatalogueIntake | N
         rule_set.model_dump(mode="json", exclude_defaults=True),
         CompileOptions(profile=RECEIVER_RULES_PROFILE),
     )
-    event = _elastic_agent_event(entry=entry)
-    return compiled.evaluate(event).value("_source") == source.source
+    return compiled.evaluate(event).value("_source")
+
+
+def _routes_to_label(*, entry: sc.CatalogueEntry, intake: sc.CatalogueIntake | None) -> bool:
+    """Whether the source created from *entry* on *intake* labels its own Elastic Agent event."""
+    label = _label_of(entry=entry, event=_elastic_agent_event(entry=entry), intake=intake)
+    return label == entry.name
 
 
 def _beats_and_receiver(*, catalogue: sc.SourceCatalogue) -> list[sc.CatalogueEntry]:
@@ -366,6 +373,42 @@ class TestElasticAgentRouting:
     ):
         entry = fixture_catalogue.entry(name="cisco-asa")
         assert not _routes_to_label(entry=entry, intake="receiver")
+
+
+def _hub_event(*, src_type: str) -> dict[str, Any]:
+    """A syslog event as an EdgeStream Hub forwards it, which carries no ``_source``."""
+    return {
+        "@edgestream": {
+            "event": {"name": "estate-syslog", "src_type": src_type},
+            "hub": {"hostname": "edgestream", "org_id": "local", "site_id": "local"},
+        },
+        "@timestamp": "2026-11-21T01:28:18+00:00",
+        "facility": "user",
+        "host": "10.66.0.102",
+        "message": "a syslog line",
+    }
+
+
+class TestShipperRouting:
+    """A receiver-only entry routes on the field its shipper sends."""
+
+    def test_a_hub_event_is_labelled_with_the_source(self, fixture_catalogue: sc.SourceCatalogue):
+        entry = fixture_catalogue.entry(name="edgestream-hub-syslog")
+        label = _label_of(entry=entry, event=_hub_event(src_type="syslog_ng"), intake=None)
+        assert label == "edgestream-hub-syslog"
+
+    @pytest.mark.parametrize("src_type", ["vector", "", "SYSLOG_NG"])
+    def test_another_source_type_is_left_for_main(
+        self, fixture_catalogue: sc.SourceCatalogue, src_type: str
+    ):
+        entry = fixture_catalogue.entry(name="edgestream-hub-syslog")
+        assert _label_of(entry=entry, event=_hub_event(src_type=src_type), intake=None) is None
+
+    def test_an_event_with_no_hub_object_is_left_for_main(
+        self, fixture_catalogue: sc.SourceCatalogue
+    ):
+        entry = fixture_catalogue.entry(name="edgestream-hub-syslog")
+        assert _label_of(entry=entry, event={"message": "a syslog line"}, intake=None) is None
 
 
 def _without_transform(entry: sc.CatalogueEntry, *intakes: sc.CatalogueIntake) -> sc.CatalogueEntry:

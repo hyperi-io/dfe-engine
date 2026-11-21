@@ -26,6 +26,7 @@ from dfe_engine.manifest import ManifestError
 from dfe_engine.source.flow import FlowError, resolve_flow
 from dfe_engine.source.models import (
     SOURCE_LABEL_FIELD,
+    SourceMatch,
     SourceTransform,
     SourceWriteRequest,
     source_from_write,
@@ -205,6 +206,8 @@ def _entry_from(*, path: Path, tag: str) -> CatalogueEntry:
         raise SourceCatalogueError("it must carry fetcher exactly when fetcher is an intake")
     if request.transform is not None and not (catalogue.variants):
         raise SourceCatalogueError("its catalogue block lists no variants for its transform")
+    if catalogue.intakes == ["receiver"]:
+        _require_shipper_match(match=request.match)
     return CatalogueEntry(
         beats=catalogue.beats,
         data_stream=catalogue.data_stream,
@@ -218,10 +221,27 @@ def _entry_from(*, path: Path, tag: str) -> CatalogueEntry:
     )
 
 
+def _require_shipper_match(*, match: SourceMatch | None) -> None:
+    """Refuse a receiver-only entry whose match is not one ``equals`` test on a field.
+
+    Nothing else supplies the match of an entry that arrives by the receiver alone, so it
+    names a field the shipper sends.
+    """
+    if match is None or not match.is_test or match.operator != "equals" or match.negate:
+        raise SourceCatalogueError(
+            "its receiver-only body must carry a match of one equals test on a field the shipper sends"
+        )
+
+
 def _match_for(*, entry: CatalogueEntry, intake: str, source: str) -> dict[str, str]:
     """The receiver match a non-fetcher intake gives the source."""
     if intake == "beats":
         return {"field": BEATS_DATASET_FIELD, "operator": "equals", "value": entry.dataset}
+    shipper = entry.request.match
+    if entry.default_intake == "receiver" and shipper is not None and shipper.field:
+        # A receiver-only entry names the field its shipper sends, where any other entry's source label.
+        if shipper.field != SOURCE_LABEL_FIELD:
+            return {"field": shipper.field, "operator": "equals", "value": shipper.value}
     return {"field": SOURCE_LABEL_FIELD, "operator": "equals", "value": source}
 
 
