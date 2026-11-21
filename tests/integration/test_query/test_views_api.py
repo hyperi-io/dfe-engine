@@ -37,6 +37,7 @@ from dfe_engine.settings import (
     SecretsSettings,
 )
 from tests.support.accounts import admin_on_its_own_password, session_token
+from tests.support.orgs import name_your_org
 
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
@@ -114,6 +115,9 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             admin_on_its_own_password(app)
+            # An account of any org but yours holds only its org's admin or viewer group,
+            # so the admin must be bound to your org to keep the groups that grant the view.
+            name_your_org(app=app, name="default", display_name="Default")
             app.state.account_store.update("admin", org="default")
             token = session_token(app, settings, {"sub": "admin"})
             yield SimpleNamespace(
