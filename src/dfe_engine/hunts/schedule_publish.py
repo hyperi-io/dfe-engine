@@ -102,10 +102,13 @@ class StoredHuntSchedule:
 
     def publish(self, hunt_dir: Path) -> None:
         """Bring ``hunt_schedule`` to the hunts stored in *hunt_dir*, retrying until it lands."""
-        if self._try(hunt_dir):
-            self._cancel_retry()
-        else:
-            self._retry_later(hunt_dir)
+        # The retry is armed or cancelled under the same turn as the publish, so an older
+        # success cannot cancel the retry a newer failure armed.
+        with self._turn:
+            if self._try(hunt_dir):
+                self._cancel_retry()
+            else:
+                self._retry_later(hunt_dir)
 
     def close(self) -> None:
         """Cancel the pending retry, and take no more."""
@@ -113,13 +116,13 @@ class StoredHuntSchedule:
         self._cancel_retry()
 
     def _try(self, hunt_dir: Path) -> bool:
+        """One publish attempt, called with the turn held. True when it landed."""
         db = self._settings.clickhouse.effective_data_database
         try:
-            with self._turn:
-                if not hunt_dir.is_dir():  # load_specs reads a missing directory as no hunts
-                    raise FileNotFoundError(f"hunt directory {hunt_dir} is missing")
-                specs = load_specs(hunt_dir, **spec_sources(self._settings, db, self._rules_dir))
-                publish_hunt_schedule(self._client(), db, specs, self._settings)
+            if not hunt_dir.is_dir():  # load_specs reads a missing directory as no hunts
+                raise FileNotFoundError(f"hunt directory {hunt_dir} is missing")
+            specs = load_specs(hunt_dir, **spec_sources(self._settings, db, self._rules_dir))
+            publish_hunt_schedule(self._client(), db, specs, self._settings)
         except Exception as exc:  # the hunt change has already been saved, so this cannot fail it
             if not self._failing:
                 logger.warning(
