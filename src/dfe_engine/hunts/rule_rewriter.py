@@ -130,7 +130,7 @@ class RuleRewriter:
 
         if result.had_select_star:
             result.warnings.append(
-                "SELECT * detected -- hunt output will use lean columns "
+                "SELECT * detected. Hunt output will use lean columns "
                 "(matched_uuid + rule metadata + _json) instead."
             )
         if result.source_table is None:

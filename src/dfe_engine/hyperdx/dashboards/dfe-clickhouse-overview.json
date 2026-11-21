@@ -159,7 +159,7 @@
         "displayType": "line",
         "connection": "platform",
         "source": "clickhouse_system",
-        "numberFormat": { "output": "duration", "unit": "ms", "mantissa": 0 },
+        "numberFormat": { "output": "duration", "factor": 0.001 },
         "sqlTemplate": "SELECT $__timeInterval(event_time) AS ts,\n       quantile(0.5)(query_duration_ms) AS \"p50\",\n       quantile(0.9)(query_duration_ms) AS \"p90\",\n       quantile(0.99)(query_duration_ms) AS \"p99\"\nFROM system.query_log\nWHERE type = 'QueryFinish' AND $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
       }
     },

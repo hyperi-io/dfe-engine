@@ -12,6 +12,7 @@
         "name": "Records received",
         "source": "otel_metrics",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "select": [
           {
             "aggFn": "increase",
@@ -36,6 +37,7 @@
         "name": "Records delivered",
         "source": "otel_metrics",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "select": [
           {
             "aggFn": "increase",
@@ -60,6 +62,7 @@
         "name": "Kafka consumer lag (max)",
         "source": "otel_metrics",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "select": [
           {
             "aggFn": "max",
@@ -84,6 +87,7 @@
         "name": "Loader buffer rows",
         "source": "otel_metrics",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "select": [
           {
             "aggFn": "max",
@@ -135,6 +139,7 @@
         "name": "Collector export queue",
         "source": "otel_metrics",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "select": [
           {
             "aggFn": "max",

@@ -53,6 +53,7 @@
         "name": "Total consumer lag",
         "configType": "sql",
         "displayType": "number",
+        "numberFormat": { "output": "number", "thousandSeparated": true },
         "connection": "platform",
         "source": "otel_metrics",
         "sqlTemplate": "SELECT sum(latest) AS \"Messages behind\"\nFROM (\n  SELECT argMax(Value, TimeUnix) AS latest\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'kafka.consumer_group.lag_sum' AND $__timeFilter(TimeUnix)\n  GROUP BY Attributes['group'], Attributes['topic']\n)"
