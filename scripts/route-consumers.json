@@ -447,12 +447,6 @@
     },
     "/api/v1/tasks": {
       "dfe-infra": 1
-    },
-    "/api/v1/transforms/compile": {
-      "dfe-ui": 2
-    },
-    "/api/v1/transforms/test": {
-      "dfe-ui": 2
     }
   },
   "unmatched": {

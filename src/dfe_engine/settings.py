@@ -1510,13 +1510,10 @@ class SigmaSettings(BaseModel):
 class ServicesSettings(BaseModel):
     """Where the engine reaches the managed DFE services.
 
-    The transform-wasm compile/test proxy and the Rust-services YAML config
-    replica dir.
+    The Rust-services YAML config replica dir.
 
     """
 
-    transform_wasm_url: str = Field(default="http://localhost:8080")
-    transform_wasm_compiler_url: str = Field(default="http://localhost:8090")
     config_yaml_dir: str = Field(
         default="", description="YAML config replica directory for Rust services"
     )
@@ -2542,8 +2539,6 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_SOURCE_PLANS_DIR": "source.plans_dir",
             "DFE_ENGINE_SOURCE_DEPLOYS_DIR": "source.deploys_dir",
             "DFE_ENGINE_FIELDMAPS_DIR": "fieldmap.fieldmaps_dir",
-            "DFE_ENGINE_SERVICES_TRANSFORM_WASM_URL": "services.transform_wasm_url",
-            "DFE_ENGINE_SERVICES_TRANSFORM_WASM_COMPILER_URL": "services.transform_wasm_compiler_url",
             "DFE_ENGINE_SERVICES_CONFIG_YAML_DIR": "services.config_yaml_dir",
             "DFE_ENGINE_DEPLOYMENT_NAMESPACE": "deployment.namespace",
             "DFE_ENGINE_AUTH_DIR": "auth.auth_dir",

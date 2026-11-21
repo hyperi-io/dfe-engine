@@ -39,8 +39,8 @@ _.provider_max_replica_memory_gb, _.provider_min_replica_memory_gb, _.provider_r
 _.python_version, _.queued, _.read_rows, _.relinked, _.requested_fire, _.rule_errors, _.runnable
 _.runnable_intakes, _.runnable_reason, _.sampled, _.service_account_json, _.services_config_dir
 _.source_build, _.source_deployment, _.source_tables_altered, _.source_url, _.storage_model
-_.target_table_name, _.upstream_modified, _.url_scheme, _.validation, _.wasm_bytes
-_.argo_namespace_prefix, _.notes, _.wasm_memory_bytes, _.wildcard, _.your_org
+_.target_table_name, _.upstream_modified, _.url_scheme, _.validation
+_.argo_namespace_prefix, _.notes, _.wildcard, _.your_org
 
 # Stored documents, results and dataclass fields: pydantic or asdict reads them.
 _.actual_rows, _.actual_time_ms, _.admin_username, _.apps_sync_error, _.apps_synced, _.average

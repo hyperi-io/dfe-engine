@@ -44,7 +44,6 @@ from dfe_engine.api.v1.sigma import router as sigma_router
 from dfe_engine.api.v1.sources import router as sources_router
 from dfe_engine.api.v1.synthetic_data import router as synthetic_data_router
 from dfe_engine.api.v1.system import router as system_router
-from dfe_engine.api.v1.transforms import router as transforms_router
 from dfe_engine.api.v1.usage import router as usage_router
 from dfe_engine.clickhouse.attribution import tags_context
 from dfe_engine.gitops.repo import read_scope
@@ -121,7 +120,6 @@ def build_v1_router(settings: DFESettings) -> APIRouter:
     v1_router.include_router(rules_router)
     v1_router.include_router(alerts_router)
     v1_router.include_router(system_router)
-    v1_router.include_router(transforms_router)
     v1_router.include_router(hunts_router)
     v1_router.include_router(queries_router)
     v1_router.include_router(sampler_router)
