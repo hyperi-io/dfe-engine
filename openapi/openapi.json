@@ -42197,6 +42197,14 @@
             "type": "array",
             "title": "Members"
           },
+          "linked_members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Linked Members",
+            "description": "Accounts that hold the group through an IdP sign-in its link matches, beside the stored members. Read-only: writing members never sets them."
+          },
           "scope": {
             "type": "string",
             "title": "Scope"

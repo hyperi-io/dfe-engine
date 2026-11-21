@@ -2096,3 +2096,45 @@ class TestLastAdminGroupMembership:
         )
         assert resp.status_code == 200, resp.text
         assert "ops" not in recovery_accounts.state.group_store.get("dfe-admins").members
+
+
+class TestLinkedMembers:
+    @pytest.fixture
+    def linked(self, app: FastAPI) -> None:
+        """Link dfe-viewers to Okta's 00g-viewers, whose sign-ins ivy and olga assert, with olga also a stored member."""
+        app.state.group_store.update(
+            name="dfe-viewers", source_id="00g-viewers", source_provider="okta"
+        )
+        for username in ("ivy", "olga"):
+            app.state.account_store.create(groups=["00g-viewers"], password="", username=username)
+            app.state.account_store.update(external=True, source_provider="okta", username=username)
+        app.state.group_store.add_member(group_name="dfe-viewers", username="olga")
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/api/v1/auth/groups?page_size=100", "/api/v1/auth/groups/dfe-viewers"],
+        ids=["list", "detail"],
+    )
+    def test_a_link_holder_is_listed_apart_from_the_stored_members(
+        self, admin_headers: dict[str, str], client: TestClient, linked: None, path: str
+    ):
+        body = client.get(path, headers=admin_headers).json()
+        groups = body["items"] if "items" in body else [body]
+        group = next(item for item in groups if item["name"] == "dfe-viewers")
+        assert (group["linked_members"], "olga" in group["members"], "ivy" in group["members"]) == (
+            ["ivy"],
+            True,
+            False,
+        )
+
+    def test_a_members_write_never_stores_a_link_holder(
+        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient, linked: None
+    ):
+        group = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers).json()
+        resp = client.put(
+            "/api/v1/auth/groups/dfe-viewers",
+            headers=admin_headers,
+            json={"members": group["members"]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert "ivy" not in app.state.group_store.get("dfe-viewers").members

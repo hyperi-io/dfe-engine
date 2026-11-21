@@ -143,6 +143,11 @@ class GroupResponse(BaseModel):
     description: str
     roles: list[str]
     members: list[str]
+    linked_members: list[str] = Field(
+        default_factory=list,
+        description="Accounts that hold the group through an IdP sign-in its link matches, "
+        "beside the stored members. Read-only: writing members never sets them.",
+    )
     scope: str
     source_id: str
     source_provider: str
@@ -247,9 +252,10 @@ def _refuse_link_below_system_scope(request: Request, user) -> None:
     raise AuthorizationError(reason)
 
 
-def _response(group: Group) -> GroupResponse:
+def _response(group: Group, *, linked_members: Iterable[str] = ()) -> GroupResponse:
     return GroupResponse(
         description=group.description,
+        linked_members=[member for member in linked_members if member not in group.members],
         members=group.members,
         name=group.name,
         roles=group.roles,
@@ -429,24 +435,32 @@ def _org_role_message(*, account_org: str, group: str, username: str) -> str:
     )
 
 
-def org_link_holders(*, group: Group, request: Request) -> list[str]:
-    """The accounts that would hold *group*, as it would be stored, through an IdP sign-in its link matches."""
-    if not (group.source_id):
-        return []
+def _link_holders(*, groups: Iterable[Group], request: Request) -> dict[str, list[str]]:
+    """The accounts holding each linked group in *groups* through an IdP sign-in its link matches, by group name, read in one pass over the accounts."""
+    unlisted = [group.model_copy(update={"members": []}) for group in groups if group.source_id]
+    if not (unlisted):
+        return {}
     bindings = provider_bindings(request)
-    unlisted = group.model_copy(update={"members": []})
-    return [
-        account.username
-        for account in request.app.state.account_store.scan()
-        if groups_held_by(
+    holders = {group.name: [] for group in unlisted}
+    for account in request.app.state.account_store.scan():
+        if (account.is_link_record) or (account.is_soft_deleted):
+            continue
+        held = groups_held_by(
             account.username,
             account.groups,
             account.source_provider,
-            [unlisted],
+            unlisted,
             bindings=bindings,
             identities=account.identities,
         )
-    ]
+        for group in held:
+            holders[group.name].append(account.username)
+    return holders
+
+
+def org_link_holders(*, group: Group, request: Request) -> list[str]:
+    """The accounts that would hold *group*, as it would be stored, through an IdP sign-in its link matches."""
+    return _link_holders(groups=[group], request=request).get(group.name, [])
 
 
 def org_role_refusal(*, group: Group, members: Iterable[str], request: Request) -> str | None:
@@ -643,7 +657,8 @@ async def list_groups(
     member = _member_name(request, user)
     held = _held(request, user)
     visible = [g for g in store.list() if _visible(request, user, g, member, held)]
-    rows = [_response(g).model_dump() for g in visible]
+    linked = _link_holders(groups=visible, request=request)
+    rows = [_response(g, linked_members=linked.get(g.name, [])).model_dump() for g in visible]
     rows = apply_search(rows, search, ["name", "description"])
     rows = sort_by_order(rows, query.order_by)
     summaries = [GroupResponse.model_validate(row) for row in rows]
@@ -657,7 +672,9 @@ async def get_group(
     request: Request,
 ):
     """Get a single group by name (404 when not visible to the caller)."""
-    return _response(_visible_group(request, user, name))
+    group = _visible_group(request, user, name)
+    linked = _link_holders(groups=[group], request=request)
+    return _response(group, linked_members=linked.get(group.name, []))
 
 
 @router.put("/{name}", response_model=GroupResponse, dependencies=[Depends(require_group_reauth)])
