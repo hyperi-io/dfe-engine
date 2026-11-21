@@ -47,6 +47,7 @@ from dfe_engine.api.v1 import (
 )
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.source import catalogue as source_catalogue_module
+from tests.support.reauth import waive_reauth
 
 from .test_e2e_server import (
     _ADMIN_OWN_PASSWORD,
@@ -122,8 +123,12 @@ class _Park:
 def seeded(tmp_path):
     """An e2e-server process over a Kubernetes-shaped deploy repo, with every seed applied."""
     _stood_up_as_on_kubernetes(tmp_path / "deploy")
-    app = create_app(
-        settings=_settings(tmp_path, e2e_server=True, gitops=True, deployment_target="kubernetes")
+    app = waive_reauth(
+        create_app(
+            settings=_settings(
+                tmp_path, e2e_server=True, gitops=True, deployment_target="kubernetes"
+            )
+        )
     )
     try:
         with TestClient(app, raise_server_exceptions=False) as client:

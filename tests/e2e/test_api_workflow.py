@@ -234,6 +234,16 @@ class TestAccountGroupWorkflow:
         )
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
+    def _granted(self, client, headers: dict[str, str], kind: str, target: str) -> dict[str, str]:
+        """*headers* with the re-auth grant the admin earns for the *kind* named *target*."""
+        resp = client.post(
+            "/api/v1/auth/reauth",
+            json={"kind": kind, "password": E2E_ADMIN_PASSWORD, "target": target},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        return {**headers, "X-DFE-Reauth": resp.json()["grant"]}
+
     def test_create_account_assign_group_login(self, e2e_client):
         headers = self._login(e2e_client)
         user_password = secrets.token_urlsafe(16)
@@ -241,11 +251,12 @@ class TestAccountGroupWorkflow:
         resp = e2e_client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "e2e_user",
                 "password": user_password,
                 "email": "e2e_user@example.com",
             },
-            headers=headers,
+            headers=self._granted(e2e_client, headers, "account", "e2e_user"),
         )
         assert resp.status_code == 201
 
@@ -253,7 +264,7 @@ class TestAccountGroupWorkflow:
         resp = e2e_client.post(
             "/api/v1/auth/groups/dfe-admins/members",
             json={"username": "e2e_user"},
-            headers=headers,
+            headers=self._granted(e2e_client, headers, "group", "dfe-admins"),
         )
         assert resp.status_code == 200
 

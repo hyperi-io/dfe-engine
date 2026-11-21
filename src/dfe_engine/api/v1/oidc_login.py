@@ -12,6 +12,7 @@ GET /api/v1/auth/oidc/{provider}/login     -> 302 to the IdP authorize endpoint
 GET /api/v1/auth/oidc/{provider}/login?redirect=false -> JSON {authorization_url}
 GET /api/v1/auth/oidc/{provider}/login?return_to=<url> -> callback hands the browser back there
 GET /api/v1/auth/oidc/{provider}/callback  -> exchange code, RE-MINT engine token
+POST /api/v1/auth/oidc/link               -> link a held sign-in to its local account
 
 A browser client (the console) passes ``return_to`` on login. The callback then
 303s to it with the engine token in the URL fragment, which never leaves the
@@ -33,37 +34,61 @@ import functools
 import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, NoReturn
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from jwt.exceptions import InvalidTokenError
+from pydantic import BaseModel, Field, ValidationError
 from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api.deps import (
+    CurrentUser,
     Settings,
     _get_client_ip,
+    bound_account,
     get_role_config,
     jwt_authority_for,
     require_local_account_enabled,
     resolve_live_grants_for_user,
+    throttled,
 )
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.audit import audit_jit_failed, audit_login_denied, audit_login_success
+from dfe_engine.auth.identity_links import (
+    LinkTicket,
+    asserted_groups,
+    linked_through,
+    mint_link_ticket,
+    read_link_ticket,
+    trusted_email,
+)
 from dfe_engine.auth.jit import (
     JitAccountUnavailableError,
+    JitEmailHeldError,
+    JitEmailUntrustedError,
     JitIdentityCollisionError,
+    JitLinkRequiredError,
     JitNoRoleError,
     JitSubjectUnusableError,
 )
+from dfe_engine.auth.reauth import (
+    REAUTH_KINDS,
+    REAUTH_LIFETIME,
+    ReauthKind,
+    grant_target,
+    mint_reauth_grant,
+)
 from dfe_engine.auth.sessions import session_claims, token_lifetime
 from dfe_engine.http_errors import describe_http_error
+from dfe_engine.names import StoreName
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.oidc.rp import OidcRelyingParty
+    from dfe_engine.auth.accounts import Account
+    from dfe_engine.auth.oidc.rp import NormalizedIdentity, OidcRelyingParty
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -82,6 +107,15 @@ def token_cookie_secure(settings: DFESettings) -> bool:
 
 # Session key holding the validated return_to between login and callback.
 _RETURN_TO_SESSION_KEY = "oidc_return_to"
+
+# Session key holding a re-auth sign-in between its start and the callback.
+_REAUTH_SESSION_KEY = "oidc_reauth"
+
+# How long a re-auth sign-in may spend at the IdP.
+_REAUTH_SIGN_IN_SECONDS = 600
+
+# How far the IdP's clock may run behind the engine's when ``auth_time`` is judged.
+_AUTH_TIME_SKEW_SECONDS = 30
 
 
 def _origin(url: str) -> str:
@@ -139,6 +173,27 @@ class OidcCallbackResponse(BaseModel):
     subject: str = Field(description="IdP subject (sub)")
     email: str = Field(default="", description="Email from the IdP, if asserted")
     groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")
+
+
+class OidcReauthRequest(BaseModel):
+    """The account or group you are about to change, and where the sign-in hands its grant back."""
+
+    kind: ReauthKind = Field("account", description="What the target names")
+    return_to: str = Field(
+        description="Where the callback sends the browser, with the grant in the URL fragment "
+        "(#reauth_grant=...&expires_in=...) or the refusal's code (#error=<code>&provider=...). "
+        "A relative path, or an absolute URL on this API's origin or a CORS-allowed origin."
+    )
+    target: StoreName = Field(
+        description="The account, group, role, sign-in provider or API key you are about to change"
+    )
+
+
+class OidcLinkRequest(BaseModel):
+    """Body for linking a held IdP sign-in to its local account with that account's password."""
+
+    password: str = Field(description="The local account's password")
+    ticket: str = Field(description="The link_ticket a link_required callback answered with")
 
 
 def _registered_state(request: Request, provider: str) -> bool | None:
@@ -289,8 +344,15 @@ def _hand_back_refusal(return_to: str, provider: str, exc: ProblemError) -> Redi
         303: {
             "description": "Login started with return_to: redirect there with the engine "
             "token in the URL fragment, or with the refusal's code "
-            "(#error=<code>&provider=...) when the login is refused."
-        }
+            "(#error=<code>&provider=...) when the login is refused. A sign-in that "
+            "links to a local account comes back with "
+            "#error=link_required&link_ticket=...&account=...&provider=... instead."
+        },
+        409: {
+            "description": "link_required: the sign-in's trusted email matches a local "
+            "account. The body's link_ticket and that account's password go to POST "
+            "/auth/oidc/link, and account names it."
+        },
     },
 )
 async def oidc_callback(
@@ -303,9 +365,27 @@ async def oidc_callback(
     refusal answers JSON with its status, as any API error does.
     """
     # Spent before the provider check, so a 404 leaves no return_to behind either.
-    return_to = request.session.pop(_RETURN_TO_SESSION_KEY, None)
+    pending = request.session.get(_REAUTH_SESSION_KEY)
+    # Only the re-auth's own authorize request answers it: a login open in another tab stays a login.
+    reauthing = (pending is not None) and (
+        pending.get("state") == request.query_params.get("state")
+    )
+    if reauthing:
+        request.session.pop(_REAUTH_SESSION_KEY, None)
+        return_to = pending.get("return_to")
+    else:
+        return_to = request.session.pop(_RETURN_TO_SESSION_KEY, None)
     rp = await _rp_or_404(request, provider)
     try:
+        if reauthing:
+            return await _complete_reauth(
+                pending=pending,
+                provider=provider,
+                request=request,
+                return_to=return_to,
+                rp=rp,
+                settings=settings,
+            )
         return await _complete_login(provider, request, settings, rp, return_to)
     except ProblemError as exc:
         if not return_to:
@@ -350,12 +430,29 @@ async def _complete_login(
                 email=identity.email,
                 name=identity.name,
                 keep_stored_groups=identity.groups_unresolved,
+                email_verified=_trusted_email(
+                    identity=identity, provider=provider, request=request
+                ),
+            )
+        except JitLinkRequiredError as exc:
+            return _link_required(
+                exc=exc,
+                identity=identity,
+                provider=provider,
+                request=request,
+                return_to=return_to,
+                settings=settings,
             )
         except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
             # Ordered before the catch-all: a refused identity is a 401, not a 503.
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
             raise ProblemError(401, str(exc), code="unauthorized") from exc
-        except (JitAccountUnavailableError, JitNoRoleError) as exc:
+        except (
+            JitAccountUnavailableError,
+            JitEmailHeldError,
+            JitEmailUntrustedError,
+            JitNoRoleError,
+        ) as exc:
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
             raise ProblemError(401, str(exc), code=exc.reason) from exc
         except Exception as exc:
@@ -368,12 +465,144 @@ async def _complete_login(
                 503, "The login could not be recorded. Try again.", code="service_unavailable"
             ) from exc
 
-    account = require_local_account_enabled(request, identity.subject)
-    # Groups the directory never answered for are the account's stored ones, not none.
-    groups = account.groups if identity.groups_unresolved and account else identity.groups
+    return _signed_in(
+        email=identity.email,
+        groups=identity.groups,
+        groups_unresolved=identity.groups_unresolved,
+        provider=provider,
+        request=request,
+        return_to=return_to,
+        settings=settings,
+        subject=identity.subject,
+    )
+
+
+async def _complete_reauth(
+    *,
+    pending: dict,
+    provider: str,
+    request: Request,
+    return_to: str | None,
+    rp: OidcRelyingParty,
+    settings: DFESettings,
+) -> JSONResponse | RedirectResponse:
+    """Hand back a grant for a re-auth sign-in that is the caller's own and fresh. A refusal raises ProblemError."""
+    caller = str(pending.get("caller") or "")
+    started = int(pending.get("started") or 0)
+    client_ip = _get_client_ip(request)
+    if int(time.time()) - started > _REAUTH_SIGN_IN_SECONDS:
+        audit_login_denied(caller, "reauth", client_ip, "reauth_expired")
+        raise ProblemError(403, "The sign-in took too long. Try again.", code="reauth_expired")
+    try:
+        identity = await rp.handle_callback(provider, request)
+    except Exception as exc:
+        failure = describe_http_error(exc)
+        logger.warning("OIDC re-auth callback failed", provider=provider, **failure)
+        reason = str(failure.get("code") or failure["error_type"])
+        audit_login_denied(caller, "reauth", client_ip, reason)
+        raise ProblemError(
+            403, "The sign-in failed; the engine log has the reason", code="reauth_failed"
+        ) from exc
+    account = require_local_account_enabled(request, caller)
+    if (account is None) or ((provider, identity.subject) not in _sign_ins(account=account)):
+        audit_login_denied(caller, "reauth", client_ip, "reauth_other_person")
+        raise ProblemError(403, "That sign-in is not yours", code="reauth_other_person")
+    if (identity.auth_time is None) or (identity.auth_time < started - _AUTH_TIME_SKEW_SECONDS):
+        audit_login_denied(caller, "reauth", client_ip, "reauth_not_fresh")
+        raise ProblemError(
+            403,
+            "Your identity provider did not ask for your credentials again",
+            code="reauth_not_fresh",
+        )
+    kind = next((known for known in REAUTH_KINDS if known == pending.get("kind")), None)
+    if kind is None:
+        raise ProblemError(403, "The sign-in failed. Try again.", code="reauth_failed")
+    target = grant_target(kind=kind, name=str(pending.get("target") or ""))
+    grant = mint_reauth_grant(authority=jwt_authority_for(settings), caller=caller, target=target)
+    expires_in = int(REAUTH_LIFETIME.total_seconds())
+    if not (return_to):
+        return JSONResponse({"expires_in": expires_in, "grant": grant})
+    fields = {"expires_in": str(expires_in), "reauth_grant": grant}
+    return RedirectResponse(_hand_back_url(return_to, fields), status_code=303)
+
+
+def _link_required(
+    *,
+    exc: JitLinkRequiredError,
+    identity: NormalizedIdentity,
+    provider: str,
+    request: Request,
+    return_to: str | None,
+    settings: DFESettings,
+) -> RedirectResponse:
+    """Hold a sign-in that links to a local account until that account's password, handing back its ticket.
+
+    A browser login goes back to ``return_to`` with the ticket in the URL fragment beside ``error=link_required``, so a console that cannot link shows a refusal. Otherwise the 409 carries it.
+    """
+    link = LinkTicket(
+        account=exc.account,
+        email=identity.email,
+        groups=identity.groups,
+        groups_unresolved=identity.groups_unresolved,
+        name=identity.name,
+        provider=provider,
+        subject=identity.subject,
+    )
+    ticket = mint_link_ticket(authority=jwt_authority_for(settings), ticket=link)
+    audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
+    if not (return_to):
+        raise ProblemError(409, str(exc), code=exc.reason, account=exc.account, link_ticket=ticket)
+    fields = {
+        "account": exc.account,
+        "error": exc.reason,
+        "link_ticket": ticket,
+        "provider": provider,
+    }
+    return RedirectResponse(_hand_back_url(return_to, fields), status_code=303)
+
+
+def _sign_ins(*, account: Account) -> set[tuple[str, str]]:
+    """The ``(provider, subject)`` sign-ins that reach *account*: its own and each one linked to it."""
+    held = {(identity.provider, identity.subject) for identity in account.identities}
+    if (account.oidc_id) and (account.subject):
+        held.add((account.oidc_id, account.subject))
+    return held
+
+
+def _trusted_email(*, identity: NormalizedIdentity, provider: str, request: Request) -> bool:
+    """Whether the IdP vouched for the sign-in's email and the provider is trusted for its domain."""
+    registry = getattr(request.app.state, "oidc_provider_registry", None)
+    config = registry.get(provider) if registry is not None else None
+    domains = config.trusted_email_domains if config is not None else []
+    return trusted_email(
+        email=identity.email, email_verified=identity.email_verified, trusted_domains=domains
+    )
+
+
+def _signed_in(
+    *,
+    email: str,
+    groups: list[str],
+    groups_unresolved: bool,
+    provider: str,
+    request: Request,
+    return_to: str | None,
+    settings: DFESettings,
+    subject: str,
+) -> JSONResponse | RedirectResponse:
+    """Mint the engine token for the admitted IdP *subject* and answer with it.
+
+    A sign-in linked to an account is that account's session, so the token's ``sub`` is the account's, which binds it back to the account on every request.
+    """
+    account = require_local_account_enabled(request, subject)
+    linked = account is not None and linked_through(account=account, subject=subject)
+    session_subject = account.session_subject if linked else subject
+    # Groups the directory never answered for are the stored assertion, not none.
+    if groups_unresolved and account is not None:
+        groups = asserted_groups(account=account, subject=subject)
 
     # From the group files rather than the IdP token, for the claim and the audit.
-    live = resolve_live_grants_for_user(request, identity.subject)
+    live = resolve_live_grants_for_user(request, subject)
     roles = live.roles
 
     # RE-MINT: the engine's own ES384 identity token is the ONLY token downstream
@@ -387,8 +616,8 @@ async def _complete_login(
     )
     token = jwt_authority_for(settings).sign(
         {
-            "sub": identity.subject,
-            "email": identity.email,
+            "sub": session_subject,
+            "email": email,
             "groups": groups,
             # dfe-hyperdx gates changing what a team sees on this one value.
             hyperdx_role.CLAIM: hyperdx_role.role_claim(live.grants, get_role_config(request)),
@@ -401,18 +630,18 @@ async def _complete_login(
     logger.info(
         "OIDC login re-minted engine token",
         provider=provider,
-        subject=identity.subject,
+        subject=subject,
         group_count=len(groups),
     )
 
     # The IdP code is exchanged for an engine token here, so this is the login
     # the audit trail counts - not the per-request token check in get_current_user.
-    audit_login_success(identity.subject, "oidc", _get_client_ip(request), roles)
+    audit_login_success(session_subject, "oidc", _get_client_ip(request), roles)
 
     payload = OidcCallbackResponse(
         access_token=token,
-        subject=identity.subject,
-        email=identity.email,
+        subject=subject,
+        email=email,
         groups=groups,
     )
     response: JSONResponse | RedirectResponse
@@ -430,3 +659,136 @@ async def _complete_login(
         max_age=lifetime,
     )
     return response
+
+
+@router.post(
+    "/link",
+    response_model=OidcCallbackResponse,
+    responses={
+        401: {
+            "description": "link_ticket_invalid (expired or not this engine's), a wrong "
+            "password, link_stale (the account or the sign-in changed since the ticket), "
+            "or the account is disabled, blocked or would hold no role"
+        },
+        404: {"description": "The ticket's provider is no longer registered and enabled"},
+        429: {
+            "description": "Too many failed attempts for this account or from this "
+            "address; Retry-After gives the seconds to wait"
+        },
+    },
+)
+async def oidc_link(
+    body: OidcLinkRequest, request: Request, settings: Settings
+) -> JSONResponse | RedirectResponse:
+    """Link the sign-in a ``link_required`` callback held to its local account, on that account's password, and sign it in.
+
+    Wrong passwords count against the account's sign-in throttle (``auth.login_throttle``), as a password login's do. The answer is the callback's, and from then on the sign-in reaches the account without a password.
+    """
+    client_ip = _get_client_ip(request)
+    try:
+        ticket = read_link_ticket(authority=jwt_authority_for(settings), token=body.ticket)
+    except (InvalidTokenError, ValidationError) as exc:
+        audit_login_denied("unknown", "oidc", client_ip, "link_ticket_invalid")
+        raise ProblemError(
+            401,
+            "The link has expired or is not valid. Sign in through your identity provider again.",
+            code="link_ticket_invalid",
+        ) from exc
+    if not (_registered_state(request, ticket.provider)):
+        raise _not_found(ticket.provider)
+    domains = request.app.state.oidc_provider_registry.get(ticket.provider).trusted_email_domains
+    if not (trusted_email(email=ticket.email, email_verified=True, trusted_domains=domains)):
+        # Trust withdrawn since the ticket was issued.
+        audit_login_denied(ticket.subject, "oidc", client_ip, "link_stale")
+        raise ProblemError(401, "The link is no longer allowed. Sign in again.", code="link_stale")
+
+    throttle = request.app.state.login_throttle
+    wait = throttle.retry_after(ticket.account, client_ip)
+    if wait:
+        audit_login_denied(ticket.account, "oidc", client_ip, "throttled")
+        raise throttled(request, wait)
+    store = request.app.state.account_store
+    account = store.get(ticket.account)
+    verified = await run_blocking(store.verify_account_password, account, body.password)
+    if (not (verified)) or (account is None) or (account.external):
+        throttle.failed(ticket.account, client_ip)
+        audit_login_denied(ticket.account, "oidc", client_ip, "invalid_password")
+        raise ProblemError(401, "Invalid password", code="unauthorized")
+    throttle.succeeded(ticket.account)
+
+    jit = getattr(request.app.state, "jit_provisioner", None)
+    if jit is None:
+        raise _not_found(ticket.provider)
+    try:
+        jit.complete_link(ticket=ticket)
+    except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
+        audit_login_denied(ticket.subject, "oidc", client_ip, exc.reason)
+        code = exc.reason if exc.reason == "link_stale" else "unauthorized"
+        raise ProblemError(401, str(exc), code=code) from exc
+    except (JitAccountUnavailableError, JitNoRoleError) as exc:
+        audit_login_denied(ticket.subject, "oidc", client_ip, exc.reason)
+        raise ProblemError(401, str(exc), code=exc.reason) from exc
+    except Exception as exc:
+        logger.error("Account link failed", user_id=ticket.subject, **describe_http_error(exc))
+        audit_jit_failed(ticket.subject, exc)
+        raise ProblemError(
+            503, "The link could not be recorded. Try again.", code="service_unavailable"
+        ) from exc
+
+    return _signed_in(
+        email=ticket.email,
+        groups=ticket.groups,
+        groups_unresolved=ticket.groups_unresolved,
+        provider=ticket.provider,
+        request=request,
+        return_to=None,
+        settings=settings,
+        subject=ticket.subject,
+    )
+
+
+@router.post(
+    "/reauth",
+    response_model=OidcLoginResponse,
+    response_model_exclude_none=True,
+    responses={
+        409: {
+            "description": "reauth_via_password: the caller has no identity-provider sign-in, "
+            "so it confirms with its password at POST /auth/reauth"
+        }
+    },
+)
+async def oidc_reauth(
+    body: OidcReauthRequest, request: Request, settings: Settings, user: CurrentUser
+) -> OidcLoginResponse:
+    """Start a fresh sign-in at your own identity provider, which earns a grant for changing one account or group.
+
+    The IdP is asked to take your credentials again (``prompt=login``, ``max_age=0``), and the callback answers with the grant instead of a session.
+    """
+    account = bound_account(request, user.user_id)
+    held = _sign_ins(account=account) if account is not None else set()
+    if not (held):
+        raise ProblemError(
+            409,
+            "You have no identity-provider sign-in: confirm it is you with your password",
+            code="reauth_via_password",
+        )
+    own = (account.oidc_id, account.subject)
+    provider = own[0] if own in held else sorted(held)[0][0]
+    rp = await _rp_or_404(request, provider)
+    return_to = validate_return_to(
+        body.return_to, _origin(str(request.base_url)), settings.api.cors_origins
+    )
+    redirect_uri = str(request.url_for("oidc_callback", provider=provider))
+    url = await rp.login_authorization_url(
+        provider, request, redirect_uri, max_age=0, prompt="login"
+    )
+    request.session[_REAUTH_SESSION_KEY] = {
+        "caller": user.user_id,
+        "kind": body.kind,
+        "return_to": return_to,
+        "started": int(time.time()),
+        "state": parse_qs(urlsplit(url).query).get("state", [""])[0],
+        "target": body.target,
+    }
+    return OidcLoginResponse(authorization_url=url)

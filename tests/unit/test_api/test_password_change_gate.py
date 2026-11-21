@@ -20,12 +20,12 @@ from fastapi.testclient import TestClient
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
-from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.metrics import PASSWORD_CHANGE_REFUSALS
 from dfe_engine.api.password_change import ALLOWED_BEFORE_CHANGE, PASSWORD_CHANGE_CLAIM
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from dfe_engine.settings import DFESettings
+from tests.support.reauth import create_app_without_reauth
 
 from .conftest import ADMIN_PASSWORD
 
@@ -41,7 +41,7 @@ def _password_of(length: int) -> str:
 @pytest.fixture
 def fresh(api_settings: DFESettings) -> Iterator[TestClient]:
     """The app as a deployment boots it: the admin on its issued password."""
-    app = create_app(settings=api_settings)
+    app = create_app_without_reauth(settings=api_settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             yield client
@@ -284,7 +284,7 @@ class TestWhatAFlaggedSessionReports:
 class TestAcrossARestart:
     def test_the_flag_survives_a_restart(self, api_settings):
         for _ in range(2):
-            app = create_app(settings=api_settings)
+            app = create_app_without_reauth(settings=api_settings)
             try:
                 with TestClient(app, raise_server_exceptions=False) as client:
                     assert _login(client)["password_change_required"] is True
@@ -292,14 +292,14 @@ class TestAcrossARestart:
                 _registries.clear()
 
     def test_the_owners_password_survives_a_restart_and_the_flag_stays_clear(self, api_settings):
-        app = create_app(settings=api_settings)
+        app = create_app_without_reauth(settings=api_settings)
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
                 _change(client, _bearer(_login(client)))
         finally:
             _registries.clear()
 
-        app = create_app(settings=api_settings)
+        app = create_app_without_reauth(settings=api_settings)
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
                 body = _login(client, _OWN_PASSWORD)
@@ -330,7 +330,7 @@ def _sample(exposition: str, name: str, labels: dict[str, str]) -> float | None:
 
 def test_a_refusal_is_counted_by_method_and_area(api_settings):
     manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
-    app = create_app(settings=api_settings, metrics_manager=manager)
+    app = create_app_without_reauth(settings=api_settings, metrics_manager=manager)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             headers = _bearer(_login(client))
@@ -350,7 +350,7 @@ def test_a_refusal_is_counted_by_method_and_area(api_settings):
 
 def test_a_floor_refusal_is_counted_by_route(api_settings):
     manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
-    app = create_app(settings=api_settings, metrics_manager=manager)
+    app = create_app_without_reauth(settings=api_settings, metrics_manager=manager)
     short = _password_of(MIN_ADMIN_PASSWORD_LENGTH - 1)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:

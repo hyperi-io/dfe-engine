@@ -14,8 +14,10 @@ from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
-from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, LinkedIdentity
 from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.identity_links import LinkTicket
+from dfe_engine.auth.jit import JitProvisioner
 from dfe_engine.auth.oidc.adapters.entra import GraphCredentials
 from dfe_engine.auth.oidc.field_rules import FieldProblem
 from dfe_engine.auth.oidc.models import OIDCProvider
@@ -26,6 +28,16 @@ from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
 
 # The env var an Okta provider from make_okta_directory_provider reads its API token from.
 OKTA_API_TOKEN_ENV = "DFE_TEST_OKTA_API_TOKEN"
+
+# What an account with no usable password stores, so verify_password never matches it.
+PASSWORDLESS_HASH = "!"
+
+
+def make_account(
+    *, username: str, password_hash: str = PASSWORDLESS_HASH, **kwargs: object
+) -> Account:
+    """Build an auth.accounts.Account, passwordless unless a hash is given."""
+    return Account.model_validate({"password_hash": password_hash, "username": username, **kwargs})
 
 
 def make_account_store(*, directory: Path) -> AccountStore:
@@ -53,6 +65,29 @@ def make_group(*, name: str, **kwargs: object) -> Group:
 def make_group_store(*, directory: Path) -> GroupStore:
     """Build an auth.groups.GroupStore over a directory of group files."""
     return GroupStore(directory)
+
+
+def make_jit_provisioner(*, account_store: AccountStore, group_store: GroupStore) -> JitProvisioner:
+    """Build an auth.jit.JitProvisioner with no HyperDX client and no provider bindings."""
+    return JitProvisioner(account_store, group_store)
+
+
+def make_link_ticket(
+    *, account: str, email: str, provider: str, subject: str, **kwargs: object
+) -> LinkTicket:
+    """Build an auth.identity_links.LinkTicket."""
+    return LinkTicket.model_validate(
+        {"account": account, "email": email, "provider": provider, "subject": subject, **kwargs}
+    )
+
+
+def make_linked_identity(
+    *, key: str, provider: str, subject: str, **kwargs: object
+) -> LinkedIdentity:
+    """Build an auth.accounts.LinkedIdentity."""
+    return LinkedIdentity.model_validate(
+        {"key": key, "provider": provider, "subject": subject, **kwargs}
+    )
 
 
 def make_local_idp() -> LocalIdp:

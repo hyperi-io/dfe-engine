@@ -86,22 +86,25 @@ class ScopedGrant(BaseModel):
 # The tenant role: holding it never unfences a group or a caller from its org.
 ORG_VIEWER_ROLE = "org_viewer"
 
+# An org's administrator, bound only at that org's scope: a system group grants nothing through it.
+ORG_ADMIN_ROLE = "org_admin"
+
 
 def is_platform_role(role: str, role_config: RoleConfig) -> bool:
     """Whether a system-scope grant of ``role`` may read across orgs.
 
     Only a role the definitions declare and do not mark ``scoped`` may. ``org_viewer``
-    never may, whatever a deployment's definitions say, and an undefined role grants
-    nothing, so it unfences nothing either.
+    and ``org_admin`` never may, whatever a deployment's definitions say, and an
+    undefined role grants nothing, so it unfences nothing either.
 
     Args:
         role: The role name.
         role_config: The role definitions ``authorize()`` reads.
 
     Returns:
-        True for a declared, unscoped role other than ``org_viewer``.
+        True for a declared, unscoped role other than ``org_viewer`` and ``org_admin``.
     """
-    if role == ORG_VIEWER_ROLE:
+    if role in (ORG_ADMIN_ROLE, ORG_VIEWER_ROLE):
         return False
     definition = role_config.roles.get(role)
     return definition is not None and not definition.scoped

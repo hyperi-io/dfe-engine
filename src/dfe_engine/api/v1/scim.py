@@ -60,10 +60,31 @@ from scim2_models import (
     User as ScimUser,
 )
 
-from dfe_engine.api.deps import CurrentUser, provider_bindings, require_platform_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    ReauthGrant,
+    is_own_account,
+    provider_bindings,
+    refuse_without_grant,
+    require_platform_action,
+    require_scim_group_reauth,
+    require_scim_user_reauth,
+)
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
-from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
-from dfe_engine.auth.accounts import AccountExistsError, discard_created
+from dfe_engine.api.v1.account_groups import (
+    check_group_changes,
+    check_role_assignment,
+    org_link_holders,
+    org_role_refusal,
+    scope_of,
+)
+from dfe_engine.auth.accounts import (
+    Account,
+    AccountExistsError,
+    AccountStore,
+    delete_link_records,
+    discard_created,
+)
 from dfe_engine.auth.audit import audit_account_change, audit_group_change
 from dfe_engine.auth.groups import (
     Group,
@@ -73,6 +94,7 @@ from dfe_engine.auth.groups import (
 )
 from dfe_engine.auth.membership import forget_member, groups_held, linked_providers
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import grant_target
 from dfe_engine.auth.scim_mapping import (
     account_to_scim_user,
     generate_provisioning_password,
@@ -172,6 +194,12 @@ async def _parse_body(request: Request):
         return None
 
 
+async def _named_in_body(*, field: str, request: Request) -> str:
+    """The *field* a SCIM create body names, or empty when the body names none."""
+    body = await _parse_body(request)
+    return str(body.get(field) or "") if isinstance(body, dict) else ""
+
+
 def _filter_terms(raw: str) -> dict[str, str] | None:
     """Map each ``eq`` term of an ``and`` filter to its value, or None for any other form."""
     terms: dict[str, str] = {}
@@ -224,6 +252,12 @@ _GROUP_FILTERS: _Forms = {
         g.name == t["id"] and t["members[value]"] in g.members
     ),
 }
+
+
+def _stored_user(*, store: AccountStore, user_id: str) -> Account | None:
+    """The account stored as *user_id*, or None for a link record, which belongs to the account it links to."""
+    account = store.get(user_id)
+    return None if (account is None) or (account.is_link_record) else account
 
 
 def _page_params(request: Request) -> tuple[int, int]:
@@ -308,6 +342,23 @@ def _scim_last_admin_member_removals(
 # -- /Users ---------------------------------------------------
 
 
+async def require_new_scim_group_reauth(
+    request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the group a SCIM create names."""
+    name = await _named_in_body(field="displayName", request=request)
+    target = grant_target(kind="group", name=name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
+async def require_new_scim_user_reauth(
+    request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the account a SCIM create names."""
+    name = await _named_in_body(field="userName", request=request)
+    refuse_without_grant(reauth=reauth, request=request, target=name, user=user)
+
+
 @router.get(
     "/Users",
     dependencies=[Depends(require_platform_action(scopes_dict["account_read"]))],
@@ -316,7 +367,8 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
     """List users (SCIM ListResponse). Supports ``userName eq``, ``externalId eq`` + paging."""
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    accounts = _filtered(request, store.list(), _USER_FILTERS)
+    users = [account for account in store.list() if not (account.is_link_record)]
+    accounts = _filtered(request, users, _USER_FILTERS)
     if isinstance(accounts, JSONResponse):
         return accounts
 
@@ -355,7 +407,7 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
     """Fetch a single user by id (username)."""
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    account = store.get(user_id)
+    account = _stored_user(store=store, user_id=user_id)
     if account is None:
         return scim_error(404, f"User '{user_id}' not found")
     groups = groups_held(account, group_store.list(), bindings=provider_bindings(request))
@@ -367,7 +419,10 @@ async def get_user(user_id: str, user: CurrentUser, request: Request) -> Respons
 
 @router.post(
     "/Users",
-    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["account_write"])),
+        Depends(require_new_scim_user_reauth),
+    ],
 )
 async def create_user(user: CurrentUser, request: Request) -> Response:
     """Provision a user. IdP-owned. Local password is randomised when omitted.
@@ -427,7 +482,10 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
 
 @router.put(
     "/Users/{user_id}",
-    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["account_write"])),
+        Depends(require_scim_user_reauth),
+    ],
 )
 async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a user's writable attributes (SCIM PUT)."""
@@ -438,7 +496,7 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(user_id)
+    existing = _stored_user(store=store, user_id=user_id)
     if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
     try:
@@ -483,7 +541,10 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
 
 @router.patch(
     "/Users/{user_id}",
-    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["account_write"])),
+        Depends(require_scim_user_reauth),
+    ],
 )
 async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision."""
@@ -494,7 +555,7 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(user_id)
+    existing = _stored_user(store=store, user_id=user_id)
     if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
     try:
@@ -547,7 +608,10 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 
 @router.delete(
     "/Users/{user_id}",
-    dependencies=[Depends(require_platform_action(scopes_dict["account_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["account_write"])),
+        Depends(require_scim_user_reauth),
+    ],
 )
 async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
@@ -555,10 +619,10 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
 
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    existing = store.get(user_id)
+    existing = _stored_user(store=store, user_id=user_id)
     if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
-    if user_id == user.user_id:
+    if is_own_account(request=request, user=user, username=user_id):
         return scim_error(403, "Cannot delete your own account")
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
@@ -577,6 +641,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
                 ),
             )
     store.delete(user_id)
+    delete_link_records(store, existing)
     forget_member(group_store, user_id)
     audit_account_change(user.user_id, user_id, "deleted", _audit_details(groups=held))
     return Response(status_code=204)
@@ -636,7 +701,10 @@ async def get_group(group_id: str, user: CurrentUser, request: Request) -> Respo
 
 @router.post(
     "/Groups",
-    dependencies=[Depends(require_platform_action(scopes_dict["group_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["group_write"])),
+        Depends(require_new_scim_group_reauth),
+    ],
 )
 async def create_group(user: CurrentUser, request: Request) -> Response:
     """Provision a group with its member set (member Account.groups kept in sync)."""
@@ -669,6 +737,9 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     )
     if collision is not None:
         return collision
+    refusal = org_role_refusal(group=Group(name=name), members=members, request=request)
+    if refusal is not None:
+        return scim_error(400, refusal, "invalidValue")
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(name, roles=[], description="", members=members)
@@ -687,7 +758,10 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
 
 @router.put(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_platform_action(scopes_dict["group_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["group_write"])),
+        Depends(require_scim_group_reauth),
+    ],
 )
 async def replace_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a group's member set (SCIM PUT)."""
@@ -739,6 +813,13 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     provider = existing.source_provider
     if fields["source_id"] and not provider:
         provider = fields["source_provider"]
+    stored = existing.model_copy(
+        update={"source_id": fields["source_id"], "source_provider": provider}
+    )
+    linked = org_link_holders(group=stored, request=request) if moves_link else []
+    refusal = org_role_refusal(group=stored, members=[*(new - old), *linked], request=request)
+    if refusal is not None:
+        return scim_error(400, refusal, "invalidValue")
     store.update(
         group_id,
         members=new_members,
@@ -760,7 +841,10 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
 
 @router.patch(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_platform_action(scopes_dict["group_write"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["group_write"])),
+        Depends(require_scim_group_reauth),
+    ],
 )
 async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp on group membership (add/remove/replace members)."""
@@ -789,6 +873,9 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     # Checked before anything is written, so a refusal leaves the membership as it was.
     if added or removed:
         check_role_assignment(request, user, group.roles, scope_of(group))
+        refusal = org_role_refusal(group=group, members=added, request=request)
+        if refusal is not None:
+            return scim_error(400, refusal, "invalidValue")
         # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
         store.protected.check_members_replaced(group_id, group.members, members)
         last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=removed)
@@ -809,7 +896,10 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
 
 @router.delete(
     "/Groups/{group_id}",
-    dependencies=[Depends(require_platform_action(scopes_dict["group_delete"]))],
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["group_delete"])),
+        Depends(require_scim_group_reauth),
+    ],
 )
 async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a group. Members are detached first so the store permits removal."""

@@ -145,8 +145,9 @@ a pure customer gets the data plane alone.
 Providers are YAML files (one per provider, filename stem = name) managed by
 `OIDCProviderRegistry`. The model (`src/dfe_engine/auth/oidc/models.py`) holds
 `type` (generic, google, entra_id or okta), `enabled`, `issuer`, `client_id`,
-`client_id_env`, `client_secret_path`, `client_secret_env`, `scopes`, and a
-`groups` block (mode, claim name and the per-provider directory fields).
+`client_id_env`, `client_secret_path`, `client_secret_env`, `scopes`, a
+`groups` block (mode, claim name and the per-provider directory fields) and
+[`trusted_email_domains`](rbac-sign-in.md#linked-sign-ins).
 
 A provider file that does not load, with unreadable YAML or fields that fail validation, is left out of the provider list, the relying party and the sync scheduler. The engine logs it once and counts it on `auth_oidc_providers_skipped_total{reason}` (`unreadable`, `invalid`), and every other provider keeps working.
 

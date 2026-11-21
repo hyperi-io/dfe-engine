@@ -265,8 +265,6 @@ class TestBuiltInOrgViewer:
 
 # Each read gated on a system-scope role check that no handler holds to the caller's orgs.
 UNHELD_READS = [
-    pytest.param("/api/v1/auth/accounts", id="accounts-list"),
-    pytest.param("/api/v1/auth/accounts/admin", id="account"),
     pytest.param("/api/v1/auth/accounts/admin/git-status", id="account-git-status"),
     pytest.param("/api/v1/auth/accounts/admin/attributes", id="account-attributes"),
     pytest.param("/api/v1/auth/accounts/admin/sensitive-attributes", id="account-sensitive"),
@@ -294,6 +292,33 @@ class TestUnheldSystemReads:
     @pytest.mark.parametrize("path", UNHELD_READS)
     def test_an_admin_is_not_refused(self, client, admin_headers, path):
         assert client.get(path, headers=admin_headers).status_code != 403
+
+
+class TestAccountReads:
+    """Account reads are held to the orgs a caller's grants reach, like the org routes."""
+
+    @pytest.fixture
+    def reader(self, app, api_settings, orgs) -> TestClient:
+        define_role(app, "tenant_reader", UNHELD_PERMISSIONS, scoped=True)
+        for username, org in (("ann-acme", "acme"), ("bob-beta", "beta")):
+            app.state.account_store.create(username, "", groups=[])
+            app.state.account_store.update(username, org=org)
+        return caller_in_group(
+            app, api_settings, "reader-acme", roles=["tenant_reader"], org_ids=["acme"]
+        )
+
+    def test_the_list_shows_only_the_org_the_group_names(self, reader):
+        resp = reader.get("/api/v1/auth/accounts")
+
+        assert resp.status_code == 200, resp.text
+        assert [item["username"] for item in resp.json()["items"]] == ["ann-acme"]
+
+    @pytest.mark.parametrize("username", ["admin", "bob-beta"])
+    def test_an_account_outside_it_is_not_found(self, reader, username):
+        assert reader.get(f"/api/v1/auth/accounts/{username}").status_code == 404
+
+    def test_an_account_of_the_org_the_group_names_is_read(self, reader):
+        assert reader.get("/api/v1/auth/accounts/ann-acme").status_code == 200
 
 
 class TestSystemGroupWrite:

@@ -27,9 +27,11 @@ from scalo.logger import logger
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
+    check_action,
     granted_bound_org,
     live_role_config,
     require_action,
+    require_own_org_action,
 )
 from dfe_engine.api.errors import backend_failure
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -167,7 +169,7 @@ def get_view(
 @router.post(
     "/views/{label:path}/execute",
     response_model=QueryResponse,
-    dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["query_execute"]))],
 )
 def execute_view(
     label: str,
@@ -181,7 +183,8 @@ def execute_view(
     The ``org_id`` parameter is always injected from the authenticated
     user's context -- it cannot be overridden by the client. It is the org the
     session's account is bound to, and a view taking it runs only when the caller's
-    groups grant that org or it reads every org (``granted_bound_org``).
+    groups grant that org or it reads every org (``granted_bound_org``). Any other
+    view needs ``query:execute`` at system scope.
     """
     from dfe_engine.query.executor import ViewExecutionError, ViewRequestError
 
@@ -191,6 +194,8 @@ def execute_view(
         raise ProblemError(404, f"View '{label}' not found", code="not_found")
     if view_def.tenant_isolated:
         granted_bound_org(request, user, scopes_dict["query_execute"])
+    else:
+        check_action(request, user, scopes_dict["query_execute"])
     try:
         result = executor.execute(
             label=label,

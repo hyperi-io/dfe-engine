@@ -12,6 +12,8 @@ import re
 import secrets
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
@@ -40,6 +42,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "newuser",
                 "password": _PASSWORD,
                 "email": "newuser@example.com",
@@ -58,7 +61,7 @@ class TestCreateAccount:
         assert "password_hash" not in data
         assert data["email"] == "newuser@example.com"
         assert data["phone"] == ""
-        assert data["name"] == ""
+        assert data["name"] == "Test User"
 
         group = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers)
         assert "newuser" in group.json()["members"]
@@ -90,7 +93,7 @@ class TestCreateAccount:
     def test_create_without_an_email(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "no-email", "password": _PASSWORD},
+            json={"name": "Test User", "username": "no-email", "password": _PASSWORD},
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -101,7 +104,12 @@ class TestCreateAccount:
         # says what leaving the key out says.
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "empty-email", "password": _PASSWORD, "email": ""},
+            json={
+                "name": "Test User",
+                "username": "empty-email",
+                "password": _PASSWORD,
+                "email": "",
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -111,6 +119,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "email-only",
                 "password": _PASSWORD,
                 "email": "only@example.com",
@@ -121,17 +130,37 @@ class TestCreateAccount:
         data = resp.json()
         assert data["email"] == "only@example.com"
         assert data["phone"] == ""
-        assert data["name"] == ""
+        assert data["name"] == "Test User"
+
+    @pytest.mark.parametrize(
+        "body",
+        [{}, {"name": ""}, {"name": "   "}],
+        ids=["missing", "empty", "blank"],
+    )
+    def test_a_missing_or_blank_name_is_refused(self, app, client, admin_headers, body):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"password": _PASSWORD, "username": "nameless", **body},
+            headers=admin_headers,
+        )
+        assert (resp.status_code, [e["field"] for e in resp.json()["errors"]]) == (422, ["name"])
+        assert app.state.account_store.get("nameless") is None
 
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "dupuser", "password": _PASSWORD, "email": "dupuser@example.com"},
+            json={
+                "name": "Test User",
+                "username": "dupuser",
+                "password": _PASSWORD,
+                "email": "dupuser@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "dupuser",
                 "password": secrets.token_urlsafe(16),
                 "email": "dupuser@example.com",
@@ -150,6 +179,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "racer",
                 "password": secrets.token_urlsafe(16),
                 "groups": ["dfe-viewers"],
@@ -168,7 +198,12 @@ class TestCreateAccount:
 
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": username, "password": _PASSWORD, "groups": ["dfe-viewers"]},
+            json={
+                "name": "Test User",
+                "username": username,
+                "password": _PASSWORD,
+                "groups": ["dfe-viewers"],
+            },
             headers=admin_headers,
         )
 
@@ -183,7 +218,7 @@ class TestCreateAccount:
 
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "long-pw", "password": password},
+            json={"name": "Test User", "username": "long-pw", "password": password},
             headers=admin_headers,
         )
 
@@ -197,7 +232,7 @@ class TestCreateAccount:
 
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "fine-name", "password": _PASSWORD},
+            json={"name": "Test User", "username": "fine-name", "password": _PASSWORD},
             headers=admin_headers,
         )
 
@@ -215,7 +250,7 @@ class TestCreateAccount:
         short = _short_password()
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "short-pw", "password": short, "groups": []},
+            json={"name": "Test User", "username": "short-pw", "password": short, "groups": []},
             headers=admin_headers,
         )
         assert resp.status_code == 422, resp.text
@@ -228,7 +263,7 @@ class TestCreateAccount:
 # What the console's CreateAccountForm posts. The setup wizard creates the first
 # user with it, so a field required beyond these leaves a fresh deployment with
 # no way into its own console.
-CONSOLE_CREATE_FIELDS = {"username", "password", "groups"}
+CONSOLE_CREATE_FIELDS = {"groups", "name", "password", "username"}
 
 
 class TestConsoleCreatePayload:
@@ -241,7 +276,12 @@ class TestConsoleCreatePayload:
     def test_the_console_payload_creates_an_account(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "wizard-first-user", "password": _PASSWORD, "groups": []},
+            json={
+                "name": "Test User",
+                "username": "wizard-first-user",
+                "password": _PASSWORD,
+                "groups": [],
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -326,10 +366,98 @@ class TestListAccounts:
         assert searched.status_code == 200
         assert all(a["username"] != "oidc-bob" for a in searched.json()["items"])
 
+    @pytest.mark.parametrize(
+        ("org", "expected"),
+        [("acme", {"org-alice"}), ("", {"no-org-carol"})],
+        ids=["an_org_lists_its_accounts", "empty_lists_the_accounts_bound_to_none"],
+    )
+    def test_list_filters_by_org(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        org: str,
+        expected: set[str],
+    ):
+        store = app.state.account_store
+        for username, account_org in (
+            ("org-alice", "acme"),
+            ("org-bob", "globex"),
+            ("no-org-carol", ""),
+        ):
+            store.create(username=username, password="")
+            store.update(username=username, org=account_org)
+        page = client.get(
+            "/api/v1/auth/accounts",
+            headers=admin_headers,
+            params={"limit": 100, "org": org},
+        ).json()
+        listed = {item["username"] for item in page["items"]}
+        assert listed & {"org-alice", "org-bob", "no-org-carol"} == expected
+
+    def test_list_orders_root_accounts_first_then_by_org(
+        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient
+    ):
+        store = app.state.account_store
+        for username, account_org in (
+            ("order-zed", "globex"),
+            ("order-amy", "acme"),
+            ("order-root-b", ""),
+            ("order-root-a", ""),
+        ):
+            store.create(username=username, password="")
+            store.update(username=username, org=account_org)
+        page = client.get(
+            "/api/v1/auth/accounts",
+            headers=admin_headers,
+            params={"limit": 100, "order_by": "org"},
+        ).json()
+        listed = [item["username"] for item in page["items"]]
+        assert [name for name in listed if name.startswith("order-")] == [
+            "order-root-a",
+            "order-root-b",
+            "order-amy",
+            "order-zed",
+        ]
+
+    @pytest.mark.parametrize(
+        ("roles", "scope", "expected"),
+        [
+            (["admin"], "system", True),
+            (["admin"], "org:acme", False),
+            (["data_viewer"], "system", False),
+        ],
+        ids=[
+            "a_system_admin_group_makes_an_admin",
+            "an_org_admin_group_does_not",
+            "a_group_without_the_admin_role_does_not",
+        ],
+    )
+    def test_admin_flag(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        roles: list[str],
+        scope: str,
+        expected: bool,
+    ):
+        app.state.account_store.create(username="flag-kim", password="")
+        app.state.group_store.create(
+            members=["flag-kim"], name="flag-group", roles=roles, scope=scope
+        )
+        body = client.get("/api/v1/auth/accounts/flag-kim", headers=admin_headers).json()
+        assert body["admin"] is expected
+
     def test_list_blocked_omitted_returns_all(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "listed-blocked", "password": _PASSWORD, "email": "lb@example.com"},
+            json={
+                "name": "Test User",
+                "username": "listed-blocked",
+                "password": _PASSWORD,
+                "email": "lb@example.com",
+            },
             headers=admin_headers,
         )
         client.put(
@@ -347,7 +475,12 @@ class TestListAccounts:
     def test_list_blocked_true_returns_only_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "only-blocked", "password": _PASSWORD, "email": "ob@example.com"},
+            json={
+                "name": "Test User",
+                "username": "only-blocked",
+                "password": _PASSWORD,
+                "email": "ob@example.com",
+            },
             headers=admin_headers,
         )
         client.put(
@@ -370,7 +503,12 @@ class TestListAccounts:
     def test_list_blocked_false_returns_only_unblocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "now-blocked", "password": _PASSWORD, "email": "nb@example.com"},
+            json={
+                "name": "Test User",
+                "username": "now-blocked",
+                "password": _PASSWORD,
+                "email": "nb@example.com",
+            },
             headers=admin_headers,
         )
         client.put(
@@ -500,7 +638,12 @@ class TestAccountExternalFlag:
     def test_list_and_create_include_external(self, client, admin_headers):
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "local-user", "password": _PASSWORD, "email": "local@example.com"},
+            json={
+                "name": "Test User",
+                "username": "local-user",
+                "password": _PASSWORD,
+                "email": "local@example.com",
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201
@@ -518,7 +661,12 @@ class TestUpdateAccount:
         # Create account first
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "updatable", "password": _PASSWORD, "email": "updatable@example.com"},
+            json={
+                "name": "Test User",
+                "username": "updatable",
+                "password": _PASSWORD,
+                "email": "updatable@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.put(
@@ -536,6 +684,7 @@ class TestUpdateAccount:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "grp-sync",
                 "password": _PASSWORD,
                 "email": "grp-sync@example.com",
@@ -692,19 +841,46 @@ class TestTheGroupsAnAccountShows:
         )
         resp = client.put(
             "/api/v1/auth/accounts/contact-clear",
-            json={"phone": "", "name": ""},
+            json={"phone": ""},
             headers=admin_headers,
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["email"] == "gone@example.com"
         assert data["phone"] == ""
-        assert data["name"] == ""
+        assert data["name"] == "Gone"
+
+    def test_a_set_name_cannot_be_cleared(self, app, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"name": "Named", "password": _PASSWORD, "username": "named"},
+            headers=admin_headers,
+        )
+        resp = client.put("/api/v1/auth/accounts/named", json={"name": " "}, headers=admin_headers)
+        assert (
+            resp.status_code,
+            resp.json()["code"],
+            app.state.account_store.get("named").name,
+        ) == (
+            422,
+            "name_required",
+            "Named",
+        )
+
+    def test_an_account_with_no_name_still_takes_an_empty_one(self, app, client, admin_headers):
+        app.state.account_store.create("unnamed", _PASSWORD)
+        resp = client.put(
+            "/api/v1/auth/accounts/unnamed",
+            json={"name": "", "phone": "+1"},
+            headers=admin_headers,
+        )
+        assert (resp.status_code, resp.json()["phone"]) == (200, "+1")
 
     def test_update_empty_email_returns_422(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "email-required",
                 "password": _PASSWORD,
                 "email": "keep@example.com",
@@ -721,7 +897,12 @@ class TestTheGroupsAnAccountShows:
     def test_update_enabled(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "disableme", "password": _PASSWORD, "email": "disableme@example.com"},
+            json={
+                "name": "Test User",
+                "username": "disableme",
+                "password": _PASSWORD,
+                "email": "disableme@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.put(
@@ -747,7 +928,12 @@ class TestTheGroupsAnAccountShows:
     ):
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
@@ -767,7 +953,12 @@ class TestTheGroupsAnAccountShows:
         store = recovery_accounts.state.account_store
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
@@ -800,7 +991,12 @@ class TestTheGroupsAnAccountShows:
     ):
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
@@ -818,7 +1014,12 @@ class TestTheGroupsAnAccountShows:
         store = recovery_accounts.state.account_store
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
@@ -847,7 +1048,12 @@ class TestTheGroupsAnAccountShows:
         store = recovery_accounts.state.account_store
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
@@ -875,7 +1081,12 @@ class TestTheGroupsAnAccountShows:
     def test_update_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "blockme", "password": _PASSWORD, "email": "blockme@example.com"},
+            json={
+                "name": "Test User",
+                "username": "blockme",
+                "password": _PASSWORD,
+                "email": "blockme@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.put(
@@ -1209,7 +1420,12 @@ class TestResetPassword:
     def test_reset_password(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwreset", "password": _PASSWORD, "email": "pwreset@example.com"},
+            json={
+                "name": "Test User",
+                "username": "pwreset",
+                "password": _PASSWORD,
+                "email": "pwreset@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.post(
@@ -1223,7 +1439,12 @@ class TestResetPassword:
     def test_reset_to_current_password_rejected(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "pwsame", "password": _PASSWORD, "email": "pwsame@example.com"},
+            json={
+                "name": "Test User",
+                "username": "pwsame",
+                "password": _PASSWORD,
+                "email": "pwsame@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.post(
@@ -1398,7 +1619,12 @@ class TestDeleteAccount:
     def test_delete_account(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"username": "deleteme", "password": _PASSWORD, "email": "deleteme@example.com"},
+            json={
+                "name": "Test User",
+                "username": "deleteme",
+                "password": _PASSWORD,
+                "email": "deleteme@example.com",
+            },
             headers=admin_headers,
         )
         resp = client.delete("/api/v1/auth/accounts/deleteme", headers=admin_headers)
@@ -1420,6 +1646,7 @@ class TestDeleteAccount:
         created = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "ops",
                 "password": _PASSWORD,
                 "groups": ["dfe-admins"],
@@ -1438,7 +1665,12 @@ class TestDeleteAccount:
         store = recovery_accounts.state.account_store
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
@@ -1506,7 +1738,12 @@ class TestProtectedAccounts:
         """A rename is a create plus a delete, and the delete is what refuses."""
         created = client.post(
             "/api/v1/auth/accounts",
-            json={"username": f"{username}-renamed", "password": _PASSWORD, "groups": []},
+            json={
+                "name": "Test User",
+                "username": f"{username}-renamed",
+                "password": _PASSWORD,
+                "groups": [],
+            },
             headers=admin_headers,
         )
         assert created.status_code == 201

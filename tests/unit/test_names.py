@@ -79,7 +79,10 @@ def test_every_store_object_is_created_under_exactly_the_store_names(name, accep
     assert _accepted(lambda: validate_store_name(name)) is accepted
     assert _accepted(lambda: CreateRoleRequest(name=name, permissions=[])) is accepted
     assert _accepted(lambda: CreateGroupRequest(name=name, roles=[])) is accepted
-    assert _accepted(lambda: CreateAccountRequest(username=name, password=_PASSWORD)) is accepted
+    assert (
+        _accepted(lambda: CreateAccountRequest(name="Test User", password=_PASSWORD, username=name))
+        is accepted
+    )
     assert _accepted(lambda: CreateAPIKeyRequest(name=name)) is accepted
     assert (
         _accepted(lambda: CreateProviderRequest.model_validate({"name": name, **provider}))

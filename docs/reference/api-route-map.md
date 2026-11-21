@@ -8,13 +8,13 @@ One row per operation the engine serves today. **New** is where it goes, and its
 
 | Status | Operations | Meaning |
 |---|---|---|
-| moved | 87 | A new path, method or both |
-| merged into | 9 | Folded into the operation **New** names |
+| moved | 88 | A new path, method or both |
+| merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
-| frozen | 54 | Kept as it is |
+| frozen | 57 | Kept as it is |
 | decide | 128 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 322 | |
+| total | 327 | |
 
 ## Questions
 
@@ -103,12 +103,14 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|---|---|---|---|---|
 | `GET /api/v1/auth/accounts` | `GET /api/v1/identity/accounts` | `identity.accounts.list` | `dfe identity accounts list` | `dfe_identity_accounts_list` | moved | ui 2, cli 1 |  |
 | `POST /api/v1/auth/accounts` | `PUT /api/v1/identity/accounts/{account}` | `identity.accounts.apply` | `dfe identity accounts apply` | `dfe_identity_accounts_apply` | merged into | ui 2, cli 1 | One PUT creates (`If-None-Match: *`) and replaces (`If-Match`). |
+| `GET /api/v1/auth/accounts/availability` | `PUT /api/v1/identity/accounts/{account}` | `identity.accounts.apply` | `dfe identity accounts apply` | `dfe_identity_accounts_apply` | merged into | 0 | Validation is the apply with `dry_run=true`. |
 | `DELETE /api/v1/auth/accounts/{username}` | `DELETE /api/v1/identity/accounts/{account}` | `identity.accounts.delete` | `dfe identity accounts delete` | `dfe_identity_accounts_delete` | moved | ui 2 |  |
 | `GET /api/v1/auth/accounts/{username}` | `GET /api/v1/identity/accounts/{account}` | `identity.accounts.get` | `dfe identity accounts get` | `dfe_identity_accounts_get` | moved | ui 2 |  |
 | `PUT /api/v1/auth/accounts/{username}` | `PUT /api/v1/identity/accounts/{account}` | `identity.accounts.apply` | `dfe identity accounts apply` | `dfe_identity_accounts_apply` | moved | ui 2 |  |
 | `GET /api/v1/auth/accounts/{username}/attributes` | `GET /api/v1/identity/accounts/{account}/attributes` | `identity.accounts.attributes.get` | `dfe identity accounts attributes get` | `dfe_identity_accounts_attributes_get` | moved | 0 |  |
 | `PUT /api/v1/auth/accounts/{username}/attributes` | `PUT /api/v1/identity/accounts/{account}/attributes` | `identity.accounts.attributes.apply` | `dfe identity accounts attributes apply` | `dfe_identity_accounts_attributes_apply` | moved | 0 |  |
 | `GET /api/v1/auth/accounts/{username}/git-status` | `GET /api/v1/identity/accounts/{account}/git-status` | `identity.accounts.git-status` | `dfe identity accounts git-status` | `dfe_identity_accounts_git_status` | moved | 0 |  |
+| `DELETE /api/v1/auth/accounts/{username}/identities/{key}` | `DELETE /api/v1/identity/accounts/{account}/identities/{identity}` | `identity.accounts.identities.delete` | `dfe identity accounts identities delete` | `dfe_identity_accounts_identities_delete` | moved | 0 |  |
 | `POST /api/v1/auth/accounts/{username}/reset-password` | `POST /api/v1/identity/accounts/{account}/reset-password` | `identity.accounts.reset-password` | `dfe identity accounts reset-password` | `dfe_identity_accounts_reset_password` | moved | ui 2 |  |
 | `POST /api/v1/auth/accounts/{username}/rotate-password` | `POST /api/v1/identity/accounts/{account}/rotate-password` | `identity.accounts.rotate-password` | `dfe identity accounts rotate-password` | `dfe_identity_accounts_rotate_password` | moved | 0 |  |
 | `GET /api/v1/auth/accounts/{username}/sensitive-attributes` | `GET /api/v1/identity/accounts/{account}/sensitive-attributes` | `identity.accounts.sensitive-attributes.get` | `dfe identity accounts sensitive-attributes get` | `dfe_identity_accounts_sensitive_attributes_get` | moved | 0 |  |
@@ -241,9 +243,12 @@ Protocol surface: token issue, OIDC or SCIM (RFC 7644) fixes its shape.
 | `POST /api/v1/auth/login` | `POST /api/v1/auth/login` | `auth.login` | `dfe auth login` | - | frozen | ui 6, infra 1, docker 1, cli 1 |  |
 | `POST /api/v1/auth/logout` | `POST /api/v1/auth/logout` | `auth.logout` | `dfe auth logout` | - | frozen | ui 3 |  |
 | `GET /api/v1/auth/me` | `GET /api/v1/auth/me` | `auth.me.list` | `dfe auth me list` | - | frozen | ui 7, cli 1 |  |
+| `POST /api/v1/auth/oidc/link` | `POST /api/v1/auth/oidc/link` | `auth.oidc.link` | `dfe auth oidc link` | - | frozen | 0 |  |
+| `POST /api/v1/auth/oidc/reauth` | `POST /api/v1/auth/oidc/reauth` | `auth.oidc.reauth` | `dfe auth oidc reauth` | - | frozen | 0 |  |
 | `GET /api/v1/auth/oidc/{provider}/callback` | `GET /api/v1/auth/oidc/{provider}/callback` | `auth.oidc.callback.list` | `dfe auth oidc callback list` | - | frozen | ui 2, infra 3 |  |
 | `GET /api/v1/auth/oidc/{provider}/login` | `GET /api/v1/auth/oidc/{provider}/login` | `auth.oidc.login.list` | `dfe auth oidc login list` | - | frozen | ui 3, infra 1 |  |
 | `GET /api/v1/auth/permissions` | `GET /api/v1/auth/permissions` | `auth.permissions.list` | `dfe auth permissions list` | - | frozen | ui 2 |  |
+| `POST /api/v1/auth/reauth` | `POST /api/v1/auth/reauth` | `auth.reauth` | `dfe auth reauth` | - | frozen | 0 |  |
 | `POST /api/v1/auth/refresh` | `POST /api/v1/auth/refresh` | `auth.refresh` | `dfe auth refresh` | - | frozen | ui 5 |  |
 | `GET /api/v1/auth/setup-status` | `GET /api/v1/auth/setup-status` | `auth.setup-status.list` | `dfe auth setup-status list` | - | frozen | ui 4, infra 5, docker 3 |  |
 | `POST /api/v1/auth/setup/retire-admin` | `POST /api/v1/auth/setup/retire-admin` | `auth.setup.retire-admin` | `dfe auth setup retire-admin` | - | frozen | docker 1 |  |

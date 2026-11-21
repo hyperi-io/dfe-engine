@@ -21,7 +21,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.auth import admin_retirement
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -41,6 +40,7 @@ from dfe_engine.settings import (
 )
 from tests.support.accounts import session_token
 from tests.support.orgs import name_your_org
+from tests.support.reauth import create_app_without_reauth
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_USER = secrets.token_urlsafe(16)
@@ -109,7 +109,7 @@ def _complete_setup(app, *, admin_of_our_own: bool = True) -> None:
 def wired(tmp_path: Path):
     """A booted app on a local deploy repo, with setup complete and alice an admin."""
     settings = _settings(tmp_path)
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             _complete_setup(app)
@@ -200,7 +200,7 @@ class TestRetireAdmin:
 
     def test_refused_without_an_admin_of_the_deployments_own(self, tmp_path):
         settings = _settings(tmp_path)
-        app = create_app(settings=settings)
+        app = create_app_without_reauth(settings=settings)
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
                 _complete_setup(app, admin_of_our_own=False)
@@ -222,7 +222,7 @@ class TestRetireAdmin:
     def test_refused_without_a_deploy_repo_to_record_it_in(self, tmp_path):
         """No gitops means nowhere durable for the fact, so the next boot would reseed."""
         settings = _settings(tmp_path, gitops=False)
-        app = create_app(settings=settings)
+        app = create_app_without_reauth(settings=settings)
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
                 _complete_setup(app)
@@ -252,7 +252,7 @@ class TestRetiredDeploymentBoots:
         rebuilt = _settings(tmp_path, auth_sub="rebuilt-auth")
         rebuilt.env = "production"
         rebuilt.auth.local.admin_password = ""
-        rebuilt_app = create_app(settings=rebuilt)
+        rebuilt_app = create_app_without_reauth(settings=rebuilt)
         try:
             with TestClient(rebuilt_app, raise_server_exceptions=False) as rebuilt_client:
                 assert rebuilt_client.get("/api/v1/auth/setup-status").json()["admin_retired"]

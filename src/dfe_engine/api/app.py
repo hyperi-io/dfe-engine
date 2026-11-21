@@ -598,7 +598,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.org_lifecycle = OrgLifecycleManager(
         registry=app.state.org_registry,
         hyperdx_client=hdx_client,
+        group_store=app.state.group_store,
     )
+    # Seeded orgs skip the lifecycle, so every org's admin and viewer groups are made here too.
+    from dfe_engine.orgs.role_groups import ensure_org_role_groups
+
+    for org in app.state.org_registry.list():
+        try:
+            ensure_org_role_groups(group_store=app.state.group_store, org=org.name)
+        except (OSError, ValueError) as exc:  # a missing group must never break startup
+            logger.warning("org role groups not created", org=org.name, error=str(exc))
 
     # Bootstrap JIT provisioner
     from dfe_engine.auth.jit import JitProvisioner
@@ -611,6 +620,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # admin stays out of an IdP's reach.
         admin_name=settings.auth.local.admin_name,
         source_provider_bindings=settings.auth.source_provider_bindings,
+        home_org=app.state.org_registry.home_name_known,
+        provider_registry=app.state.oidc_provider_registry,
     )
 
     # Bootstrap task manager for async background tasks

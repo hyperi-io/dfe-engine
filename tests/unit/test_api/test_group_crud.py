@@ -413,11 +413,11 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
 
     @pytest.fixture
     def acme(self, client, app, admin_headers, api_settings) -> dict[str, dict[str, str]]:
-        """acme-admins (admin) and acme-infra (infra_admin), each with one member."""
+        """acme-ops (admin) and acme-infra (infra_admin), each with one member."""
         resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
         assert resp.status_code == 201, resp.text
         for username, group, role in (
-            ("orgadmin", "acme-admins", "admin"),
+            ("orgadmin", "acme-ops", "admin"),
             ("orgop", "acme-infra", "infra_admin"),
         ):
             app.state.account_store.create(username, secrets.token_urlsafe(16))
@@ -431,19 +431,19 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
 
     def test_an_org_infra_admin_cannot_join_the_org_admins(self, client, app, acme):
         by_post = client.post(
-            "/api/v1/auth/groups/acme-admins/members",
+            "/api/v1/auth/groups/acme-ops/members",
             json={"username": "orgop"},
             headers=acme["orgop"],
         )
         by_put = client.put(
-            "/api/v1/auth/groups/acme-admins",
+            "/api/v1/auth/groups/acme-ops",
             json={"members": ["orgadmin", "orgop"]},
             headers=acme["orgop"],
         )
 
         assert by_post.status_code == 403, by_post.text
         assert by_put.status_code == 403, by_put.text
-        assert app.state.group_store.get("acme-admins").members == ["orgadmin"]
+        assert app.state.group_store.get("acme-ops").members == ["orgadmin"]
 
     def test_an_admin_of_another_org_cannot_join_the_org_admins(
         self, client, app, admin_headers, api_settings, acme
@@ -453,7 +453,7 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
         assert resp.status_code == 201, resp.text
         app.state.account_store.create("crosser", secrets.token_urlsafe(16))
         app.state.group_store.create(
-            "globex-admins", ["admin"], members=["crosser"], scope="org:globex"
+            "globex-ops", ["admin"], members=["crosser"], scope="org:globex"
         )
         app.state.group_store.add_member("acme-infra", "crosser")
         headers = {
@@ -461,13 +461,13 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
         }
 
         resp = client.post(
-            "/api/v1/auth/groups/acme-admins/members",
+            "/api/v1/auth/groups/acme-ops/members",
             json={"username": "crosser"},
             headers=headers,
         )
 
         assert resp.status_code == 403, resp.text
-        assert "crosser" not in app.state.group_store.get("acme-admins").members
+        assert "crosser" not in app.state.group_store.get("acme-ops").members
         created = client.post(
             "/api/v1/auth/groups",
             json={"name": "acme-own", "roles": ["admin"], "scope": "org:acme"},
@@ -477,31 +477,27 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
 
     def test_the_org_admin_still_adds_a_member(self, client, app, acme):
         resp = client.post(
-            "/api/v1/auth/groups/acme-admins/members",
+            "/api/v1/auth/groups/acme-ops/members",
             json={"username": "orgop"},
             headers=acme["orgadmin"],
         )
 
         assert resp.status_code == 200, resp.text
-        assert "orgop" in app.state.group_store.get("acme-admins").members
+        assert "orgop" in app.state.group_store.get("acme-ops").members
 
     def test_an_org_infra_admin_cannot_remove_the_org_admin(self, client, app, acme):
-        resp = client.delete(
-            "/api/v1/auth/groups/acme-admins/members/orgadmin", headers=acme["orgop"]
-        )
+        resp = client.delete("/api/v1/auth/groups/acme-ops/members/orgadmin", headers=acme["orgop"])
 
         assert resp.status_code == 403, resp.text
-        assert app.state.group_store.get("acme-admins").members == ["orgadmin"]
+        assert app.state.group_store.get("acme-ops").members == ["orgadmin"]
 
     def test_the_org_admin_still_removes_a_member(self, client, app, acme):
-        app.state.group_store.add_member("acme-admins", "orgop")
+        app.state.group_store.add_member("acme-ops", "orgop")
 
-        resp = client.delete(
-            "/api/v1/auth/groups/acme-admins/members/orgop", headers=acme["orgadmin"]
-        )
+        resp = client.delete("/api/v1/auth/groups/acme-ops/members/orgop", headers=acme["orgadmin"])
 
         assert resp.status_code == 200, resp.text
-        assert app.state.group_store.get("acme-admins").members == ["orgadmin"]
+        assert app.state.group_store.get("acme-ops").members == ["orgadmin"]
 
 
 class TestScimJoinsNeedTheGroupsRoles:
@@ -1797,6 +1793,7 @@ class TestUpdateGroup:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "memsync-user",
                 "password": secrets.token_urlsafe(16),
                 "email": "memsync-user@example.com",
@@ -1828,6 +1825,7 @@ class TestUpdateGroup:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "rm-sync-user",
                 "password": secrets.token_urlsafe(16),
                 "email": "rm-sync-user@example.com",
@@ -2048,6 +2046,7 @@ class TestLastAdminGroupMembership:
         created = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "ops",
                 "password": secrets.token_urlsafe(16),
                 "groups": ["dfe-admins"],
@@ -2083,6 +2082,7 @@ class TestLastAdminGroupMembership:
         created = client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "ops",
                 "password": secrets.token_urlsafe(16),
                 "groups": ["dfe-admins"],
@@ -2096,3 +2096,45 @@ class TestLastAdminGroupMembership:
         )
         assert resp.status_code == 200, resp.text
         assert "ops" not in recovery_accounts.state.group_store.get("dfe-admins").members
+
+
+class TestLinkedMembers:
+    @pytest.fixture
+    def linked(self, app: FastAPI) -> None:
+        """Link dfe-viewers to Okta's 00g-viewers, whose sign-ins ivy and olga assert, with olga also a stored member."""
+        app.state.group_store.update(
+            name="dfe-viewers", source_id="00g-viewers", source_provider="okta"
+        )
+        for username in ("ivy", "olga"):
+            app.state.account_store.create(groups=["00g-viewers"], password="", username=username)
+            app.state.account_store.update(external=True, source_provider="okta", username=username)
+        app.state.group_store.add_member(group_name="dfe-viewers", username="olga")
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/api/v1/auth/groups?page_size=100", "/api/v1/auth/groups/dfe-viewers"],
+        ids=["list", "detail"],
+    )
+    def test_a_link_holder_is_listed_apart_from_the_stored_members(
+        self, admin_headers: dict[str, str], client: TestClient, linked: None, path: str
+    ):
+        body = client.get(path, headers=admin_headers).json()
+        groups = body["items"] if "items" in body else [body]
+        group = next(item for item in groups if item["name"] == "dfe-viewers")
+        assert (group["linked_members"], "olga" in group["members"], "ivy" in group["members"]) == (
+            ["ivy"],
+            True,
+            False,
+        )
+
+    def test_a_members_write_never_stores_a_link_holder(
+        self, admin_headers: dict[str, str], app: FastAPI, client: TestClient, linked: None
+    ):
+        group = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers).json()
+        resp = client.put(
+            "/api/v1/auth/groups/dfe-viewers",
+            headers=admin_headers,
+            json={"members": group["members"]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert "ivy" not in app.state.group_store.get("dfe-viewers").members

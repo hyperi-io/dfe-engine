@@ -157,8 +157,8 @@ class TestQueries:
                 raise ViewExecutionError(f"Failed to execute view 'x': {SENTINEL}")
 
         app.state.view_executor = _FailingExecutor()
-        # The view is held to the session's org, so the viewer's account is bound to one.
-        app.state.account_store.update("viewer", org="test-org")
+        # The view is held to the session's org, so the root viewer is bound to your org.
+        app.state.org_registry.home.set(actor="test", name="test-org")
 
         resp = client.post(
             "/api/v1/queries/views/analytics/events/execute", headers=viewer_headers, json={}

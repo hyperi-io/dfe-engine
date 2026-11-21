@@ -73,6 +73,21 @@ class TestNeedsUserinfo:
     def test_matches_expected(self, claims: dict, expected: bool):
         assert needs_userinfo(claims=claims) is expected
 
+    @pytest.mark.parametrize(
+        ("claims", "expected"),
+        [
+            ({"sub": "u1", "name": "Ada", "email": "ada@example.com"}, True),
+            (
+                {"sub": "u1", "name": "Ada", "email": "ada@example.com", "email_verified": False},
+                False,
+            ),
+            ({"sub": "u1", "name": "Ada", "email": "ada@example.com", "xms_edov": True}, False),
+        ],
+        ids=["no-proof", "email-verified-false", "xms-edov"],
+    )
+    def test_a_trusted_provider_wants_email_proof(self, claims: dict, expected: bool):
+        assert needs_userinfo(claims=claims, wants_email_proof=True) is expected
+
 
 class TestMergeUserinfoClaims:
     @pytest.mark.parametrize(
