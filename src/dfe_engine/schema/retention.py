@@ -352,6 +352,8 @@ def converge_default_ttl(
         days=days,
         core_altered=len(outcome.core_altered),
         source_tables_altered=sum(1 for t in outcome.report.tables if t.action == "altered"),
+        sources_reconciled=outcome.sources_reconciled,
+        sources_skipped=outcome.sources_skipped,
         failed=len(outcome.failed),
         lease_renewals=lease.renewals,
     )
