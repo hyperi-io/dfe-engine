@@ -221,6 +221,29 @@ class TestWhatTheContainerReads:
                     },
                 },
             ),
+            (
+                "conf_is_written_whole_beside_the_name",
+                {
+                    "engine": "elastic",
+                    "variant": "filebeat.cisco_nexus.default",
+                    "conf": {
+                        "tz_offset": "+10:00",
+                        "tz_map": [{"tz_short": "AEST", "tz_long": "Australia/Sydney"}],
+                    },
+                },
+                {
+                    "name": "filebeat.cisco_nexus.default",
+                    "conf": {
+                        "tz_offset": "+10:00",
+                        "tz_map": [{"tz_short": "AEST", "tz_long": "Australia/Sydney"}],
+                    },
+                },
+            ),
+            (
+                "no_conf_writes_no_conf_key",
+                {"engine": "elastic", "variant": "filebeat.cisco_nexus.default", "conf": {}},
+                {"name": "filebeat.cisco_nexus.default"},
+            ),
         ],
     )
     def test_the_elastic_transform_file_carries_the_sources_mode_and_detect(
@@ -243,9 +266,9 @@ class TestWhatTheContainerReads:
         appconfig.render(crud, settings)
 
         written = _rendered(settings, ELASTIC, "syslog")["source"]
-        assert {k: v for k, v in written.items() if k in {"name", "mode", "detect"}} == expected, (
-            id_
-        )
+        assert {
+            k: v for k, v in written.items() if k in {"name", "mode", "detect", "conf"}
+        } == expected, id_
         assert written["topics"] == ["syslog_land"]
 
     def test_an_app_with_no_overlay_still_gets_the_deployment_base(self, crud, tmp_path):

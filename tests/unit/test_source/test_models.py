@@ -396,6 +396,47 @@ class TestSourceTransform:
         with pytest.raises(ValueError, match=refusal):
             SourceTransform(engine=engine, **fields)
 
+    @pytest.mark.parametrize(
+        ("id_", "conf", "refusal"),
+        [
+            ("empty", {}, None),
+            ("a_zone_map", {"tz_map": [{"tz_short": "AEST", "tz_long": "Australia/Sydney"}]}, None),
+            ("a_scalar_setting", {"tz_offset": "+10:00"}, None),
+            ("a_key_containing_a_secret_name", {"secret_name_hint": "x"}, None),
+            ("just_under_the_size_cap", {"k": "x" * (16 * 1024 - 8)}, None),
+            ("over_the_size_cap", {"k": "x" * (16 * 1024)}, "byte limit"),
+            ("a_secret_at_the_top", {"secret": "x"}, r"conf\.secret names a secret"),
+            ("a_password_in_any_case", {"Password": "x"}, "names a secret"),
+            ("a_token_in_a_nested_map", {"a": {"b": {"token": "x"}}}, r"conf\.a\.b\.token"),
+            ("an_api_key_in_a_list", {"a": [{"api_key": "x"}]}, r"conf\.a\[0\]\.api_key"),
+            ("a_client_secret", {"client_secret": "x"}, "names a secret"),
+        ],
+    )
+    def test_elastic_conf(self, id_, conf, refusal):
+        if refusal is None:
+            assert SourceTransform(engine="elastic", conf=conf).conf == conf
+        else:
+            with pytest.raises(ValueError, match=refusal):
+                SourceTransform(engine="elastic", conf=conf)
+
+    @pytest.mark.parametrize(("levels", "accepted"), [(16, True), (17, False)])
+    def test_elastic_conf_nests_to_sixteen_levels(self, levels, accepted):
+        conf: dict = {}
+        node = conf
+        for _ in range(levels - 1):
+            node["n"] = {}
+            node = node["n"]
+        if accepted:
+            SourceTransform(engine="elastic", conf=conf)
+        else:
+            with pytest.raises(ValueError, match="nests deeper than 16 levels"):
+                SourceTransform(engine="elastic", conf=conf)
+
+    @pytest.mark.parametrize("engine", ["vrl", "vector"])
+    def test_an_app_with_no_conf_path_refuses_conf(self, engine):
+        with pytest.raises(ValueError, match="takes no conf"):
+            SourceTransform(engine=engine, conf={"tz_offset": "+10:00"})
+
 
 # ---------------------------------------------------------------------------
 # SourceFetcher

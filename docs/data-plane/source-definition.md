@@ -113,6 +113,9 @@ transform:
   #   unmatched: fallback               # passthrough (default), fallback or stop
   #   fallback: filebeat.cisco_asa.default   # registry name, required exactly when unmatched is fallback
   #   candidates: []                    # registry names detection may name, empty means every source
+  # conf:                               # elastic only: settings the program reads, set as _conf on each event
+  #   tz_offset: "+10:00"
+  #   tz_map: [{tz_short: AEST, tz_long: Australia/Sydney}]
   config_file: /etc/vector/filebeat.yaml
   env: {}                               # Per-transform ENV overrides
   files: []                             # Enrichment files (CSV, MMDB)
@@ -321,6 +324,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
 | transform mode and detect | `mode` and `detect` only for an app whose manifest declares `mode_path` and `detect_path` (`elastic`). `detect` only with `mode: agentless`, which takes no `variant`. `detect.fallback` is required when `unmatched` is `fallback` and refused otherwise, and `candidates` holds distinct non-blank names |
+| transform conf | `conf` only for an app whose manifest declares `conf_path` (`elastic`), at most 16 KiB serialised and 16 levels deep, with no key named `secret`, `password`, `token`, `api_key` or `client_secret` at any depth. The app refuses, at start, a key its variant never reads |
 | catalogue entry | the intake must be one the entry arrives by, the variant one it compiles to and not one a mounted contract of the deployed transform leaves out (409 `missing_variant`), and the source name a legal label |
 | schema | files exist and pass `SchemaBuilderV2` validation, and carry `_source` as a column (injected if missing) |
 
