@@ -48,6 +48,19 @@ CISCO_ASA_BEATS_BODY: dict[str, Any] = {
     "from_catalogue_intake": "beats",
 }
 
+EDGESTREAM_HUB_SYSLOG_BODY: dict[str, Any] = {
+    "source": "edgestream-hub-syslog",
+    "display_name": "EdgeStream Hub syslog",
+    "description": "Syslog events an EdgeStream Hub forwards, routed on the hub's "
+    "@edgestream.event.src_type.",
+    "match": {"field": "@edgestream.event.src_type", "operator": "equals", "value": "syslog_ng"},
+    "schema": {"meta_schema": "meta/edgestream/hub_syslog"},
+    "transport": None,
+    "archive": False,
+    "from_catalogue_item": "edgestream-hub-syslog",
+    "from_catalogue_intake": "receiver",
+}
+
 COREDNS_LOG_BODY: dict[str, Any] = {
     "source": "coredns-log",
     "display_name": "coredns.log",
@@ -104,6 +117,11 @@ DEFAULT_INTAKE_CASES: list[DefaultIntakeCase] = [
     {"id": "fetcher_first", "entry": "aws-cloudtrail", "expected_default_intake": "fetcher"},
     {"id": "beats_before_receiver", "entry": "cisco-asa", "expected_default_intake": "beats"},
     {"id": "beats_alone", "entry": "coredns-log", "expected_default_intake": "beats"},
+    {
+        "id": "receiver_alone",
+        "entry": "edgestream-hub-syslog",
+        "expected_default_intake": "receiver",
+    },
 ]
 
 
@@ -136,6 +154,18 @@ LOAD_SOURCE_CATALOGUE_CASES: list[LoadSourceCatalogueCase] = [
             "intakes": ("beats", "fetcher"),
             "package": "okta",
             "variants": ("filebeat.okta.default",),
+        },
+    },
+    {
+        "id": "receiver_alone_with_no_transform",
+        "entry": "edgestream-hub-syslog",
+        "expected_block": {
+            "beats": {},
+            "data_stream": "syslog",
+            "framing": "body",
+            "intakes": ("receiver",),
+            "package": "edgestream_hub",
+            "variants": (),
         },
     },
     {
@@ -266,6 +296,18 @@ LOAD_SOURCE_CATALOGUE_SKIP_CASES: list[LoadSourceCatalogueSkipCase] = [
         "id": "no_variants",
         "text": _document(changes={"catalogue.variants": []}),
         "expected_reason": "its catalogue block lists no variants for its transform",
+    },
+    {
+        "id": "a_receiver_only_match_that_is_not_equals",
+        "text": _document(
+            changes={"catalogue.intakes": ["receiver"], "match.operator": "includes"}
+        ),
+        "expected_reason": "its receiver-only body must carry a match of one equals test",
+    },
+    {
+        "id": "a_receiver_only_match_that_is_negated",
+        "text": _document(changes={"catalogue.intakes": ["receiver"], "match.negate": True}),
+        "expected_reason": "its receiver-only body must carry a match of one equals test",
     },
 ]
 
@@ -419,6 +461,18 @@ WRITE_REQUEST_FOR_CASES: list[WriteRequestForCase] = [
         "arguments": {"archive": True, "transport": "bus"},
         "expected_body": {**COREDNS_LOG_BODY, "transport": "bus", "archive": True},
     },
+    {
+        "id": "receiver_alone_matches_the_shippers_own_field",
+        "entry": "edgestream-hub-syslog",
+        "arguments": {},
+        "expected_body": EDGESTREAM_HUB_SYSLOG_BODY,
+    },
+    {
+        "id": "receiver_alone_renamed_keeps_the_shippers_field",
+        "entry": "edgestream-hub-syslog",
+        "arguments": {"intake": "receiver", "name": "estate-syslog"},
+        "expected_body": {**EDGESTREAM_HUB_SYSLOG_BODY, "source": "estate-syslog"},
+    },
 ]
 
 
@@ -443,6 +497,13 @@ WRITE_REQUEST_FOR_REJECT_CASES: list[WriteRequestForRejectCase] = [
         "arguments": {"variant": "filebeat.cisco_asa.json"},
         "message": "catalogue entry 'cisco-asa' has no variant 'filebeat.cisco_asa.json'; it has "
         "filebeat.cisco_asa.default",
+    },
+    {
+        "id": "a_variant_on_an_entry_that_runs_no_transform",
+        "entry": "edgestream-hub-syslog",
+        "arguments": {"variant": "filebeat.edgestream_hub.default"},
+        "message": "catalogue entry 'edgestream-hub-syslog' has no variant "
+        "'filebeat.edgestream_hub.default'; it has none, as it runs no transform",
     },
     {
         "id": "a_name_that_is_not_a_label",
