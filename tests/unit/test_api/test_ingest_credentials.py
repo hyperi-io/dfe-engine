@@ -323,7 +323,7 @@ def acme_admin(client, app, admin_headers, api_settings, orgs) -> dict[str, str]
     resp = client.post(
         "/api/v1/auth/groups",
         json={
-            "name": "acme-admins",
+            "name": "acme-ops",
             "roles": ["admin"],
             "scope": "org:acme",
             "members": ["acme-admin"],

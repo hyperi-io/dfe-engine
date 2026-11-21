@@ -329,7 +329,7 @@ class TestLoadBuiltin:
         config = RoleConfig.load_builtin()
         assert config is not None
 
-    def test_load_builtin_has_all_nine_roles(self):
+    def test_load_builtin_has_every_role(self):
         config = RoleConfig.load_builtin()
         expected_roles = {
             "admin",
@@ -339,6 +339,7 @@ class TestLoadBuiltin:
             "infra_admin",
             "infra_viewer",
             "ingest_admin",
+            "org_admin",
             "org_viewer",
             "dfe_operator",
         }

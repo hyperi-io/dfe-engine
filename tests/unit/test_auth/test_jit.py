@@ -9,6 +9,7 @@
 import asyncio
 import gc
 import json
+import re
 import warnings
 
 import pytest
@@ -32,6 +33,17 @@ from tests.support.failing_stores import StampFailingAccountStore
 from tests.support.loopback import CountingListener
 from tests.support.present import present
 from tests.support.racing_stores import RacingAccountStore
+from tests.unit.test_auth.factories import make_jit_provisioner, make_link_ticket
+from tests.unit.test_auth.jit_cases import (
+    COMPLETE_LINK_STALE_CASES,
+    ENSURE_ACCOUNT_LINK_CASES,
+    ENSURE_ACCOUNT_LINK_REFUSED_CASES,
+    ENTRA_SUBJECT,
+    JANE,
+    CompleteLinkStaleCase,
+    EnsureAccountLinkCase,
+    EnsureAccountLinkRefusedCase,
+)
 
 NO_LOOP_EVENT = "JIT HyperDX invite skipped - no running event loop"
 
@@ -251,6 +263,176 @@ NO_ROLE_MESSAGE = (
     "OIDC login refused: no DFE group with a role is linked to your identity provider "
     "groups. Ask a DFE administrator to link one."
 )
+
+
+def _linked_jane(*, accounts: AccountStore, groups: GroupStore) -> JitProvisioner:
+    """Store an okta account for jane, link an entra sign-in to it, and return the provisioner."""
+    accounts.create("jane-okta", "", email=JANE)
+    accounts.update(
+        "jane-okta", email_verified=True, external=True, source_provider="okta", subject="00u1"
+    )
+    jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+    jit.ensure_account(ENTRA_SUBJECT, ["dfe-analysts"], "entra", email=JANE, email_verified=True)
+    return jit
+
+
+class TestEnsureAccountLinks:
+    @pytest.mark.parametrize(
+        "case", ENSURE_ACCOUNT_LINK_CASES, ids=[case["id"] for case in ENSURE_ACCOUNT_LINK_CASES]
+    )
+    def test_matches_expected(self, stores, case: EnsureAccountLinkCase):
+        accounts, groups = stores
+        for account in case["stored"]:
+            accounts.put(account=account, allow_protected=True)
+        jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+        returned = jit.ensure_account(
+            ENTRA_SUBJECT,
+            ["dfe-analysts"],
+            "entra",
+            email=case["email"],
+            email_verified=case["email_verified"],
+        )
+        record = accounts.get(ENTRA_SUBJECT)
+        assert (
+            returned.username,
+            [identity.key for identity in returned.identities],
+            record.linked_to,
+        ) == (case["expected_username"], case["expected_identity_keys"], case["expected_linked_to"])
+
+    @pytest.mark.parametrize(
+        "case",
+        ENSURE_ACCOUNT_LINK_REFUSED_CASES,
+        ids=[case["id"] for case in ENSURE_ACCOUNT_LINK_REFUSED_CASES],
+    )
+    def test_refused(self, stores, case: EnsureAccountLinkRefusedCase):
+        accounts, groups = stores
+        for account in case["stored"]:
+            accounts.put(account=account)
+        jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+        with pytest.raises(case["expected_error"], match=re.escape(case["expected_message"])):
+            jit.ensure_account(
+                ENTRA_SUBJECT,
+                case["oidc_groups"],
+                "entra",
+                email=JANE,
+                email_verified=case["email_verified"],
+            )
+        assert accounts.list() == case["stored"]
+
+    def test_a_linked_session_binds_the_account(self, stores):
+        accounts, groups = stores
+        _linked_jane(accounts=accounts, groups=groups)
+        assert account_for_session_subject(accounts, ENTRA_SUBJECT).username == "jane-okta"
+
+    def test_a_later_login_records_its_groups_on_its_entry(self, stores):
+        accounts, groups = stores
+        jit = _linked_jane(accounts=accounts, groups=groups)
+        returned = jit.ensure_account(
+            ENTRA_SUBJECT, ["dfe-admins", "dfe-analysts"], "entra", email=JANE
+        )
+        assert (returned.username, returned.identities[0].groups, returned.groups) == (
+            "jane-okta",
+            ["dfe-admins", "dfe-analysts"],
+            [],
+        )
+
+    def test_a_later_login_holding_no_role_ends_every_session(self, stores):
+        accounts, groups = stores
+        jit = _linked_jane(accounts=accounts, groups=groups)
+        before = accounts.get("jane-okta").session_generation
+        with pytest.raises(JitNoRoleError, match=re.escape(NO_ROLE_MESSAGE)):
+            jit.ensure_account(ENTRA_SUBJECT, ["unlinked-team"], "entra", email=JANE)
+        assert accounts.get("jane-okta").session_generation == before + 1
+
+    def test_a_disabled_account_refuses_its_linked_sign_ins(self, stores):
+        accounts, groups = stores
+        jit = _linked_jane(accounts=accounts, groups=groups)
+        accounts.update("jane-okta", enabled=False)
+        with pytest.raises(JitAccountUnavailableError, match="Account disabled"):
+            jit.ensure_account(ENTRA_SUBJECT, ["dfe-analysts"], "entra", email=JANE)
+
+    def test_another_providers_login_cannot_use_a_link_record(self, stores):
+        accounts, groups = stores
+        jit = _linked_jane(accounts=accounts, groups=groups)
+        with pytest.raises(JitIdentityCollisionError, match="OIDC login refused"):
+            jit.ensure_account(ENTRA_SUBJECT, ["dfe-analysts"], "google", email=JANE)
+
+    def test_a_proxied_email_change_drops_the_proof(self, stores):
+        accounts, groups = stores
+        jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account(
+            ENTRA_SUBJECT, ["dfe-analysts"], "entra", email=JANE, email_verified=True
+        )
+        returned = jit.ensure_account(
+            ENTRA_SUBJECT, ["dfe-analysts"], "entra", email="evil@corp.com"
+        )
+        assert (returned.email, returned.email_verified) == ("evil@corp.com", False)
+
+    def test_a_link_record_nothing_lists_starts_again(self, stores):
+        accounts, groups = stores
+        jit = _linked_jane(accounts=accounts, groups=groups)
+        accounts.delete("jane-okta")
+        returned = jit.ensure_account(ENTRA_SUBJECT, ["dfe-analysts"], "entra", email=JANE)
+        assert (returned.username, returned.linked_to, returned.source_provider) == (
+            ENTRA_SUBJECT,
+            "",
+            "entra",
+        )
+
+
+class TestCompleteLink:
+    def test_links_the_local_account(self, stores):
+        accounts, groups = stores
+        accounts.create("kaz", "", email=JANE)
+        jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+        ticket = make_link_ticket(
+            account="kaz",
+            email=JANE,
+            groups=["dfe-analysts"],
+            provider="entra",
+            subject=ENTRA_SUBJECT,
+        )
+        returned = jit.complete_link(ticket=ticket)
+        bound = account_for_session_subject(accounts, ENTRA_SUBJECT)
+        assert (returned.username, [i.key for i in returned.identities], bound.username) == (
+            "kaz",
+            [ENTRA_SUBJECT],
+            "kaz",
+        )
+
+    def test_a_repeated_redemption_keeps_one_link(self, stores):
+        accounts, groups = stores
+        accounts.create("kaz", "", email=JANE)
+        jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+        ticket = make_link_ticket(
+            account="kaz",
+            email=JANE,
+            groups=["dfe-analysts"],
+            provider="entra",
+            subject=ENTRA_SUBJECT,
+        )
+        jit.complete_link(ticket=ticket)
+        returned = jit.complete_link(ticket=ticket)
+        assert (returned.username, [i.key for i in returned.identities]) == ("kaz", [ENTRA_SUBJECT])
+
+    @pytest.mark.parametrize(
+        "case", COMPLETE_LINK_STALE_CASES, ids=[case["id"] for case in COMPLETE_LINK_STALE_CASES]
+    )
+    def test_stale(self, stores, case: CompleteLinkStaleCase):
+        accounts, groups = stores
+        for account in case["stored"]:
+            accounts.put(account=account)
+        jit = make_jit_provisioner(account_store=accounts, group_store=groups)
+        ticket = make_link_ticket(
+            account="kaz",
+            email=JANE,
+            groups=["dfe-analysts"],
+            provider="entra",
+            subject=ENTRA_SUBJECT,
+        )
+        with pytest.raises(JitIdentityCollisionError, match="OIDC login refused") as refused:
+            jit.complete_link(ticket=ticket)
+        assert (refused.value.reason, accounts.list()) == ("link_stale", case["stored"])
 
 
 class TestALoginThatWouldHoldNoRole:

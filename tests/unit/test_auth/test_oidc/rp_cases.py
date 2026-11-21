@@ -290,6 +290,58 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
             issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
         ),
     },
+    {
+        "id": "email_verified_vouches_for_the_email",
+        "claims": {"sub": "00u2", "email": "jane@corp.com", "email_verified": True},
+        "expected_identity": make_normalized_identity(
+            email="jane@corp.com", email_verified=True, subject="00u2"
+        ),
+        "provider": make_oidc_provider(issuer="https://acme.okta.com", type="okta"),
+    },
+    {
+        "id": "email_verified_sent_as_a_string",
+        "claims": {"sub": "00u2", "email": "jane@corp.com", "email_verified": " True "},
+        "expected_identity": make_normalized_identity(
+            email="jane@corp.com", email_verified=True, subject="00u2"
+        ),
+        "provider": make_oidc_provider(issuer="https://acme.okta.com", type="okta"),
+    },
+    {
+        "id": "email_verified_false",
+        "claims": {"sub": "00u2", "email": "jane@corp.com", "email_verified": False},
+        "expected_identity": make_normalized_identity(email="jane@corp.com", subject="00u2"),
+        "provider": make_oidc_provider(issuer="https://acme.okta.com", type="okta"),
+    },
+    {
+        "id": "entra_xms_edov_vouches_for_the_email",
+        "claims": {"sub": "pairwise-sub", "email": "jane@corp.com", "xms_edov": True},
+        "expected_identity": make_normalized_identity(
+            email="jane@corp.com", email_verified=True, subject="pairwise-sub"
+        ),
+        "provider": make_oidc_provider(
+            issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
+        ),
+    },
+    {
+        "id": "entra_email_without_xms_edov_is_unverified",
+        "claims": {"sub": "pairwise-sub", "email": "jane@corp.com"},
+        "expected_identity": make_normalized_identity(
+            email="jane@corp.com", subject="pairwise-sub"
+        ),
+        "provider": make_oidc_provider(
+            issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
+        ),
+    },
+    {
+        "id": "username_fallback_is_never_verified",
+        "claims": {"sub": "pairwise-sub", "email_verified": True, "upn": "jane@corp.com"},
+        "expected_identity": make_normalized_identity(
+            email="jane@corp.com", subject="pairwise-sub"
+        ),
+        "provider": make_oidc_provider(
+            issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
+        ),
+    },
 ]
 
 FILL_FROM_USERINFO_ENDPOINT_CASES: list[FillFromUserinfoEndpointCase] = [
@@ -391,6 +443,30 @@ MERGE_USERINFO_CLAIMS_CASES: list[MergeUserinfoClaimsCase] = [
         "expected_claims": {"sub": "s", "aud": "dfe"},
         "id_token_claims": {"sub": "s", "aud": "dfe"},
         "userinfo_claims": {"sub": "s"},
+    },
+    {
+        "id": "userinfo_email_brings_its_proof",
+        "expected_claims": {"sub": "s", "email": "jane@corp.com", "email_verified": True},
+        "id_token_claims": {"sub": "s", "email_verified": False},
+        "userinfo_claims": {"sub": "s", "email": "jane@corp.com", "email_verified": True},
+    },
+    {
+        "id": "userinfo_email_without_proof_drops_the_token_proof",
+        "expected_claims": {"sub": "s", "email": "jane@corp.com"},
+        "id_token_claims": {"sub": "s", "xms_edov": True},
+        "userinfo_claims": {"sub": "s", "email": "jane@corp.com"},
+    },
+    {
+        "id": "userinfo_fills_the_proof_of_the_same_email",
+        "expected_claims": {"sub": "s", "email": "Jane@corp.com", "email_verified": True},
+        "id_token_claims": {"sub": "s", "email": "Jane@corp.com"},
+        "userinfo_claims": {"sub": "s", "email": "jane@corp.com", "email_verified": True},
+    },
+    {
+        "id": "id_token_email_keeps_its_own_proof",
+        "expected_claims": {"sub": "s", "email": "a@corp.com", "email_verified": False},
+        "id_token_claims": {"sub": "s", "email": "a@corp.com", "email_verified": False},
+        "userinfo_claims": {"sub": "s", "email": "b@corp.com", "email_verified": True},
     },
 ]
 

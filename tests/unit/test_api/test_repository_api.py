@@ -72,7 +72,7 @@ def repo_setup(client: TestClient, app, fake_ch, admin_headers: dict[str, str]) 
             account_store.create(username, f"pw-{username}")
 
     for name, roles, scope, members in (
-        ("acme-admins", ["admin"], "org:acme", ["orgadmin"]),
+        ("acme-ops", ["admin"], "org:acme", ["orgadmin"]),
         ("acme-analysts", ["data_analyst"], "org:acme", ["orguser"]),
         ("globex-analysts", ["data_analyst"], "org:globex", ["globexuser"]),
     ):

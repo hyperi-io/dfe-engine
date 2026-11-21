@@ -10,7 +10,7 @@
 
 from collections.abc import Collection, Iterable, Mapping
 
-from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, LinkedIdentity
 from dfe_engine.auth.groups import Group, GroupStore
 
 
@@ -71,7 +71,8 @@ def groups_held(
     The group files are the authority, so a member removed there loses the group even
     while the account's own list still names it. An IdP-owned account's own list is
     what its IdP asserts, and holds only the groups those identifiers are linked to
-    (:func:`linked_groups`), beside any an operator added it to by hand.
+    (:func:`linked_groups`), beside any an operator added it to by hand. Each IdP
+    sign-in linked to the account adds the groups its own assertion links to.
 
     Args:
         account: The account.
@@ -82,7 +83,12 @@ def groups_held(
         Sorted group names.
     """
     held = groups_held_by(
-        account.username, account.groups, account.source_provider, groups, bindings=bindings
+        account.username,
+        account.groups,
+        account.source_provider,
+        groups,
+        bindings=bindings,
+        identities=account.identities,
     )
     return [group.name for group in held]
 
@@ -94,6 +100,7 @@ def groups_held_by(
     groups: Iterable[Group],
     *,
     bindings: Mapping[str, str],
+    identities: Iterable[LinkedIdentity] = (),
 ) -> list[Group]:
     """The stored groups an account with these fields holds, the lookup :func:`groups_held` makes.
 
@@ -107,15 +114,19 @@ def groups_held_by(
             linked group.
         groups: Every stored group, listed once by the caller.
         bindings: ``auth.source_provider_bindings``.
+        identities: The IdP sign-ins linked to the account, each linking groups by
+            its own assertion under its own provider.
 
     Returns:
         The held groups, sorted by name.
     """
     listed = list(groups)
     held = {group.name: group for group in listed if username in group.members}
-    if stamp:
-        providers = linked_providers([stamp], bindings)
-        held.update((group.name, group) for group in linked_groups(asserted, listed, providers))
+    assertions = [(stamp, asserted)] if stamp else []
+    assertions.extend((identity.provider, identity.groups) for identity in identities)
+    for provider, identifiers in assertions:
+        providers = linked_providers([provider], bindings)
+        held.update((group.name, group) for group in linked_groups(identifiers, listed, providers))
     return [held[name] for name in sorted(held)]
 
 

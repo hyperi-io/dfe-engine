@@ -23,6 +23,7 @@ Usage::
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.identity_links import link_candidates
 from dfe_engine.auth.models import AuthContext, AuthenticationError
 
 
@@ -57,6 +58,24 @@ class LocalAuthProvider:
     ) -> None:
         self._accounts = account_store
         self._groups = group_store
+
+    def account_name(self, identifier: str) -> str:
+        """The account name *identifier* signs in as: itself, or for an email the one local account vouched for holding it.
+
+        An email no local account holds, or several do, comes back unchanged and so fails as an unknown name would. An email the owner set themselves never counts, as in linking.
+        """
+        if ("@" not in identifier) or (self._accounts.get(identifier) is not None):
+            return identifier
+        holders = [
+            account
+            for account in link_candidates(
+                accounts=self._accounts.scan(),
+                email=identifier,
+                protected=self._accounts.protected.usernames,
+            )
+            if not (account.source_provider)
+        ]
+        return holders[0].username if len(holders) == 1 else identifier
 
     def authenticate(
         self,

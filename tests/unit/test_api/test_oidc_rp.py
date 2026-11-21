@@ -333,7 +333,11 @@ class _FakeOidcRp:
 
     async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
         return NormalizedIdentity(
-            email="stub@example.test", groups=["g1"], name="Stub User", subject="stub-user"
+            email_verified=True,
+            email="stub@example.test",
+            groups=["g1"],
+            name="Stub User",
+            subject="stub-user",
         )
 
 
@@ -678,7 +682,11 @@ class _SubjectOidcRp(_FakeOidcRp):
 
     async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
         return NormalizedIdentity(
-            email="evil@example.test", groups=["g1"], name="Taken Over", subject=self._subject
+            email_verified=True,
+            email="evil@example.test",
+            groups=["g1"],
+            name="Taken Over",
+            subject=self._subject,
         )
 
 
@@ -690,7 +698,11 @@ class _GroupsOidcRp(_FakeOidcRp):
 
     async def handle_callback(self, provider: str, request) -> NormalizedIdentity:
         return NormalizedIdentity(
-            email="stub@example.test", groups=self._groups, name="Stub User", subject="stub-user"
+            email_verified=True,
+            email="stub@example.test",
+            groups=self._groups,
+            name="Stub User",
+            subject="stub-user",
         )
 
 
@@ -777,6 +789,8 @@ def _break_the_account_store(app) -> None:
         ("no-role", "no_role_granted", ("auth.login.denied", "no_role_granted")),
         ("disabled", "account_disabled", ("auth.login.denied", "account_disabled")),
         ("blocked", "account_blocked", ("auth.login.denied", "account_blocked")),
+        ("email-held", "email_held", ("auth.login.denied", "email_held")),
+        ("email-untrusted", "email_untrusted", ("auth.login.denied", "email_untrusted")),
         ("local-admin", "unauthorized", ("auth.login.denied", "protected_account")),
         ("store-down", "service_unavailable", ("auth.jit.provision_failed", None)),
     ],
@@ -793,6 +807,13 @@ def test_a_refused_browser_login_returns_to_the_console_with_the_code(
         store.create("stub-user", "", groups=["dfe-viewers"])
         flag = {"enabled": False} if refusal == "disabled" else {"blocked": True}
         store.update("stub-user", external=True, source_provider="stub", **flag)
+    elif refusal == "email-held":
+        app.state.oidc_rp = _SubjectOidcRp("new-user")
+        store.create("kim", "kim-password-12", email="evil@example.test")
+        store.create("kim2", "kim-password-12", email="evil@example.test")
+    elif refusal == "email-untrusted":
+        app.state.oidc_rp = _SubjectOidcRp("new-user")
+        app.state.oidc_provider_registry.update("stub", trusted_email_domains=["other.example"])
     elif refusal == "local-admin":
         app.state.oidc_rp = _SubjectOidcRp("admin")
     else:

@@ -58,7 +58,12 @@ class TestAnAccountsGroupsNeedTheirRoles:
     def test_creating_an_account_in_the_admin_group_is_refused(self, client, app, mgr):
         resp = client.post(
             ACCOUNTS,
-            json={"username": "mallory", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "mallory",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=mgr,
         )
 
@@ -147,7 +152,12 @@ class TestAnAccountsGroupsNeedTheirRoles:
     def test_groups_whose_roles_the_caller_holds_are_accepted(self, client, app, mgr):
         resp = client.post(
             ACCOUNTS,
-            json={"username": "helper", "password": _PASSWORD, "groups": ["account-managers"]},
+            json={
+                "name": "Test User",
+                "username": "helper",
+                "password": _PASSWORD,
+                "groups": ["account-managers"],
+            },
             headers=mgr,
         )
 
@@ -157,7 +167,12 @@ class TestAnAccountsGroupsNeedTheirRoles:
     def test_admin_still_puts_an_account_into_the_admin_group(self, client, app, admin_headers):
         resp = client.post(
             ACCOUNTS,
-            json={"username": "second", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            json={
+                "name": "Test User",
+                "username": "second",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
             headers=admin_headers,
         )
 
@@ -276,7 +291,9 @@ class TestADeletedAccountLeavesItsGroups:
     ):
         deleted = client.delete(path, headers=admin_headers)
         recreated = client.post(
-            ACCOUNTS, json={"username": "ghost", "password": _PASSWORD}, headers=admin_headers
+            ACCOUNTS,
+            json={"name": "Test User", "username": "ghost", "password": _PASSWORD},
+            headers=admin_headers,
         )
 
         assert deleted.status_code == 204, deleted.text

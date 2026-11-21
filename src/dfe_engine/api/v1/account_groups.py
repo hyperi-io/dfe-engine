@@ -42,14 +42,18 @@ from scalo.logger import logger
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
+    ReauthGrant,
     bound_account,
+    bound_org,
     check_action,
     groups_granting,
     is_action_allowed,
     live_role_config,
     provider_bindings,
     reads_every_org,
+    refuse_without_grant,
     require_action,
+    require_group_reauth,
     require_platform_action,
 )
 from dfe_engine.auth import AuthorizationError, RoleConfig, Scope
@@ -61,11 +65,14 @@ from dfe_engine.auth.groups import (
     source_id_holder,
     validate_group_scope,
 )
-from dfe_engine.auth.models import ungrantable_roles
+from dfe_engine.auth.membership import groups_held_by
+from dfe_engine.auth.models import ORG_ADMIN_ROLE, ungrantable_roles
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import grant_target
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 from dfe_engine.names import StoreName
+from dfe_engine.orgs.role_groups import org_role_breach
 from dfe_engine.yaml_utils import YAMLError
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
@@ -207,6 +214,17 @@ def _visible_group(request: Request, user, name: str) -> Group:
     ):
         raise _not_found(name)
     return group
+
+
+def _refuse_org_admin_at_system_scope(*, name: str, roles: Iterable[str], scope: str) -> None:
+    """Refuse 422 ``org_admin_org_only`` when the system group *name* would grant ``org_admin``, which binds only at an org's scope."""
+    if (ORG_ADMIN_ROLE in roles) and (not (scope.startswith("org:"))):
+        raise ProblemError(
+            422,
+            f"Role {ORG_ADMIN_ROLE!r} is bound only at an org's scope, so system group "
+            f"{name!r} may not grant it",
+            code="org_admin_org_only",
+        )
 
 
 def _refuse_link_below_system_scope(request: Request, user) -> None:
@@ -403,6 +421,69 @@ def check_group_changes(
             )
 
 
+def _org_role_message(*, account_org: str, group: str, username: str) -> str:
+    """The refusal naming *username*, its org and the group it may not hold."""
+    return (
+        f"Account {username!r} belongs to org {account_org!r}, and an org account holds "
+        f"only its own org's admin or viewer group, so group {group!r} is refused"
+    )
+
+
+def org_link_holders(*, group: Group, request: Request) -> list[str]:
+    """The accounts that would hold *group*, as it would be stored, through an IdP sign-in its link matches."""
+    if not (group.source_id):
+        return []
+    bindings = provider_bindings(request)
+    unlisted = group.model_copy(update={"members": []})
+    return [
+        account.username
+        for account in request.app.state.account_store.scan()
+        if groups_held_by(
+            account.username,
+            account.groups,
+            account.source_provider,
+            [unlisted],
+            bindings=bindings,
+            identities=account.identities,
+        )
+    ]
+
+
+def org_role_refusal(*, group: Group, members: Iterable[str], request: Request) -> str | None:
+    """Why *group*, as it would be stored, may not be held by one of *members*, else None."""
+    store = request.app.state.account_store
+    home = bound_org(account_org="", request=request)
+    for username in sorted(set(members)):
+        account = store.get(username)
+        if account is None:
+            continue
+        breach = org_role_breach(account_org=account.org, groups=[group], home_org=home)
+        if breach is not None:
+            return _org_role_message(account_org=account.org, group=breach, username=username)
+    return None
+
+
+def refuse_org_role_breach(
+    *, account_org: str, groups: Iterable[Group], request: Request, username: str
+) -> None:
+    """Refuse 422 ``org_role_only`` when an account of an org other than yours would hold *groups* outside that org's admin and viewer roles."""
+    home = bound_org(account_org="", request=request)
+    breach = org_role_breach(account_org=account_org, groups=groups, home_org=home)
+    if breach is not None:
+        raise ProblemError(
+            422,
+            _org_role_message(account_org=account_org, group=breach, username=username),
+            code="org_role_only",
+        )
+
+
+def refuse_org_role_members(*, group: Group, members: Iterable[str], request: Request) -> None:
+    """Refuse 422 ``org_role_only`` when *group*, as it would be stored, may not be held by one of *members*."""
+    refusal = org_role_refusal(group=group, members=members, request=request)
+    if refusal is not None:
+        raise ProblemError(422, refusal, code="org_role_only")
+
+
 def _refuse_last_admin_member_removals(
     request: Request,
     *,
@@ -431,7 +512,20 @@ def _refuse_last_admin_member_removals(
 # -- Endpoints ------------------------------------------------
 
 
-@router.post("", response_model=GroupResponse, status_code=201)
+async def require_new_group_reauth(
+    body: CreateGroupRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the group the body creates."""
+    target = grant_target(kind="group", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
+@router.post(
+    "",
+    response_model=GroupResponse,
+    status_code=201,
+    dependencies=[Depends(require_new_group_reauth)],
+)
 async def create_group(
     body: CreateGroupRequest,
     user: CurrentUser,
@@ -449,6 +543,7 @@ async def create_group(
 
     target = Group(name=body.name, scope=body.scope)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(target))
+    _refuse_org_admin_at_system_scope(name=body.name, roles=body.roles, scope=body.scope)
     if body.source_id or body.source_provider:
         _refuse_link_below_system_scope(request, user)
     check_role_assignment(request, user, body.roles, scope_of(target))
@@ -458,7 +553,6 @@ async def create_group(
     # With no registry to check against, no org is known to exist.
     if org and (org_registry is None or org_registry.get(org) is None):
         raise ProblemError(422, f"Org '{org}' not found", code="invalid_scope")
-
     changes_source_id, changes_source_provider = _link_changes(
         before=None, source_id=body.source_id, source_provider=body.source_provider
     )
@@ -469,6 +563,19 @@ async def create_group(
         request=request,
         source_id=body.source_id,
         source_provider=body.source_provider,
+    )
+    # After the link checks: a Group cannot hold a source_id without its provider.
+    stored = Group(
+        name=body.name,
+        roles=body.roles,
+        scope=body.scope,
+        source_id=body.source_id,
+        source_provider=body.source_provider,
+    )
+    refuse_org_role_members(
+        group=stored,
+        members=[*body.members, *org_link_holders(group=stored, request=request)],
+        request=request,
     )
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
@@ -553,7 +660,7 @@ async def get_group(
     return _response(_visible_group(request, user, name))
 
 
-@router.put("/{name}", response_model=GroupResponse)
+@router.put("/{name}", response_model=GroupResponse, dependencies=[Depends(require_group_reauth)])
 async def update_group(
     name: str,
     body: UpdateGroupRequest,
@@ -569,6 +676,8 @@ async def update_group(
     account_store: AccountStore = request.app.state.account_store
     existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(existing))
+    if body.roles is not None:
+        _refuse_org_admin_at_system_scope(name=name, roles=body.roles, scope=existing.scope)
     changes_members = body.members is not None and set(body.members) != set(existing.members)
     source_id = existing.source_id if body.source_id is None else body.source_id
     source_provider = (
@@ -594,6 +703,22 @@ async def update_group(
     )
     if changes_source_id:
         _refuse_identifier_collision(groups=store.list(), name="", source_id=source_id, target=name)
+    if (body.roles is not None) or (changes_members) or (changes_link):
+        stored = existing.model_copy(
+            update={
+                "roles": body.roles if body.roles is not None else existing.roles,
+                "source_id": source_id,
+                "source_provider": source_provider,
+            }
+        )
+        # A members-only change leaves who signs in through the link as it was.
+        linked = (
+            org_link_holders(group=stored, request=request)
+            if (body.roles is not None) or (changes_link)
+            else []
+        )
+        members = body.members if body.members is not None else existing.members
+        refuse_org_role_members(group=stored, members=[*members, *linked], request=request)
     update_fields: dict[str, object] = {}
     details: dict[str, object] = {}
     if body.roles is not None:
@@ -645,7 +770,12 @@ async def update_group(
     return _response(group)
 
 
-@router.post("/{name}/members", response_model=GroupResponse, status_code=200)
+@router.post(
+    "/{name}/members",
+    response_model=GroupResponse,
+    status_code=200,
+    dependencies=[Depends(require_group_reauth)],
+)
 async def add_member(
     name: str,
     body: AddMemberRequest,
@@ -664,6 +794,7 @@ async def add_member(
     if body.username not in existing.members:
         # The new member takes every role the group carries.
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+        refuse_org_role_members(group=existing, members=[body.username], request=request)
     store.add_member(name, body.username)
     sync_account_groups_for_membership_change(
         account_store,
@@ -677,7 +808,12 @@ async def add_member(
     return _response(group)
 
 
-@router.delete("/{name}/members/{username}", response_model=GroupResponse, status_code=200)
+@router.delete(
+    "/{name}/members/{username}",
+    response_model=GroupResponse,
+    status_code=200,
+    dependencies=[Depends(require_group_reauth)],
+)
 async def remove_member(
     name: str,
     username: str,
@@ -712,7 +848,7 @@ async def remove_member(
     return _response(group)
 
 
-@router.delete("/{name}", status_code=204)
+@router.delete("/{name}", status_code=204, dependencies=[Depends(require_group_reauth)])
 async def delete_group(
     name: str,
     user: CurrentUser,
@@ -770,7 +906,10 @@ async def get_group_attributes(
 
 @router.put(
     "/{name}/attributes",
-    dependencies=[Depends(require_action(scopes_dict["group_attributes_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["group_attributes_write"])),
+        Depends(require_group_reauth),
+    ],
 )
 async def put_group_attributes(
     name: str,
@@ -814,7 +953,10 @@ async def get_group_sensitive_attributes(
 
 @router.put(
     "/{name}/sensitive-attributes",
-    dependencies=[Depends(require_action(scopes_dict["group_attributes_write_sensitive"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["group_attributes_write_sensitive"])),
+        Depends(require_group_reauth),
+    ],
 )
 async def put_group_sensitive_attributes(
     name: str,

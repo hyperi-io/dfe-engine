@@ -14,8 +14,10 @@ from fastapi.testclient import TestClient
 from dfe_engine.settings import DFESettings
 from tests.support.accounts import session_token
 from tests.unit.test_api.root_accounts_cases import (
+    ORG_DISPLAY_NAME_CASES,
     ORG_FILTER_CASES,
     SESSION_ORG_CASES,
+    OrgDisplayNameCase,
     OrgFilterCase,
     SessionOrgCase,
 )
@@ -79,3 +81,20 @@ class TestListFilter:
         ).json()
         listed = {item["username"] for item in page["items"]}
         assert listed & {"acme-amy", "globex-bob", "root-kim"} == case["expected"]
+
+
+class TestOrgDisplayName:
+    @pytest.mark.parametrize(
+        "case", ORG_DISPLAY_NAME_CASES, ids=[case["id"] for case in ORG_DISPLAY_NAME_CASES]
+    )
+    def test_matches_expected(
+        self,
+        admin_headers: dict[str, str],
+        app: FastAPI,
+        client: TestClient,
+        case: OrgDisplayNameCase,
+    ):
+        _name_your_org(app=app, name=case["your_org"])
+        _store_kim(app=app, org=case["account_org"])
+        body = client.get("/api/v1/auth/accounts/kim", headers=admin_headers).json()
+        assert body["org_display_name"] == case["expected_org_display_name"]

@@ -49,6 +49,16 @@ def test_five_failures_make_the_next_attempt_wait(client, app, audit_events):
     )
 
 
+def test_failures_by_email_count_against_the_account_name(client, app):
+    password = secrets.token_urlsafe(16)
+    app.state.account_store.create("carol", password, email="carol@corp.com")
+    failures = [_attempt(client, "Carol@corp.com", "wrong-password").status_code for _ in range(5)]
+
+    waiting = _attempt(client, "carol", password)
+
+    assert (failures, waiting.status_code) == ([401] * 5, 429)
+
+
 def test_a_waiting_attempt_checks_no_password(client, app, monkeypatch):
     _account(app)
     for _ in range(5):

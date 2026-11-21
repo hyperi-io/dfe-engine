@@ -555,3 +555,41 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
     },
 ]
+
+
+class TrustedEmailDomainsCase(TypedDict):
+    """One write of a provider's trusted email domains and the list it stores."""
+
+    id: str
+    expected_domains: list[str]
+    sent_domains: list[str]
+
+
+TRUSTED_EMAIL_DOMAINS_CASES: list[TrustedEmailDomainsCase] = [
+    {
+        "id": "folded_and_deduplicated",
+        "expected_domains": ["corp.com", "eu.corp.com"],
+        "sent_domains": [" Corp.COM ", "corp.com", "eu.corp.com"],
+    },
+    {
+        "id": "blank_entries_dropped",
+        "expected_domains": ["corp.com"],
+        "sent_domains": ["", "corp.com", "  "],
+    },
+    {"id": "empty_links_nothing", "expected_domains": [], "sent_domains": []},
+]
+
+
+class TrustedEmailDomainsRefusedCase(TypedDict):
+    """One trusted email domain list the provider API refuses."""
+
+    id: str
+    sent_domains: list[str]
+
+
+TRUSTED_EMAIL_DOMAINS_REFUSED_CASES: list[TrustedEmailDomainsRefusedCase] = [
+    {"id": "an_address", "sent_domains": ["jane@corp.com"]},
+    {"id": "a_wildcard", "sent_domains": ["corp.com", "*.corp.com"]},
+    {"id": "a_url", "sent_domains": ["https://corp.com"]},
+    {"id": "a_single_label", "sent_domains": ["localhost"]},
+]

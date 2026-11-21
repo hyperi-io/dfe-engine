@@ -47,6 +47,9 @@ if TYPE_CHECKING:
 # Claims a userinfo response may fill. Groups stay ID-token-only because they decide roles.
 _USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
 
+# Claims that vouch for ``email``: the OIDC standard one and Entra's optional domain-owner claim.
+_EMAIL_PROOF_CLAIMS = ("email_verified", "xms_edov")
+
 DIRECTORY_GROUPS_FALLBACKS = "auth_oidc_login_directory_fallbacks_total"
 DIRECTORY_GROUPS_REFUSALS = "auth_oidc_login_directory_refusals_total"
 
@@ -116,6 +119,9 @@ class NormalizedIdentity(BaseModel):
     email: str = ""
     """The ``email`` claim, else the first of ``preferred_username`` and ``upn`` that holds an ``@``, else empty."""
 
+    email_verified: bool = False
+    """The IdP vouches for ``email``: it came from the ``email`` claim with ``email_verified`` or ``xms_edov`` true."""
+
     name: str = ""
     """The display name: the ``name`` claim, else ``preferred_username``, else empty."""
 
@@ -129,6 +135,9 @@ class NormalizedIdentity(BaseModel):
     only a ``_claim_names`` pointer). The RP fills it by calling the directory
     API. A consumer that only reads ``groups`` need not care - this is a
     diagnostic flag so the enrichment path is observable in logs and tests."""
+
+    auth_time: int | None = None
+    """The ID token's ``auth_time``: when the person last entered credentials at the IdP, in epoch seconds."""
 
     groups_unresolved: bool = False
     """True when the directory gave no answer and the token carried no groups.
@@ -179,13 +188,26 @@ def _display_name(*, claims: dict[str, Any]) -> str:
     )
 
 
-def needs_userinfo(*, claims: dict[str, Any]) -> bool:
-    """Whether the ID token is too thin to name the user: no display name, or no email.
+def _vouched(*, claims: dict[str, Any], name: str) -> bool:
+    """Whether the claim is true, as a JSON boolean or the string ``"true"`` some IdPs send."""
+    value = claims.get(name)
+    return (value is True) or (isinstance(value, str) and value.strip().casefold() == "true")
+
+
+def needs_userinfo(*, claims: dict[str, Any], wants_email_proof: bool = False) -> bool:
+    """Whether the ID token is too thin: no display name, no email, or no email proof where one is wanted.
 
     A token with a name and no email would otherwise skip userinfo, and the email
     would fall back to the username claims even where the IdP holds the address.
+    Okta's authorization-code ID token carries no ``email_verified``, which only
+    its userinfo answers, so a provider trusted for email domains asks for it.
     """
-    return not (_display_name(claims=claims)) or not (_claim_text(claims=claims, name="email"))
+    unproved = (wants_email_proof) and not any(claim in claims for claim in _EMAIL_PROOF_CLAIMS)
+    return (
+        not (_display_name(claims=claims))
+        or not (_claim_text(claims=claims, name="email"))
+        or (unproved)
+    )
 
 
 def extract_identity(
@@ -198,7 +220,8 @@ def extract_identity(
     ``preferred_username`` and then ``upn``, taking the first that holds an ``@``:
     Entra emits no ``email`` for a cloud-only user with no mailbox, and its UPN is
     an address, while a bare username such as Keycloak's is not one and leaves the
-    email blank. The display name is ``name``, falling back to ``preferred_username``. Groups
+    email blank. ``email_verified`` holds only for an address from the ``email`` claim
+    itself, never one of those fallbacks. The display name is ``name``, falling back to ``preferred_username``. Groups
     come from the claim named by ``provider.groups.claim_name`` (default
     ``groups``), matching the token_claim resolution mode used across the DFE
     auth paths. A provider in ``manual`` mode yields no groups at all, because its users' membership is managed in dfe-engine and the token grants nothing.
@@ -213,12 +236,14 @@ def extract_identity(
         A NormalizedIdentity with subject, email, and groups.
     """
     subject = str(userinfo_claims.get("sub") or "")
-    email = str(userinfo_claims.get("email") or "")
+    claimed_email = str(userinfo_claims.get("email") or "")
+    email = claimed_email
     if not email:
         usernames = (
             str(userinfo_claims.get(claim) or "") for claim in ("preferred_username", "upn")
         )
         email = next((value for value in usernames if "@" in value), "")
+    vouched = any(_vouched(claims=userinfo_claims, name=claim) for claim in _EMAIL_PROOF_CLAIMS)
     name = _display_name(claims=userinfo_claims)
     groups = []
     overflowed = False
@@ -226,8 +251,20 @@ def extract_identity(
         claim_name = provider.groups.claim_name or "groups"
         groups = _coerce_groups(raw=userinfo_claims.get(claim_name))
         overflowed = _has_group_overage(claim_name=claim_name, claims=userinfo_claims)
+    raw_auth_time = userinfo_claims.get("auth_time")
+    auth_time = (
+        int(raw_auth_time)
+        if (isinstance(raw_auth_time, (int, float))) and (not isinstance(raw_auth_time, bool))
+        else None
+    )
     return NormalizedIdentity(
-        email=email, groups=groups, groups_overflowed=overflowed, name=name, subject=subject
+        auth_time=auth_time,
+        email=email,
+        email_verified=bool(claimed_email) and vouched,
+        groups=groups,
+        groups_overflowed=overflowed,
+        name=name,
+        subject=subject,
     )
 
 
@@ -246,7 +283,10 @@ def merge_userinfo_claims(
     """Fill the profile claims the ID token left blank from the userinfo response.
 
     Only ``email``, ``name`` and ``preferred_username`` are filled, and only where
-    the ID token has no non-blank value. A userinfo response for another subject
+    the ID token has no non-blank value. An ``email`` filled from userinfo brings
+    that response's ``email_verified`` and ``xms_edov`` with it, since each vouches
+    only for the address it arrived with. Where both name the same address, userinfo
+    fills a proof the ID token lacks. A userinfo response for another subject
     raises UserinfoSubjectMismatchError, because OIDC Core 5.3.4 forbids using it.
     """
     if userinfo_claims.get("sub") != id_token_claims.get("sub"):
@@ -256,6 +296,18 @@ def merge_userinfo_claims(
         value = _claim_text(claims=userinfo_claims, name=claim)
         if value and not (_claim_text(claims=id_token_claims, name=claim)):
             merged[claim] = value
+    token_email = _claim_text(claims=id_token_claims, name="email")
+    info_email = _claim_text(claims=userinfo_claims, name="email")
+    same_email = bool(token_email) and token_email.casefold() == info_email.casefold()
+    if merged.get("email") != id_token_claims.get("email"):
+        for claim in _EMAIL_PROOF_CLAIMS:
+            merged.pop(claim, None)
+            if claim in userinfo_claims:
+                merged[claim] = userinfo_claims[claim]
+    elif same_email:
+        for claim in _EMAIL_PROOF_CLAIMS:
+            if (claim in userinfo_claims) and (claim not in id_token_claims):
+                merged[claim] = userinfo_claims[claim]
     return merged
 
 
@@ -367,15 +419,17 @@ class OidcRelyingParty:
         provider_name: str,
         request: Request,
         redirect_uri: str,
+        **params: str | int,
     ) -> str:
         """Begin the auth-code flow and return the IdP authorize URL (SPA-friendly).
 
         Same session state as ``login_redirect`` (state + nonce in
         ``request.session``), but returns the URL for the browser to navigate
         explicitly--``fetch()`` cannot reliably follow a 302 to a cross-origin IdP.
+        *params* join the authorize request, such as ``prompt`` and ``max_age``.
         """
         client = self._client(provider_name)
-        rv = await client.create_authorization_url(redirect_uri)
+        rv = await client.create_authorization_url(redirect_uri, **params)
         await client.save_authorize_data(request, redirect_uri=redirect_uri, **rv)
         return str(rv["url"])
 
@@ -421,7 +475,7 @@ class OidcRelyingParty:
         """The identity a validated token response names, its groups read from the directory where the token carries none."""
         # Authlib parses + validates the id_token and exposes its claims here.
         userinfo = dict(token.get("userinfo") or {})
-        if needs_userinfo(claims=userinfo):
+        if needs_userinfo(claims=userinfo, wants_email_proof=bool(provider.trusted_email_domains)):
             userinfo = await fill_from_userinfo_endpoint(
                 claims=userinfo, client=client, issuer=provider.issuer, token=token
             )

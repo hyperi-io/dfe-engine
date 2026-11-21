@@ -20,6 +20,7 @@ from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
     CurrentUser,
+    ReauthGrant,
     Settings,
     _get_client_ip,
     bound_account,
@@ -27,12 +28,13 @@ from dfe_engine.api.deps import (
     check_action,
     create_access_token,
     get_role_config,
+    jwt_authority_for,
     refuse_denied_account,
+    refuse_without_grant,
     resolve_live_grants_for_user,
-    resolve_live_groups_for_user,
     session_accounts,
+    throttled,
 )
-from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
 from dfe_engine.api.v1.hyperdx import hyperdx_identity
 from dfe_engine.api.v1.oidc_login import TOKEN_COOKIE, token_cookie_secure
@@ -50,6 +52,13 @@ from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.login_throttle import LoginThrottle
 from dfe_engine.auth.models import AuthenticationError, ScopedGrant, held_grants
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import (
+    REAUTH_HEADER,
+    REAUTH_LIFETIME,
+    ReauthKind,
+    grant_target,
+    mint_reauth_grant,
+)
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import (
     SESSION_CLAIM,
@@ -60,9 +69,29 @@ from dfe_engine.auth.sessions import (
     token_lifetime,
 )
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
+from dfe_engine.names import StoreName
 from dfe_engine.settings import DFESettings
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+class ReauthRequest(BaseModel):
+    """Your own password, and the account you are about to edit."""
+
+    kind: ReauthKind = Field("account", description="What the target names")
+    password: str = Field(description="Your own password")
+    target: StoreName = Field(
+        description="The account, group, role, sign-in provider or API key you are about to change"
+    )
+
+
+class ReauthResponse(BaseModel):
+    """A grant for editing one account."""
+
+    grant: str = Field(
+        description=f"Send it as the {REAUTH_HEADER} header on every edit of that account"
+    )
+    expires_in: int = Field(description="Seconds the grant stays valid")
 
 
 def request_time() -> int:
@@ -79,7 +108,7 @@ RequestTime = Annotated[int, Depends(request_time)]
 class LoginRequest(BaseModel):
     """Body for a local login."""
 
-    username: str = Field(description="Account name (admin, operator, viewer)")
+    username: str = Field(description="Account name, or the email of a local account")
     password: str = Field(description="Plaintext password")
 
 
@@ -221,19 +250,6 @@ async def persist_session_end(request: Request, account: Account, *, actor: str)
     await run_blocking(account_durability.publish_session_end, gc, account, actor=actor)
 
 
-def throttled(request: Request, wait: int) -> ProblemError:
-    """The 429 a sign-in or password check answers while its caller must wait, counted."""
-    metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
-    route = str(getattr(request.scope.get("route"), "path", "")) or "unknown"
-    metrics.sign_in_throttled(route)
-    return ProblemError(
-        429,
-        f"Too many failed attempts; try again in {wait} seconds",
-        code="too_many_attempts",
-        headers={"Retry-After": str(wait)},
-    )
-
-
 def _mint(
     data: dict,
     account: Account | None,
@@ -294,15 +310,17 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     provider: LocalAuthProvider = request.app.state.auth_provider
     throttle: LoginThrottle = request.app.state.login_throttle
     client_ip = _get_client_ip(request)
+    # An email resolves first, so it shares the account name's throttle.
+    username = await run_blocking(provider.account_name, body.username)
 
-    wait = throttle.retry_after(body.username, client_ip)
+    wait = throttle.retry_after(username, client_ip)
     if wait:
-        audit_login_denied(body.username, "jwt", client_ip, "throttled")
+        audit_login_denied(username, "jwt", client_ip, "throttled")
         raise throttled(request, wait)
 
     # The break-glass account bypasses the IdP, so every attempt is audited.
     breakglass_off = False
-    if body.username == breakglass.USERNAME:
+    if username == breakglass.USERNAME:
         gc = getattr(request.app.state, "gitcrud", None)
         breakglass_off = not breakglass.is_enabled(gc)
         audit_breakglass_login(client_ip, not breakglass_off, "disabled" if breakglass_off else "")
@@ -310,17 +328,17 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     try:
         auth_ctx = await run_blocking(
             provider.authenticate,
-            body.username,
+            username,
             body.password,
             request_id=request.headers.get("X-Request-ID"),
             client_ip=client_ip,
             user_agent=request.headers.get("User-Agent"),
         )
     except AuthenticationError as exc:
-        throttle.failed(body.username, client_ip)
+        throttle.failed(username, client_ip)
         # Audited here rather than in the app-wide 401 handler, which also answers
         # expired tokens on ordinary requests - those are already audited in deps.py.
-        audit_login_denied(body.username, "jwt", client_ip, str(exc))
+        audit_login_denied(username, "jwt", client_ip, str(exc))
         raise
     if breakglass_off:
         # Only after the password passed, so a guesser gets the generic 401 and a failed
@@ -334,22 +352,24 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo.",
             code="breakglass_disabled",
         )
-    throttle.succeeded(body.username)
+    throttle.succeeded(username)
+
+    # The bound account's groups decide, as on every request: the provider sees members only, never linked sign-ins or the org-role rule.
+    live = resolve_live_grants_for_user(request, auth_ctx.user_id)
+    roles = live.roles
 
     # The password is exchanged for a token here, so this is the login the
     # audit trail counts - not the per-request token check in get_current_user.
-    audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
+    audit_login_success(auth_ctx.user_id, "jwt", client_ip, roles)
 
     change_required = _password_change_required(request, auth_ctx.user_id)
-    # The provider resolves role names only. The claim needs the scope each is bound at.
-    live = resolve_live_grants_for_user(request, auth_ctx.user_id)
     data = _token_data(
         auth_ctx.user_id,
         bound_org(account_org=auth_ctx.org_id, request=request),
-        auth_ctx.roles,
+        roles,
         live.grants,
-        auth_ctx.groups,
-        auth_ctx.org_ids,
+        live.groups,
+        live.org_ids,
         change_required=change_required,
         role_config=get_role_config(request),
     )
@@ -434,7 +454,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
         user.org_id,
         live.roles,
         live.grants,
-        resolve_live_groups_for_user(request, user.user_id),
+        live.groups,
         live.org_ids,
         change_required=change_required,
         role_config=get_role_config(request),
@@ -530,7 +550,21 @@ def get_setup_status(request: Request) -> SetupStatus:
     return evaluate_initial_setup(request)
 
 
-@router.post("/setup/retire-admin", response_model=SetupStatus, dependencies=[WRITE_TURN])
+async def require_retire_reauth(
+    request: Request, settings: Settings, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: another caller's re-auth grant for the bootstrap admin it retires. The admin retiring itself needs none."""
+    admin_name = admin_account_name(settings.auth.local.admin_name)
+    if user.user_id != admin_name:
+        check_action(request, user, scopes_dict["account_write"])
+        refuse_without_grant(reauth=reauth, request=request, target=admin_name, user=user)
+
+
+@router.post(
+    "/setup/retire-admin",
+    response_model=SetupStatus,
+    dependencies=[WRITE_TURN, Depends(require_retire_reauth)],
+)
 def retire_bootstrap_admin(
     user: CurrentUser,
     request: Request,
@@ -589,3 +623,37 @@ def retire_bootstrap_admin(
         )
     audit_account_change(user.user_id, admin_name, "retired the bootstrap admin")
     return evaluate_initial_setup(request)
+
+
+@router.post("/reauth", response_model=ReauthResponse)
+async def reauth(body: ReauthRequest, user: CurrentUser, request: Request) -> ReauthResponse:
+    """Re-enter your password to earn a grant for editing one account, which every edit of it needs.
+
+    403 ``invalid_password`` on a wrong password, counted against the sign-in throttle. 409 ``reauth_via_idp`` for a caller with no local password, who re-signs in at its identity provider instead.
+    """
+    client_ip = _get_client_ip(request)
+    account = bound_account(request, user.user_id)
+    if (account is None) or (account.external) or (not (account.password_hash)):
+        raise ProblemError(
+            409,
+            "You sign in through an identity provider: confirm it is you there instead",
+            code="reauth_via_idp",
+        )
+    throttle = request.app.state.login_throttle
+    wait = throttle.retry_after(account.username, client_ip)
+    if wait:
+        audit_login_denied(account.username, "reauth", client_ip, "throttled")
+        raise throttled(request, wait)
+    store = request.app.state.account_store
+    verified = await run_blocking(store.verify_account_password, account, body.password)
+    if not (verified):
+        throttle.failed(account.username, client_ip)
+        audit_login_denied(account.username, "reauth", client_ip, "invalid_password")
+        raise ProblemError(403, "Invalid password", code="invalid_password")
+    throttle.succeeded(account.username)
+    grant = mint_reauth_grant(
+        authority=jwt_authority_for(request.app.state.settings),
+        caller=user.user_id,
+        target=grant_target(kind=body.kind, name=body.target),
+    )
+    return ReauthResponse(expires_in=int(REAUTH_LIFETIME.total_seconds()), grant=grant)

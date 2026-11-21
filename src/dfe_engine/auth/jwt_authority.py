@@ -239,16 +239,19 @@ class JwtAuthority:
             expires_delta=timedelta(seconds=ttl_seconds),
         )
 
-    def verify(self, token: str) -> dict[str, Any]:
-        """Verify signature + issuer + expiry. Raises ``InvalidTokenError`` on any failure."""
-        header = jwt.get_unverified_header(token)
-        kid = header.get("kid")
+    def _verify_key(self, token: str) -> EllipticCurvePublicKey:
+        """The trusted public key the token's ``kid`` names, else ``InvalidTokenError``."""
+        kid = jwt.get_unverified_header(token).get("kid")
         key = self._verify_keys.get(kid) if kid else None
         if key is None:
             raise InvalidTokenError(f"unknown or missing key id (kid={kid!r})")
+        return key
+
+    def verify(self, token: str) -> dict[str, Any]:
+        """Verify signature + issuer + expiry. Raises ``InvalidTokenError`` on any failure."""
         claims = jwt.decode(
             token,
-            key,
+            self._verify_key(token=token),
             algorithms=[self._alg],
             issuer=self._issuer,
             leeway=_CLOCK_SKEW_SECONDS,
@@ -259,6 +262,18 @@ class JwtAuthority:
         if "aud" in claims:
             raise InvalidTokenError(f"token audience {claims['aud']!r} is not for this issuer")
         return claims
+
+    def verify_for(self, token: str, *, audience: str) -> dict[str, Any]:
+        """Verify a token this engine minted for *audience*: signature, issuer, expiry and that audience, else ``InvalidTokenError``."""
+        return jwt.decode(
+            token,
+            self._verify_key(token=token),
+            algorithms=[self._alg],
+            audience=audience,
+            issuer=self._issuer,
+            leeway=_CLOCK_SKEW_SECONDS,
+            options={"require": ["aud", "exp", "iss"]},
+        )
 
     def jwks(self) -> dict[str, list[dict[str, str]]]:
         """The public JWK Set for ``/.well-known/jwks.json`` (public halves only)."""

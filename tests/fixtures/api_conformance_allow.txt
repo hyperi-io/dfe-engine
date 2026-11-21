@@ -8,6 +8,7 @@ dry-run DELETE /api/v1/apps/{service}/{instance}
 dry-run DELETE /api/v1/apps/{service}/{instance}/config
 dry-run DELETE /api/v1/apps/{service}/{instance}/files/{set_name}/{filename}
 dry-run DELETE /api/v1/auth/accounts/{username}
+dry-run DELETE /api/v1/auth/accounts/{username}/identities/{key}
 dry-run DELETE /api/v1/auth/api-keys/{short_token}
 dry-run DELETE /api/v1/auth/groups/{name}
 dry-run DELETE /api/v1/auth/groups/{name}/members/{username}
@@ -153,6 +154,7 @@ hierarchy DELETE /api/v1/apps/{service}/{instance}
 hierarchy DELETE /api/v1/apps/{service}/{instance}/config
 hierarchy DELETE /api/v1/apps/{service}/{instance}/files/{set_name}/{filename}
 hierarchy DELETE /api/v1/auth/accounts/{username}
+hierarchy DELETE /api/v1/auth/accounts/{username}/identities/{key}
 hierarchy DELETE /api/v1/auth/api-keys/{short_token}
 hierarchy DELETE /api/v1/auth/groups/{name}
 hierarchy DELETE /api/v1/auth/groups/{name}/members/{username}
@@ -194,6 +196,7 @@ hierarchy GET /api/v1/apps/{service}/{instance}/scaling
 hierarchy GET /api/v1/apps/{service}/{instance}/status
 hierarchy GET /api/v1/apps/{service}/{instance}/values
 hierarchy GET /api/v1/auth/accounts
+hierarchy GET /api/v1/auth/accounts/availability
 hierarchy GET /api/v1/auth/accounts/me
 hierarchy GET /api/v1/auth/accounts/{username}
 hierarchy GET /api/v1/auth/accounts/{username}/attributes
@@ -375,6 +378,7 @@ hierarchy PUT /api/v1/sigma/providers/{name}
 hierarchy PUT /api/v1/sigma/views/{source_name}
 if-match DELETE /api/v1/alerts/destinations/{name}
 if-match DELETE /api/v1/auth/accounts/{username}
+if-match DELETE /api/v1/auth/accounts/{username}/identities/{key}
 if-match DELETE /api/v1/auth/api-keys/{short_token}
 if-match DELETE /api/v1/auth/groups/{name}
 if-match DELETE /api/v1/auth/groups/{name}/members/{username}

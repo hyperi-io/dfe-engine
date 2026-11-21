@@ -30,6 +30,7 @@ from dfe_engine.settings import (
 )
 from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.core_sources import write_landing_definition
+from tests.support.reauth import waive_reauth
 from tests.unit.test_query.view_fakes import OneViewCatalog, RecordingClient, view_definition
 
 # The admin password these fixtures inject, as a deployment's secret store would.
@@ -138,6 +139,7 @@ def app(api_settings: DFESettings):
     endpoint works against store-backed accounts.
     """
     application = create_app(settings=api_settings)
+    waive_reauth(application)
 
     # The lifespan will call bootstrap_auth, but we need to also seed
     # extra test accounts (operator, viewer) that aren't created by

@@ -46,7 +46,14 @@ ADMINS_ID = "0d1e2f30-0000-4000-8000-00000000ad31"
 FAILING = {"error": {"code": "ServiceUnavailable", "status": "UNAVAILABLE"}}
 SCOPE_REFUSED = {"error": {"code": 403, "status": "PERMISSION_DENIED"}}
 
-USERINFO = {"email": "alice@acme.test", "name": "Alice", "oid": OID, "sub": SUBJECT}
+USERINFO = {
+    "email": "alice@acme.test",
+    "email_verified": True,
+    "name": "Alice",
+    "oid": OID,
+    "sub": SUBJECT,
+    "xms_edov": True,
+}
 
 PROVIDERS: dict[str, OIDCProvider] = {
     "entra": OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/t/v2.0"),

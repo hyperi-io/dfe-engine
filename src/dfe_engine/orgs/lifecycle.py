@@ -28,8 +28,6 @@ Usage::
     org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from dfe_engine.auth.audit import (
@@ -39,8 +37,10 @@ from dfe_engine.auth.audit import (
 )
 from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.registry import OrgRegistry
+from dfe_engine.orgs.role_groups import drop_org_role_groups, ensure_org_role_groups
 
 if TYPE_CHECKING:
+    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.hyperdx.client import HyperDXClient
 
 
@@ -57,9 +57,11 @@ class OrgLifecycleManager:
         self,
         registry: OrgRegistry,
         hyperdx_client: HyperDXClient | None = None,
+        group_store: GroupStore | None = None,
     ) -> None:
         self._registry = registry
         self._hdx = hyperdx_client
+        self._groups = group_store
 
     # ------------------------------------------------------------------
     # Public API
@@ -92,6 +94,8 @@ class OrgLifecycleManager:
             ValueError: If an org with this name already exists.
         """
         org = self._registry.create(name, org_ids=org_ids, display_name=display_name)
+        if self._groups is not None:
+            ensure_org_role_groups(group_store=self._groups, org=name)
         org = await self._provision_hyperdx(org)
         audit_org_change(admin_id=admin_id, org_name=name, change="created")
         return org
@@ -114,6 +118,9 @@ class OrgLifecycleManager:
         if org is None:
             raise KeyError(name)
 
+        # The org's groups go first, so a failed drop leaves the org to retry rather than orphaned groups.
+        if self._groups is not None:
+            drop_org_role_groups(group_store=self._groups, org=name)
         self._registry.delete(name)
         audit_org_change(admin_id=admin_id, org_name=name, change="deleted")
 

@@ -82,6 +82,14 @@ class TestLogin:
         assert "admin" in data["roles"]
         assert data["expires_in"] == 30 * 60
 
+    def test_a_local_account_signs_in_with_its_email(self, app, client: TestClient):
+        app.state.account_store.create("emailuser", "email-user-pw-1", email="Email.User@corp.com")
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"username": "email.user@corp.com", "password": "email-user-pw-1"},
+        )
+        assert (resp.status_code, resp.json()["user_id"]) == (200, "emailuser")
+
     def test_login_bad_password(self, client: TestClient):
         resp = client.post(
             "/api/v1/auth/login",
@@ -468,6 +476,7 @@ class TestMe:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "nogrp",
                 "password": secrets.token_urlsafe(16),
                 "email": "nogrp@example.com",
@@ -627,6 +636,7 @@ class TestTheHyperdxSessionFields:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "name": "Test User",
                 "username": "hdx-nogrp",
                 "password": secrets.token_urlsafe(16),
                 "email": "hdx-nogrp@example.com",
@@ -756,7 +766,7 @@ class TestRolesFollowTheBoundAccount:
     def test_a_scim_adopted_local_login_whose_subject_differs_is_unbound(
         self, client: TestClient, app
     ):
-        """Login answers with roles, but no account backs the session, so its token is refused."""
+        """Login answers, but no account backs the session, so it carries no role and its token is refused."""
         password = secrets.token_urlsafe(16)
         store = app.state.account_store
         store.create("bob", password, groups=["dfe-analysts"])
@@ -769,7 +779,7 @@ class TestRolesFollowTheBoundAccount:
         refreshed = client.post("/api/v1/auth/refresh", headers=headers)
 
         assert login.status_code == 200, login.text
-        assert login.json()["roles"] == ["data_analyst"]
+        assert login.json()["roles"] == []
         assert me.status_code == 401, me.text
         assert me.json()["code"] == "session_ended"
         assert refreshed.status_code == 401, refreshed.text

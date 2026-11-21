@@ -27,17 +27,26 @@ from pydantic import BaseModel, ConfigDict, Field
 from scalo.api import ListParams, Page, ProblemError, paginate
 
 from dfe_engine.api.conventions import apply_search
-from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    ReauthGrant,
+    live_role_config,
+    refuse_without_grant,
+    require_action,
+    require_role_reauth,
+)
 from dfe_engine.auth import AuthContext, AuthorizationError, RoleConfig, Scope
 from dfe_engine.auth.audit import audit_permission_denied, audit_role_change
 from dfe_engine.auth.models import ungrantable_permissions
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
+from dfe_engine.auth.reauth import grant_target
 from dfe_engine.auth.role_store import Role, RoleStore
 from dfe_engine.auth.roles import scoped_role_refusal
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 from dfe_engine.names import StoreName
 
 RoleResourceTypeQuery = Literal["core", "custom"]
+
 
 router = APIRouter(prefix="/roles", tags=["Roles"])
 
@@ -185,11 +194,22 @@ async def list_casbin_scopes(
     )
 
 
+async def require_new_role_reauth(
+    body: CreateRoleRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the role the body creates."""
+    target = grant_target(kind="role", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
 @router.post(
     "",
     response_model=RoleResponse,
     status_code=201,
-    dependencies=[Depends(require_action(scopes_dict["role_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["role_write"])),
+        Depends(require_new_role_reauth),
+    ],
 )
 async def create_role(
     body: CreateRoleRequest,
@@ -265,7 +285,10 @@ async def get_role(
 @router.put(
     "/{name}",
     response_model=RoleResponse,
-    dependencies=[Depends(require_action(scopes_dict["role_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["role_write"])),
+        Depends(require_role_reauth),
+    ],
 )
 async def update_role(
     name: str,
@@ -302,7 +325,10 @@ async def update_role(
 @router.delete(
     "/{name}",
     status_code=204,
-    dependencies=[Depends(require_action(scopes_dict["role_delete"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["role_delete"])),
+        Depends(require_role_reauth),
+    ],
 )
 async def delete_role(
     name: str,
