@@ -51,10 +51,10 @@ for _otel_key, _otel_val in (
 ):
     os.environ.setdefault(_otel_key, _otel_val)
 
-# Never post to the release endpoint: create_app() wires scalo's startup version
-# check with a real api_url, and version_check.enabled is read from the
-# bare-prefix cascade (Dynaconf, so VERSION_CHECK__ENABLED). Off for the run.
-os.environ.setdefault("VERSION_CHECK__ENABLED", "false")
+# Never post to the release endpoint. Each ServiceApp reads version_check.enabled
+# under its own env prefix, and code that runs before an app starts reads the bare key.
+for _prefix in ("", "DFE_ENGINE_API_", "DFE_ENGINE_"):
+    os.environ.setdefault(f"{_prefix}VERSION_CHECK__ENABLED", "false")
 
 # --------------------------------------------------------------------------
 # Declare the dev posture explicitly. `DFE_ENGINE_ENV` defaults to "production", and

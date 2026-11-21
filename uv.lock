@@ -740,7 +740,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["api", "cli", "expression", "http", "kafka", "metrics", "secrets-kubernetes"], specifier = ">=2.32.8,<3" },
+    { name = "scalo", extras = ["api", "cli", "expression", "http", "kafka", "metrics", "secrets-kubernetes"], specifier = ">=2.32.10,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2393,7 +2393,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.32.8"
+version = "2.32.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2411,9 +2411,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/db/164b37ec0eede476f5e90d3dbccf79ca889ce1762d3002053c77a252cccc/scalo-2.32.8.tar.gz", hash = "sha256:25ede9b7fd5fbd329e9ef5bfc9e053bfc69dbf4ba83d9af2c370628699d8bd6f", size = 551720, upload-time = "2026-11-17T01:40:17.902Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/38/71099ff43b0bdae421bbefe5a5c4bdcf57b5ceef526748eaf59dc9947b60/scalo-2.32.10.tar.gz", hash = "sha256:356c7afb62e5469a14c7fccea5c1a012bf01c66d8e000b60ac69b9cb8b45932b", size = 553651, upload-time = "2026-11-21T03:16:52.202Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/8e/b45d090c1f621dfa52c389fb11af11f03403882f00af99ebc7a589f26004/scalo-2.32.8-py3-none-any.whl", hash = "sha256:da02c0f3e3f950d2b92c80c1a5147d31930eb2054197932ebf7cda5282bfe9bd", size = 644879, upload-time = "2026-11-17T01:40:16.092Z" },
+    { url = "https://files.pythonhosted.org/packages/28/14/f2b2a2a987320acd79684772427d168f7799430b541eb90675e6de1b8e8e/scalo-2.32.10-py3-none-any.whl", hash = "sha256:adfa8cdebc0e05e2389a69695727165c048601a2094865752ff84f1ee9466b0a", size = 646954, upload-time = "2026-11-21T03:16:50.841Z" },
 ]
 
 [package.optional-dependencies]
