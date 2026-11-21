@@ -1078,6 +1078,37 @@ def kafka_engine_restarts(
         drop_database_and_policies(client=ch_client, database=database)
 
 
+@pytest.fixture
+def engine_restarts(
+    ch_client: Any, ch_params: dict, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[Callable[[], AbstractContextManager[SimpleNamespace]]]:
+    """Start the ``stack`` engine API more than once over one deployment, the schema phase running at each start.
+
+    Gitops is on, so every process opens the same deploy repo and reads what the last
+    one committed. Yields a callable whose context is one running process.
+    """
+    import uuid
+
+    from tests.support.engine_stack import api_settings
+
+    database = f"dfe_engine_api_{uuid.uuid4().hex[:8]}"
+    settings = api_settings(ch_params=ch_params, database=database, tmp_path=tmp_path)
+    settings.clickhouse.bootstrap_tables = True
+    # The phase asserts ClickHouse objects. Its topic step would reach whatever broker .env names.
+    settings.kafka.bootstrap_topics = False
+    settings.gitops.enabled = True
+    settings.gitops.local_path = str(tmp_path / "deploy")
+    settings.gitops.mode = "solo"
+    settings.gitops.push = False
+    _prepare_engine(ch_client=ch_client, monkeypatch=monkeypatch, settings=settings)
+    try:
+        yield functools.partial(
+            _engine_process, database=database, settings=settings, tmp_path=tmp_path
+        )
+    finally:
+        drop_database_and_policies(client=ch_client, database=database)
+
+
 def _prepare_engine(*, ch_client: Any, monkeypatch: pytest.MonkeyPatch, settings: Any) -> None:
     """Give the harness's ClickHouse the core tables *settings* name, as the engine expects at start."""
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager

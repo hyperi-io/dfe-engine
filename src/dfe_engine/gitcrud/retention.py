@@ -63,32 +63,68 @@ def deployment_days(settings: Any) -> int:
     return int(getattr(settings.clickhouse, "default_ttl_days", 0) or 0)
 
 
+class RetentionUnreadable(Exception):
+    """The committed override cannot be read as a TTL, so the desired value is not known."""
+
+
+def read_stored_days(crud: GitCrud, *, authoritative: bool = False) -> int | None:
+    """The committed override, or None when the deploy repo holds none.
+
+    A read takes the remote's head first, and serves this clone as it stands when
+    the remote cannot be reached. With *authoritative* a repo that has a remote is
+    read from the remote itself, so an unreachable one is an error here instead of
+    a stale answer.
+
+    Raises:
+        RetentionUnreadable: The file or the repo could not be read, or the file is
+            not a mapping or holds anything but a non-negative int.
+    """
+    try:
+        if authoritative and crud.repo.has_remote:
+            value = crud.get_remote(CLASS, NAME).get(KEY)
+        else:
+            value = crud.get(CLASS, NAME).get(KEY)
+    except ResourceNotFoundError:
+        return None
+    except Exception as exc:
+        raise RetentionUnreadable(f"retention override file is unreadable: {exc}") from exc
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RetentionUnreadable(f"retention override is not a non-negative int: {value!r}")
+    return value
+
+
 def stored_days(crud: GitCrud) -> int | None:
     """The committed override, or None when there is none or it cannot be used.
 
     A hand-edited file that is malformed, not a mapping, or holds anything but a
     non-negative int reads as no override: the deployment default is always a safe
-    answer, and a 500 on every read and every deploy is not.
+    answer for a read or a deploy, and a 500 on every one is not. The loop that
+    alters live tables reads through :func:`desired_days` instead, which refuses
+    to guess.
     """
     try:
-        value = crud.get(CLASS, NAME).get(KEY)
-    except ResourceNotFoundError:
+        return read_stored_days(crud)
+    except RetentionUnreadable as exc:
+        logger.warning(f"{exc}; using the deployment default")
         return None
-    except Exception as exc:
-        logger.warning(
-            "retention override file is unreadable; using the deployment default",
-            error=str(exc),
-        )
-        return None
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        logger.warning(
-            "retention override is not a non-negative int; using the deployment default",
-            value=repr(value),
-        )
-        return None
-    return value
+
+
+def desired_days(crud: GitCrud | None, settings: Any) -> int:
+    """The TTL live tables are to carry: the override when one is committed, else the deployment default.
+
+    Where :func:`resolve_state` falls back to the deployment default for a file it
+    cannot read, and serves a stale clone when the remote is down, this raises. A TTL
+    applied from a guess can be shorter than the stored one, and rows past it are
+    deleted.
+
+    Raises:
+        RetentionUnreadable: A committed override cannot be read as a TTL, or the
+            deploy repo's remote cannot be reached.
+    """
+    stored = read_stored_days(crud, authoritative=True) if crud is not None else None
+    return deployment_days(settings) if stored is None else stored
 
 
 def resolve_state(crud: GitCrud | None, settings: Any) -> RetentionState:

@@ -1,12 +1,16 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_clickhouse/test_bootstrap_sources.py
-#  Purpose:      Startup brings deployed source tables to the env default TTL
+#  Purpose:      Startup rebuilds all_sources after the schema phase, and never fails on it
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""The bootstrap reconciles source TTLs after the schema phase, and never fails on them."""
+"""The bootstrap rebuilds all_sources after the schema phase, and never fails on it.
+
+The default TTL is not applied here: ``converge_default_ttl`` does that, at start and after
+every change, and ``tests/integration/test_retention_converge_ch.py`` proves it.
+"""
 
 from __future__ import annotations
 
@@ -28,11 +32,10 @@ from dfe_engine.source.registry import SourceRegistryError
 
 GUARD_REFUSAL = "unit tests do not reconcile against a ClickHouse (conftest guard)"
 NOT_REBUILT = "all_sources not rebuilt"
-TTL_FAILED = "source TTL reconcile failed"
 UNREADABLE = "the sources directory could not be read"
 
-# The opening of every line either source pass logs.
-SOURCE_PASS_EVENTS = ("all_sources", "bootstrap sources", "source TTL reconcile")
+# The opening of every line the all_sources rebuild logs.
+SOURCE_PASS_EVENTS = ("all_sources",)
 
 
 class _UnreachableClient:
@@ -118,49 +121,13 @@ def switched_off() -> Iterator[DFESettings]:
 
 @pytest.fixture
 def boot(monkeypatch):
-    """A bootstrap whose schema phase converges without a server. Records the reconcile."""
-
-    def ignore(*args, **kwargs):
-        return None
-
-    def fake_client_manager(config):
-        return SimpleNamespace(get_clickhouse_client=unreachable)
-
-    def unreachable():
-        return _UnreachableClient()
+    """A bootstrap whose schema phase converges without a server."""
 
     def converged(*args, **kwargs):
         return SchemaBootstrapState(state=STATE_CONVERGED)
 
     monkeypatch.setattr(bootstrap_module, "run_bootstrap", converged)
-    monkeypatch.setattr(bootstrap_module, "get_clickhouse_config", ignore)
-    monkeypatch.setattr(
-        bootstrap_module.ClickHouseManager, "get_instance", staticmethod(fake_client_manager)
-    )
     return monkeypatch
-
-
-def test_a_failing_source_reconcile_never_fails_the_bootstrap(boot, settings: DFESettings):
-    def exploding_reconcile(client, *, settings, sources):
-        raise RuntimeError("boom")
-
-    boot.setattr(retention_module, "reconcile_source_ttls", exploding_reconcile)
-
-    state = bootstrap_clickhouse(load_sources=_registry_of(names=["okta"]), settings=settings)
-    assert state.converged is True
-
-
-def test_the_bootstrap_hands_every_source_to_the_reconcile(boot, settings: DFESettings):
-    def recording_reconcile(client, *, settings, sources):
-        seen.extend(source.source for source in sources)
-        return SimpleNamespace(report=None, sources_skipped=0)
-
-    seen = []
-    boot.setattr(retention_module, "reconcile_source_ttls", recording_reconcile)
-
-    bootstrap_clickhouse(load_sources=_registry_of(names=["okta", "zeek"]), settings=settings)
-
-    assert seen == ["okta", "zeek"]
 
 
 def test_an_unreachable_table_is_skipped_and_core_sources_are_left_alone(monkeypatch):
@@ -174,6 +141,8 @@ def test_an_unreachable_table_is_skipped_and_core_sources_are_left_alone(monkeyp
 
     assert outcome.sources_skipped == 1
     assert outcome.sources_reconciled == 0
+    # ClickHouse could not be read, which a later pass can clear, so the loop runs again.
+    assert outcome.failed == ["dfe.okta"]
 
 
 class TestBootstrapClickhouse:
@@ -211,8 +180,5 @@ class TestBootstrapClickhouse:
 
         assert (state.converged, _source_passes(events=audit_events)) == (
             True,
-            [
-                {"event": TTL_FAILED, "error": UNREADABLE},
-                {"event": NOT_REBUILT, "changed": [], "database": "dfe", "error": GUARD_REFUSAL},
-            ],
+            [{"event": NOT_REBUILT, "changed": [], "database": "dfe", "error": GUARD_REFUSAL}],
         )

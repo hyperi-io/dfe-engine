@@ -6,7 +6,12 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Stored override round-trip, precedence over the deployment default, fail-safe reads."""
+"""Stored override round-trip, precedence over the deployment default, fail-safe reads.
+
+A read for display or a deploy falls back to the deployment default for a file it cannot
+use. The value that alters live tables refuses to, since a guess can be shorter than the
+stored TTL.
+"""
 
 from types import SimpleNamespace
 
@@ -17,6 +22,8 @@ from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitcrud.retention import (
     MAX_DEFAULT_TTL_DAYS,
     RetentionState,
+    RetentionUnreadable,
+    desired_days,
     effective_settings,
     resolve_state,
     set_stored,
@@ -131,3 +138,46 @@ class TestBrokenFile:
         _write(crud, f"default_ttl_days: {value}\n")
         assert stored_days(crud) is None
         assert resolve_state(crud, _settings(90)).effective == 90
+
+
+class TestDesired:
+    """The value that alters live tables is the override or the deployment default, and never a guess."""
+
+    def test_no_override_is_the_deployment_default(self, crud):
+        assert desired_days(crud, _settings(90)) == 90
+
+    def test_without_gitops_it_is_the_deployment_default(self):
+        assert desired_days(None, _settings(45)) == 45
+
+    @pytest.mark.parametrize("days", [0, 30])
+    def test_a_stored_override_wins_and_zero_is_an_override(self, crud, days):
+        set_stored(crud, days, actor="derek")
+
+        assert desired_days(crud, _settings(90)) == days
+
+    def test_clearing_the_override_returns_the_deployment_default(self, crud):
+        set_stored(crud, 30, actor="derek")
+        set_stored(crud, None, actor="derek")
+
+        assert desired_days(crud, _settings(90)) == 90
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "[not: a mapping",
+            "- one\n- two\n",
+            "default_ttl_days: '30'\n",
+            "default_ttl_days: -1\n",
+            "default_ttl_days: true\n",
+            "default_ttl_days: 12.5\n",
+        ],
+        ids=["malformed-yaml", "list-doc", "string", "negative", "boolean", "fraction"],
+    )
+    def test_an_override_that_cannot_be_read_as_a_ttl_raises_where_a_read_falls_back(
+        self, crud, content
+    ):
+        _write(crud, content)
+
+        with pytest.raises(RetentionUnreadable):
+            desired_days(crud, _settings(30))
+        assert resolve_state(crud, _settings(30)).effective == 30

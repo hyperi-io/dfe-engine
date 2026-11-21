@@ -42,7 +42,7 @@ A live marker always blocks, so a holder stays visible after a merge keeps only 
 later row. Every attempt reads the claims and markers, never the latest row alone:
 a missed claim with a shorter lease can be the latest row and lapse first.
 
-The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
+The boot phase holds it, and so does every source deploy (:func:`ddl_lease`). The default-TTL pass can outlast one lease, so it holds it through :func:`renewed_lease` and extends it before each table.
 """
 
 import secrets
@@ -90,6 +90,10 @@ class SchemaLockBusyError(SchemaLockError):
 
 class SchemaLockQuorumError(SchemaLockError):
     """A lease read or write missed its quorum of replicas, so that attempt did not complete."""
+
+
+class SchemaLeaseLostError(SchemaLockError):
+    """A later claim took the lease while its holder was still applying."""
 
 
 def _lock_error(action: str, exc: Exception) -> SchemaLockError:
@@ -278,6 +282,42 @@ class SchemaLock:
                 return False
             time.sleep(_POLL_SECONDS)
 
+    def renew(self) -> bool:
+        """Push the lease's expiry a full lease out from now, while this claim is still the latest.
+
+        A holder whose work outlasts one lease renews between its steps, so a peer
+        keeps waiting for it instead of taking the lease over. The renewal writes
+        under the claim's own version, as a release does, so a later claim outranks it.
+
+        Returns:
+            Whether the lease is still this lock's. False means a later claim outranks
+            this one or the lease was never taken, and the holder must stop applying.
+
+        Raises:
+            SchemaLockError: The lease could not be read or written.
+        """
+        claimed = self._claimed_at
+        if not self.acquired or claimed is None:
+            return False
+        state = self.read()
+        if (
+            state is None
+            or state.holder != self._holder
+            or state.acquired_at != claimed
+            or state.released
+        ):
+            self.acquired = False
+            self._claimed_at = None
+            return False
+        expires = datetime.now(UTC) + timedelta(seconds=self._lease_seconds)
+        self._write_rows(
+            [
+                self._row(self._lock_name, claimed, expires, 0),
+                self._row(self._marker(claimed), claimed, expires, 0),
+            ]
+        )
+        return True
+
     def release(self) -> None:
         """Soft-release the lease. A completed pass needs no delete."""
         if not self.acquired or self._claimed_at is None:
@@ -456,9 +496,36 @@ class SchemaLock:
         self.release()
 
 
+class HeldLease:
+    """The lease a block holds, which it extends between its steps.
+
+    Attributes:
+        renewals: How many times the block extended the lease.
+    """
+
+    def __init__(self, lock: SchemaLock | None) -> None:
+        self._lock = lock
+        self.renewals = 0
+
+    def renew(self) -> None:
+        """Extend the lease before the next step. A no-op where no lease table exists.
+
+        Raises:
+            SchemaLeaseLostError: Another claim took the lease, so the block must stop.
+            SchemaLockError: The lease could not be read or written.
+        """
+        if self._lock is None:
+            return
+        if not self._lock.renew():
+            raise SchemaLeaseLostError(
+                "another applier took the schema lease before this pass ended"
+            )
+        self.renewals += 1
+
+
 @contextmanager
-def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Generator[None]:
-    """Hold the schema lease around DDL applied outside the boot phase.
+def renewed_lease(client: Any, *, data_database: str, wait_seconds: float) -> Generator[HeldLease]:
+    """Hold the schema lease around DDL that can outlast one lease, yielding the handle that extends it.
 
     A server without the lease table has never run the phase, so there is no lease
     to take and the block runs unheld, the same answer the phase gives a first boot.
@@ -480,12 +547,24 @@ def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Genera
         lease_seconds=lease_seconds(wait_seconds),
     )
     if not lock.table_exists():
-        yield
+        yield HeldLease(None)
         return
     if not lock.acquire(wait_seconds=wait_seconds):
         held = lock.read()
         raise SchemaLockBusyError(held.holder if held is not None else "")
     try:
-        yield
+        yield HeldLease(lock)
     finally:
         lock.release_or_lapse()
+
+
+@contextmanager
+def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Generator[None]:
+    """Hold the schema lease around DDL that finishes within one lease, such as a source deploy's.
+
+    Raises:
+        SchemaLockBusyError: Another applier held the lease for the whole wait.
+        SchemaLockError: The lease could not be read or taken.
+    """
+    with renewed_lease(client, data_database=data_database, wait_seconds=wait_seconds):
+        yield

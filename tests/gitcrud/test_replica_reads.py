@@ -14,11 +14,13 @@ tests are the read half: write on A, read on B.
 
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from dulwich import porcelain
 
 from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.retention import RetentionUnreadable, desired_days, set_stored, stored_days
 from dfe_engine.gitops.repo import GitopsRepo, read_scope
 from dfe_engine.source.models import Source, SourceMatch, SourceView
 from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
@@ -260,3 +262,31 @@ class TestOneViewPerRequest:
             assert crud_b.list("sources") == ["syslog"]
 
         assert len(asked) == 2
+
+
+class TestRetentionAcrossReplicas:
+    """The TTL a pass applies is the remote's, never a stale clone's."""
+
+    @staticmethod
+    def _settings() -> SimpleNamespace:
+        return SimpleNamespace(clickhouse=SimpleNamespace(default_ttl_days=90))
+
+    def test_an_override_a_peer_committed_is_the_desired_value(self, replicas) -> None:
+        crud_a, crud_b = replicas
+        set_stored(crud_a, 30, "a")
+
+        assert desired_days(crud_b, self._settings()) == 30
+
+    def test_an_unreachable_remote_is_an_error_where_a_read_serves_the_stale_clone(
+        self, replicas, tmp_path: Path
+    ) -> None:
+        crud_a, crud_b = replicas
+        set_stored(crud_a, 30, "a")
+        assert stored_days(crud_b) == 30
+        # The remote moves on while this replica's clone holds 30, then the forge goes away.
+        set_stored(crud_a, 45, "a")
+        (tmp_path / "remote.git").rename(tmp_path / "forge-down.git")
+
+        assert stored_days(crud_b) == 30
+        with pytest.raises(RetentionUnreadable):
+            desired_days(crud_b, self._settings())

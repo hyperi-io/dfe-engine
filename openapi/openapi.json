@@ -13724,7 +13724,7 @@
           "System"
         ],
         "summary": "Put Retention",
-        "description": "Store the override in the deploy repo, then apply it to every table that follows it.\n\nThe engine's own tables and every deployed source's table are brought to the new\neffective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or\n``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A\nClickHouse failure answers 502 with the override ALREADY committed. Sending the\nsame value again applies it.",
+        "description": "Store the override in the deploy repo and return, leaving the tables to a background pass.\n\nThe pass brings the engine's own tables and every deployed source's table to the\nstored value with ``ALTER TABLE ... MODIFY TTL`` (or ``REMOVE TTL`` for 0). A table\nthat declares its own TTL is left alone. The pass runs again until every table\nhas it, so a ClickHouse that is down when the value is stored gets it once it is\nback, and a restart does not lose it.",
         "operationId": "system.retention.apply",
         "requestBody": {
           "content": {
@@ -13742,7 +13742,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RetentionUpdateResponse"
+                  "$ref": "#/components/schemas/RetentionStatus"
                 }
               }
             }
@@ -13769,16 +13769,6 @@
           },
           "422": {
             "description": "Validation Error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "reconcile_failed: the value is stored, and applying it to ClickHouse failed; sending the same value again applies it",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14170,7 +14160,7 @@
           "System"
         ],
         "summary": "Patch Defaults",
-        "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed.\nThis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and then runs the same reconcile as PUT /retention.",
+        "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed.\nThis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and returns, and the same background pass as PUT /retention\napplies it.",
         "operationId": "system.defaults.update",
         "requestBody": {
           "content": {
@@ -14188,7 +14178,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SystemDefaultsUpdate"
+                  "$ref": "#/components/schemas/SystemDefaults"
                 }
               }
             }
@@ -14215,16 +14205,6 @@
           },
           "422": {
             "description": "validation_error: a named value cannot be stored",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "reconcile_failed: ttl_days is stored, and applying it to ClickHouse failed; sending the same value again applies it",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -47954,45 +47934,6 @@
         "title": "ResourceSeriesResponse",
         "description": "An instance's resource metrics over a window, in time buckets."
       },
-      "RetentionReconcileSummary": {
-        "properties": {
-          "core_tables_altered": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Core Tables Altered",
-            "description": "database.table: <old> -> <new> days, for each engine table whose TTL moved."
-          },
-          "source_tables_altered": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Source Tables Altered",
-            "description": "database.table for each deployed source's table the apply altered."
-          },
-          "sources_reconciled": {
-            "type": "integer",
-            "title": "Sources Reconciled",
-            "description": "Deployed sources whose table was brought current."
-          },
-          "sources_skipped": {
-            "type": "integer",
-            "title": "Sources Skipped",
-            "description": "Deployed sources left to their next deploy: table absent, build failed or ClickHouse refused."
-          }
-        },
-        "type": "object",
-        "required": [
-          "core_tables_altered",
-          "source_tables_altered",
-          "sources_reconciled",
-          "sources_skipped"
-        ],
-        "title": "RetentionReconcileSummary",
-        "description": "What applying the new default did to the live tables."
-      },
       "RetentionStatus": {
         "properties": {
           "default_ttl_days": {
@@ -48066,60 +48007,6 @@
         ],
         "title": "RetentionUpdate",
         "description": "An admin's change to the default TTL."
-      },
-      "RetentionUpdateResponse": {
-        "properties": {
-          "default_ttl_days": {
-            "type": "integer",
-            "title": "Default Ttl Days",
-            "description": "Effective retention in days for every table that follows the default; 0 = no TTL. The override when one is stored, else deployment_default."
-          },
-          "stored": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stored",
-            "description": "The admin's override, committed in the deploy repo; null when none is set."
-          },
-          "origin": {
-            "type": "string",
-            "enum": [
-              "override",
-              "deployment"
-            ],
-            "title": "Origin",
-            "description": "override when the stored value wins, deployment when deployment_default does."
-          },
-          "deployment_default": {
-            "type": "integer",
-            "title": "Deployment Default",
-            "description": "DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
-          },
-          "editable": {
-            "type": "boolean",
-            "title": "Editable",
-            "description": "Whether this deployment can store an override. False without gitops, where a PUT answers 503."
-          },
-          "reconcile": {
-            "$ref": "#/components/schemas/RetentionReconcileSummary"
-          }
-        },
-        "type": "object",
-        "required": [
-          "default_ttl_days",
-          "stored",
-          "origin",
-          "deployment_default",
-          "editable",
-          "reconcile"
-        ],
-        "title": "RetentionUpdateResponse",
-        "description": "The default TTL after the change, and what applying it did."
       },
       "ReviewRequest": {
         "properties": {
@@ -54623,48 +54510,6 @@
         "type": "object",
         "title": "SystemDefaultsPatch",
         "description": "A partial change. Omitted fields stay as they are. Null clears that override."
-      },
-      "SystemDefaultsUpdate": {
-        "properties": {
-          "ttl_days": {
-            "$ref": "#/components/schemas/IntDefault"
-          },
-          "common_header_type": {
-            "$ref": "#/components/schemas/StrDefault"
-          },
-          "common_header_version": {
-            "$ref": "#/components/schemas/StrDefault"
-          },
-          "engine": {
-            "$ref": "#/components/schemas/StrDefault",
-            "description": "MergeTree-family variant, without the Replicated or Shared prefix."
-          },
-          "editable": {
-            "type": "boolean",
-            "title": "Editable",
-            "description": "Whether this deployment can store an override. False without gitops."
-          },
-          "reconcile": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RetentionReconcileSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "ttl_days",
-          "common_header_type",
-          "common_header_version",
-          "engine",
-          "editable"
-        ],
-        "title": "SystemDefaultsUpdate",
-        "description": "The defaults after the patch. reconcile is set only when ttl_days was named."
       },
       "SystemStatusResponse": {
         "properties": {

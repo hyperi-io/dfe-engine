@@ -6,15 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Run the schema phase on daemon startup, then reconcile the source tables' TTL.
+"""Run the schema phase on daemon startup.
 
 The phase itself lives in :mod:`dfe_engine.schema.phase`, which applies the
 pinned dfe-schemas manifest and is the only code path in the engine that issues
-DDL for a declared object. This module is the daemon's way in and the place the
-source tables are brought to the deployment default retention afterwards, so a
-changed default reaches every deployed source's table on restart. The phase
-refuses a changed default on a core table as TTL drift. An admin's change through
-``PUT /api/v1/system/retention`` is what applies it there.
+DDL for a declared object. This module is the daemon's way in. The phase refuses a
+changed default TTL on a core table as drift, so the default reaches every table
+through :func:`dfe_engine.schema.retention.converge_default_ttl`, which the
+daemon runs after each converged pass and after every change of the default.
 
 The phase is a GATE, not best-effort: its outcome decides readiness. Disable it
 with ``DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state as
@@ -36,38 +35,12 @@ from scalo.resilience import ReconnectingResilience, ResilienceConfig
 
 from dfe_engine.backoff import jittered
 from dfe_engine.clickhouse.all_sources import try_rebuild_all_sources
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema.phase import STATE_UNKNOWN, SchemaBootstrapState, run_bootstrap
-from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings, get_clickhouse_config
+from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings
 
 if TYPE_CHECKING:
     from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.source.models import Source
-
-
-def _reconcile_sources(
-    *, load_sources: Callable[[], Iterable[Source]], settings: DFESettings
-) -> None:
-    """Bring the deployed source tables the registry holds now to the default TTL. A failure here never fails the phase."""
-    from dfe_engine.schema.retention import reconcile_source_ttls
-
-    # The schema is applied, so neither an unreadable registry nor a TTL fault may undo that.
-    try:
-        sources = list(load_sources())
-        if not (sources):
-            return
-        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
-        outcome = reconcile_source_ttls(
-            manager.get_clickhouse_client(), settings=settings, sources=sources
-        )
-        logger.info(f"bootstrap sources: {outcome.report.summary()}")
-        if outcome.sources_skipped:
-            logger.warning(
-                "source TTL reconcile left sources to their next deploy",
-                count=outcome.sources_skipped,
-            )
-    except Exception as exc:
-        logger.error("source TTL reconcile failed", error=str(exc))
 
 
 def bootstrap_clickhouse(
@@ -76,22 +49,20 @@ def bootstrap_clickhouse(
     metrics: SchemaMetrics | None = None,
     settings: DFESettings,
 ) -> SchemaBootstrapState:
-    """Apply the manifest, reconcile the deployed source tables' TTL, then rebuild all_sources.
+    """Apply the manifest, then rebuild all_sources.
 
     Returns the phase state. ``state.ready`` is what the readiness check reads,
     and ``state.converged`` is what says the objects exist -- a caller must not
     report a core table as deployed unless that one is true. ``metrics`` is where
     the phase reports its outcome. ``None`` reports nothing.
 
-    Both source passes read the registry through ``load_sources`` when they run, so a retried pass sees the sources deployed since the boot. ``load_sources`` of None runs neither pass. A pass with the phase switched off (state ``unknown``) still rebuilds all_sources, and a failed pass runs neither.
+    The rebuild reads the registry through ``load_sources`` when it runs, so a retried pass sees the sources deployed since the boot. ``load_sources`` of None runs no rebuild. A pass with the phase switched off (state ``unknown``) still rebuilds all_sources, and a failed pass does not.
     """
     state = run_bootstrap(settings=settings, metrics=metrics)
     rebuilds = (state.converged) or (state.state == STATE_UNKNOWN)
     if (load_sources is None) or (not (rebuilds)):
         return state
 
-    if state.converged:
-        _reconcile_sources(load_sources=load_sources, settings=settings)
     try_rebuild_all_sources(load_sources=load_sources, settings=settings)
     return state
 

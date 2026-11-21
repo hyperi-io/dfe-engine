@@ -40,9 +40,8 @@ from dfe_engine.appmgmt import MetricsUnavailableError
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.clickhouse.cloud import CloudServiceError
-from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.routing import ReviewRouting
-from dfe_engine.gitops.repo import GitopsRepo, GitopsUnavailableError
+from dfe_engine.gitops.repo import GitopsUnavailableError
 from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
     BROKER_REFUSED,
@@ -201,29 +200,6 @@ class TestOrgs:
 
 
 class TestSystem:
-    def test_a_stored_ttl_clickhouse_refused_says_so_without_its_text(
-        self, app, client, admin_headers, monkeypatch, tmp_path, audit_events
-    ):
-        app.state.gitcrud = GitCrud(
-            GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
-        )
-        monkeypatch.setattr(system_module, "get_clickhouse_client", lambda _settings: object())
-        monkeypatch.setattr(system_module, "reconcile_default_ttl", _refuse)
-
-        put = client.put(
-            "/api/v1/system/retention", headers=admin_headers, json={"default_ttl_days": 30}
-        )
-        patch = client.patch(
-            "/api/v1/system/defaults", headers=admin_headers, json={"ttl_days": 31}
-        )
-
-        for resp in (put, patch):
-            assert resp.status_code == 502, resp.text
-            assert resp.json()["code"] == "reconcile_failed"
-            assert "override stored" in resp.json()["detail"]
-            assert_hidden(resp.text)
-        assert_logged(audit_events)
-
     def test_unreadable_deployed_tables_hide_clickhouses_text(self, monkeypatch, audit_events):
         def _unreadable(*_args, **_kwargs):
             raise SchemaApplyError(f"could not read ClickHouse state: {SENTINEL}")
