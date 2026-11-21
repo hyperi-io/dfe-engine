@@ -17,7 +17,7 @@ import pytest
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.hunts import runner_cli as cli
+from dfe_engine.hunts.schedule_publish import spec_sources
 from dfe_engine.hunts.spec_loader import load_specs
 
 pytestmark = pytest.mark.usefixtures("customer_orgs")
@@ -101,7 +101,7 @@ def test_a_propagated_hunt_compiles_over_its_sigma_view(
     _propagate(client, app, admin_headers, tmp_path)
     database = api_settings.clickhouse.effective_data_database
 
-    specs = load_specs(api_settings.hunts.hunt_dir, **cli._spec_sources(api_settings, database))
+    specs = load_specs(api_settings.hunts.hunt_dir, **spec_sources(api_settings, database))
 
     [statement] = specs[_HUNT].queries
     assert statement.rule_id == _BINDING

@@ -170,10 +170,20 @@ def bootstrap_registries(
     hunt_dir = settings.hunts.hunt_dir
     if gitcrud is not None or hunt_dir:
         from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+        from dfe_engine.hunts.schedule_publish import StoredHuntSchedule
 
+        # A runner scaled to zero publishes nothing, so the engine keeps the schedule KEDA reads.
+        rules = _registries.get("rules")
+        schedule = StoredHuntSchedule(
+            settings,
+            client=lambda: get_interactive_clickhouse_client(settings),
+            rules_dir=rules.directory if rules is not None else settings.hunts.rules_dir,
+        )
+        _registries["hunt_schedule"] = schedule
         _registries["hunt_configs"] = HuntConfigRegistry(
             hunts_directory=hunt_dir or None,
             deploy_repo=deploy_store(gitcrud, "hunts", settings=settings, forge=forge),
+            on_change=schedule.publish,
         )
 
     if settings.hunts.alert_destinations_dir:
