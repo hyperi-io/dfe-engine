@@ -9,7 +9,7 @@
 """Who may read and patch the table defaults, and which fields reach ClickHouse.
 
 Header type, header version and engine are stored for the next deploy. Only a
-patch that names ttl_days reconciles live TTL, the same way PUT /retention does.
+patch that names ttl_days asks for the same background pass PUT /retention does.
 No source here is deployed, so apply and drift never need a table. What they do
 to a deployed one is proven in tests/integration/test_system_defaults_apply_ch.py.
 """
@@ -131,7 +131,7 @@ class TestPatchDefaults:
         assert body["engine"]["effective"] == "ReplacingMergeTree"
         assert body["engine"]["origin"] == "override"
         assert body["ttl_days"]["stored"] is None
-        assert body["reconcile"] is None
+        assert "reconcile" not in body
         assert body["editable"] is True
         assert gc.get("gov_settings", "defaults") == {
             "common_header_type": "minimal",
@@ -163,10 +163,10 @@ class TestPatchDefaults:
         resp = client.patch(URL, headers=admin_headers, json={})
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["reconcile"] is None
+        assert "reconcile" not in resp.json()
         assert gc.head_revision() is None
 
-    def test_ttl_is_the_retention_override_and_a_clickhouse_failure_keeps_it(
+    def test_ttl_is_the_retention_override_and_a_down_clickhouse_does_not_fail_the_patch(
         self, unreachable_clickhouse, admin_headers, app, client, tmp_path
     ):
         gc = _wire(app, tmp_path)
@@ -177,8 +177,7 @@ class TestPatchDefaults:
             json={"ttl_days": 30, "engine": "ReplacingMergeTree"},
         )
 
-        assert resp.status_code == 502, resp.text
-        assert resp.json()["code"] == "reconcile_failed"
+        assert resp.status_code == 200, resp.text
         assert gc.get("gov_settings", "retention")["default_ttl_days"] == 30
         assert gc.get("gov_settings", "defaults")["default_engine"] == "ReplacingMergeTree"
         assert client.get(URL, headers=admin_headers).json()["ttl_days"]["origin"] == "override"

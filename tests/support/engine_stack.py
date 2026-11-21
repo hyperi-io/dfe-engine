@@ -11,6 +11,7 @@
 The ``stack`` fixture in ``tests/integration/conftest.py`` builds the engine API from :func:`api_settings`.
 """
 
+import re
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,9 @@ from typing import Any
 
 import dfe_schemas
 
+from dfe_engine.schema.lock import SchemaLock
+from dfe_engine.schema.plan import LOCK_ID, render_one
+from dfe_engine.schema.retention import CONVERGE_ATTRIBUTE
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -88,6 +92,41 @@ def bootstrap_settings(
     # These assert ClickHouse objects. The topic step would reach whatever broker .env names.
     settings.kafka.bootstrap_topics = False
     return settings
+
+
+_TTL_DAYS = re.compile(r"toIntervalDay\((\d+)\)")
+
+
+def live_ttl_days(ch_client: Any, database: str, table: str) -> int | None:
+    """The whole-day TTL on ``database.table`` as the server reports it, None for a table with none."""
+    rows = ch_client.query(
+        "SELECT engine_full FROM system.tables WHERE database = {db:String} AND name = {t:String}",
+        parameters={"db": database, "t": table},
+    ).result_rows
+    assert rows, f"{database}.{table} does not exist"
+    _, sep, clause = str(rows[0][0]).partition(" TTL ")
+    match = _TTL_DAYS.search(clause) if sep else None
+    return int(match.group(1)) if match else None
+
+
+def hold_schema_lease(ch_client: Any, database: str, holder: str) -> SchemaLock:
+    """Take the schema lease for *holder*, as an applier mid-apply does, and return the held lock."""
+    lock = SchemaLock(
+        ch_client,
+        database=database,
+        table=render_one(LOCK_ID, data_database=database).name,
+        holder=holder,
+        lease_seconds=300,
+    )
+    # A claim held up by a server stall is a missed attempt, so taking the lease here waits.
+    assert lock.acquire(wait_seconds=10.0) is True
+    return lock
+
+
+def converged(stack: SimpleNamespace, timeout: float = 120.0) -> None:
+    """Wait for the default-TTL pass the last change asked for, retries included, to end."""
+    trigger = getattr(stack.app.state, CONVERGE_ATTRIBUTE)
+    assert trigger.wait_idle(timeout), f"the default-TTL pass was still running after {timeout} s"
 
 
 def default_header(stack: SimpleNamespace) -> dict[str, str]:
