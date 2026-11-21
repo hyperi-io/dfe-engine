@@ -20,10 +20,10 @@ import pytest
 from common.hunt_files import resolved_customers
 from scalo.logger import logger
 
-from dfe_engine.hunts import runner_cli as cli
 from dfe_engine.hunts.rule_compiler import compile_hunt_queries
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.hunts.schedule_publish import spec_sources
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.settings import DFESettings
 from dfe_engine.yaml_utils import yaml_dump_string
@@ -63,7 +63,7 @@ def _write_hunt(hunt_dir: Path, name: str, **fields) -> None:
 def _runner_sources(rules_dir: Path, database: str) -> dict:
     settings = DFESettings(env="test")
     settings.hunts.rules_dir = str(rules_dir)
-    return cli._spec_sources(settings, database)
+    return spec_sources(settings, database)
 
 
 @pytest.mark.parametrize(

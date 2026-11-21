@@ -54,7 +54,7 @@ def _store(crud, cls_name, *, environment, mode, forge=None) -> DeployRepoStore:
     return DeployRepoStore(crud, cls_name, environment=environment, mode=mode, forge=forge)
 
 
-def _rebind(crud, *, environment: str, mode: str, forge=None) -> None:
+def _rebind(crud, *, environment: str, mode: str, forge=None, on_change=None) -> None:
     """Point the app's hunt and rule registries at the deploy repo, at one posture.
 
     Closes whatever it replaces: the lifespan built directory-backed registries with
@@ -62,7 +62,8 @@ def _rebind(crud, *, environment: str, mode: str, forge=None) -> None:
     """
     replacements = {
         "hunt_configs": HuntConfigRegistry(
-            deploy_repo=_store(crud, "hunts", environment=environment, mode=mode, forge=forge)
+            deploy_repo=_store(crud, "hunts", environment=environment, mode=mode, forge=forge),
+            on_change=on_change,
         ),
         "rules": RuleRegistry(
             deploy_repo=_store(crud, "rules", environment=environment, mode=mode, forge=forge)
@@ -176,6 +177,32 @@ class TestProductionTeamWritesReportReview:
         newest = read_log(deploy_repo, limit=1)[0][0]
         assert (newest.ctype, newest.scope, newest.summary) == ("hunt", body["name"], "delete")
         assert newest.conforming is True
+
+    @pytest.mark.parametrize(
+        ("environment", "mode", "published"),
+        [("dev", "solo", 1), ("production", "team", 0)],
+        ids=["direct", "review_branch"],
+    )
+    def test_a_hunt_create_publishes_the_schedule_only_where_the_runner_reads_it(
+        self, client, admin_headers, deploy_repo, environment, mode, published
+    ):
+        """A review branch leaves main as it was, so the schedule KEDA reads has nothing to follow."""
+        _store_certutil(deploy_repo)
+        publishes: list = []
+        _rebind(
+            deploy_repo,
+            environment=environment,
+            mode=mode,
+            forge=_RecordingForge(),
+            on_change=publishes.append,
+        )
+
+        resp = client.post(
+            "/api/v1/hunts", json={"name": "windows_hunt", **_HUNT}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert len(publishes) == published
 
     def test_a_rule_create_says_review_required(self, client, admin_headers, deploy_repo):
         forge = _RecordingForge(url="http://forge/pr/44")

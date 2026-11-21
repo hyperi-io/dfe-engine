@@ -24,7 +24,7 @@ from dfe_engine.hunts.customers import customer_tenant_ids, with_org_tenant_ids
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from dfe_engine.gitcrud.routing import WriteOutcome
     from dfe_engine.hunts.deploy_repo import DeployRepoStore
@@ -122,6 +122,7 @@ class HuntConfigRegistry:
         refresh_interval: int = 30,
         *,
         deploy_repo: DeployRepoStore | None = None,
+        on_change: Callable[[Path], None] | None = None,
     ) -> None:
         """Initialise the registry.
 
@@ -133,8 +134,11 @@ class HuntConfigRegistry:
             deploy_repo: Deploy-repo backend over the gitcrud ``hunts`` class.
                 When provided, ``config/hunts`` in the deploy repo is the SSoT
                 and every mutation is one commit the hunt runner git-syncs.
+            on_change: Called with the hunt directory after a save or delete lands
+                where the runner reads it. It must not raise: the write is done.
         """
         self._deploy = deploy_repo
+        self._on_change = on_change
         self._store: DirectoryConfigStore | None = None
 
         if deploy_repo is not None:
@@ -157,6 +161,17 @@ class HuntConfigRegistry:
         """Stop the backing store."""
         if self._store is not None:
             self._store.stop()
+
+    @property
+    def directory(self) -> Path:
+        """Where each hunt is stored as ``{name}.yaml``, the directory the hunt runner reads."""
+        return self._hunts_directory
+
+    def _changed(self, outcome: WriteOutcome | None) -> None:
+        """Report a write to ``on_change``, unless it went to a review branch the runner does not read."""
+        if self._on_change is None or (outcome is not None and outcome.review_required):
+            return
+        self._on_change(self._hunts_directory)
 
     def _require_store(self) -> DirectoryConfigStore:
         """Narrow the Optional store once: the directory backend always builds one."""
@@ -262,7 +277,9 @@ class HuntConfigRegistry:
         runner git-syncs, so the caller has to be able to say so.
         """
         payload = strip_identity_fields_from_yaml(config)
-        return self._put_raw(name, payload, created_by=created_by)
+        outcome = self._put_raw(name, payload, created_by=created_by)
+        self._changed(outcome)
+        return outcome
 
     def save_many(
         self,
@@ -289,9 +306,11 @@ class HuntConfigRegistry:
                 payloads, actor=created_by, scope=scope, summary=summary
             )
             logger.info(f"Saved hunt configs {sorted(payloads)} -> deploy repo config/hunts")
+            self._changed(outcome)
             return outcome
         for name, payload in payloads.items():
             self._put_raw(name, payload, created_by=created_by)
+        self._changed(None)
         return None
 
     def store_org_tenant_ids(
@@ -367,6 +386,7 @@ class HuntConfigRegistry:
         if not found:
             raise HuntConfigNotFoundError(f"Hunt not found: '{name}'")
         logger.info(f"Deleted hunt config '{name}'")
+        self._changed(outcome)
         return outcome
 
     def list_hunts(self) -> list[dict[str, Any]]:

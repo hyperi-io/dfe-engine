@@ -18,9 +18,9 @@ Two commands, matching the two ways the runner is driven:
 
   materialise - the ONE-SHOT run to write the deterministic ``hunt_schedule`` table
       KEDA scales on.
-      It is NOT the hot path - it publishes and exits. A running worker keeps that
-      table current itself, so this is for a deployment that scales the runner to zero
-      and wants the table written before any worker has started.
+      It is NOT the hot path - it publishes and exits. The engine API publishes that
+      table after each hunt change and a running worker keeps it current too, so this
+      is for a hunt committed to the deploy repo by hand while no worker is running.
 
   run - the long-running worker. It builds the CH coordinator, ensures the
       coordination schema, then repeats ``HuntRunner.tick`` on a poll interval until
@@ -57,12 +57,9 @@ from dfe_engine.hunts.daemon import run_loop
 from dfe_engine.hunts.delivery import MatchNotifier
 from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.lookups import refuse_tenant_lookups
-from dfe_engine.hunts.rule_compiler import detection_cap
 from dfe_engine.hunts.runner import HuntFailures, HuntRunner
-from dfe_engine.hunts.schedule import (
-    publish_schedule,
-    restore_hash_offsets,
-)
+from dfe_engine.hunts.schedule import restore_hash_offsets
+from dfe_engine.hunts.schedule_publish import publish_hunt_schedule, spec_sources
 from dfe_engine.hunts.smoothing import PhaseSmoother
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.hunts.worker import HuntWorker
@@ -88,28 +85,6 @@ def _ch_params(settings: DFESettings) -> dict[str, Any]:
         "username": ch.username,
         "password": ch.password,
         **tls.connect_kwargs(),
-    }
-
-
-def _spec_sources(settings: DFESettings, database: str) -> dict[str, Any]:
-    """The loader's rule inputs: rule YAML, the default tables, the cap and the lookups.
-
-    A hunt names `rules`, so the loader has to read them to build its SQL. The
-    default target is the core detection table in the resolved data database - never
-    a hardcoded 'dfe' - used only when neither the rule entry nor the hunt names one.
-    A source named without a database is read from that same data database. Every
-    compiled rule is capped at ``hunts.max_detections_per_run``, cut to its ceiling,
-    and may look values up only in ``hunts.lookup_databases``.
-    """
-    hunts = settings.hunts
-    return {
-        "rules_dir": hunts.rules_dir,
-        "default_target": f"{database}.detection",
-        "default_database": database,
-        "max_detections": detection_cap(
-            hunts.max_detections_per_run, hunts.max_detections_per_run_ceiling
-        ),
-        "lookup_databases": tuple(hunts.lookup_databases),
     }
 
 
@@ -193,23 +168,6 @@ def _match_notifier(settings: DFESettings) -> MatchNotifier:
     return MatchNotifier(registry, global_channels=settings.hunts.alert_channels)
 
 
-def _publish_schedule(
-    ch: Any, db: str, specs: Mapping[str, HuntSpec], settings: DFESettings
-) -> int:
-    """Bring ``hunt_schedule`` to *specs*, keeping an offset the smoother learned.
-
-    With smoothing on, an offset learned for a hunt whose interval is unchanged is kept
-    rather than reset to the hash. Returns the live hunt count.
-    """
-    return publish_schedule(
-        ch,
-        db,
-        specs,
-        fraction=settings.hunts.phase_spread_fraction,
-        keep_learned=settings.hunts.smoothing.enabled,
-    )
-
-
 class _SchedulePublisher:
     """Publishes ``hunt_schedule`` for the specs it is handed, and owes the publish until it lands.
 
@@ -241,7 +199,7 @@ class _SchedulePublisher:
         if self._owed is None:
             return
         try:
-            _publish_schedule(self._ch, self._db, self._owed, self._settings)
+            publish_hunt_schedule(self._ch, self._db, self._owed, self._settings)
         except Exception as exc:
             reason = unavailable_reason(exc)
             if reason is None:
@@ -262,15 +220,15 @@ class _SchedulePublisher:
 def materialise() -> None:
     """Publish the deterministic ``hunt_schedule`` table KEDA scales on (one-shot).
 
-    A running runner does this itself at start and on every reload, so this is for a
-    deployment that scales the runner to zero and wants the table written before any
-    worker has started. Idempotent: re-materialising tombstones removed hunts.
+    The engine API does this after each hunt change and a running runner does it at
+    start and on every reload, so this is for a hunt committed to the deploy repo by
+    hand while no worker is running. Idempotent: re-materialising tombstones removed hunts.
     """
     init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=False)
     settings = load_settings()
     ch, db = _build_ch(settings)
-    specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
-    live = _publish_schedule(ch, db, specs, settings)
+    specs = load_specs(settings.hunts.hunt_dir, **spec_sources(settings, db))
+    live = publish_hunt_schedule(ch, db, specs, settings)
     typer.echo(f"materialised {live} hunt(s) into {db}.hunt_schedule")
 
 
@@ -355,7 +313,7 @@ def run(
         max_deferral_seconds=settings.hunts.safe_horizon_max_deferral_seconds,
     )
     hunt_dir = settings.hunts.hunt_dir
-    sources = _spec_sources(settings, db)
+    sources = spec_sources(settings, db)
     # Outlives each rebuild below, so a reload does not restart a failing hunt's back-off.
     failures = HuntFailures.from_settings(settings.hunts)
     # Outlives each rebuild too, so a reload does not reset the cycle clock or the lease.
