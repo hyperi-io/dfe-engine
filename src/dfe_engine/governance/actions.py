@@ -530,7 +530,7 @@ class ActionStore:
         """
         try:
             self._crud.check(cls, name, doc)
-        except (contract.RefusedNullError, SharedInstanceConflictError) as exc:
+        except (contract.RefusedConfigError, SharedInstanceConflictError) as exc:
             return str(exc)
         try:
             if cls == HUNT_CLASS:
