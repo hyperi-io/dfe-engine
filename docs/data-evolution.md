@@ -264,6 +264,7 @@ Derived schemas: this is where a large meta schema usually gets one. A
 derived schema is a sub-selection of fields from its parent meta schema, plus
 which of those fields take which index type -- one index type per field, added
 and removed as a CRUD operation on both the definition and the deployed table.
+A field promoted later joins the table beside the selection.
 
 Transforms, optional: a source has at most one transform. DFE ships
 transform-elastic, transform-vrl and transform-vector.

@@ -235,11 +235,11 @@ def test_a_dry_run_reports_the_settings_move_a_redeploy_would_make(
 
     ClickHouseManager.reset_instance()
     try:
-        ttl_change, settings_change, error = dry_run()
+        ttl_change, settings_change, _, error = dry_run()
         planned, _ = _redeploy_statements(manager_client, database, source)
         for statement in planned:
             ch_client.command(statement)
-        _, settings_after, error_after = dry_run()
+        _, settings_after, _, error_after = dry_run()
     finally:
         ClickHouseManager.reset_instance()
 

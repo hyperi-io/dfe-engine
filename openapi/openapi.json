@@ -51657,6 +51657,14 @@
             ],
             "description": "On a dry run, the table-settings move the deploy would make on the table it already has; null when the settings do not move"
           },
+          "columns_added": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns Added",
+            "description": "The columns this deploy adds (or, on a dry run, would add) to the table it already has, in the order the version declares them. Empty when the table is new or already carries every column"
+          },
           "live_table_error": {
             "anyOf": [
               {
@@ -54187,7 +54195,7 @@
               }
             ],
             "title": "Derived Schema",
-            "description": "Derived-schema registry path (e.g. derived/beats/filebeat_auth). It SELECTS from the meta schema: the table's columns become exactly the names it lists, in its order, after the common header. It is not an override layer -- everything but the column's index resolves from the base -- and it also carries the _json/_raw capture switches for this table"
+            "description": "Derived-schema registry path (e.g. derived/beats/filebeat_auth). It SELECTS from the meta schema: the table's columns become the names it lists, in its order, after the common header, then any column promoted out of _json since. It is not an override layer -- everything but the column's index resolves from the base -- and it also carries the _json/_raw capture switches for this table"
           },
           "derived_schema_version": {
             "anyOf": [

@@ -141,6 +141,9 @@ def engine_registry() -> EngineRegistry:
 # Schema Column (used in meta_schema, derived_schema, additional_fields)
 # ---------------------------------------------------------------------------
 
+# The ``_field_type`` of a column promoted out of ``_json``.
+PROMOTED_FIELD_TYPE = "promoted"
+
 
 class SchemaColumn(BaseModel):
     """A single column in a schema definition.
@@ -582,11 +585,11 @@ class SourceSchema(BaseModel):
         default=None,
         description=(
             "Derived-schema registry path (e.g. derived/beats/filebeat_auth). It "
-            "SELECTS from the meta schema: the table's columns become exactly the "
-            "names it lists, in its order, after the common header. It is not an "
-            "override layer -- everything but the column's index resolves from the "
-            "base -- and it also carries the _json/_raw capture switches for this "
-            "table"
+            "SELECTS from the meta schema: the table's columns become the names it "
+            "lists, in its order, after the common header, then any column promoted "
+            "out of _json since. It is not an override layer -- everything but the "
+            "column's index resolves from the base -- and it also carries the "
+            "_json/_raw capture switches for this table"
         ),
     )
     derived_schema_version: str | None = Field(
