@@ -21,7 +21,6 @@ import sqlglot
 from sqlglot.tokens import TokenType
 
 from dfe_engine.hunts.hdx_sanitizer import HdxSanitizeError, HdxSanitizer, split_time_window
-from dfe_engine.hunts.rule_creation_service import RuleCreateRequest, RuleCreationService
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "hdx_sanitizer" / "rendered_views.json"
 GOLDEN: list[dict] = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
@@ -810,35 +809,3 @@ class TestSplitTimeWindow:
         split = split_time_window("SELECT a FROM t WHERE b = 1; DROP TABLE t")
         assert (split.filter, split.after_filter) == ("b = 1", "")
         assert split.ignored_clauses == ["a second statement"]
-
-
-# -- The call site --
-
-
-class TestRuleCreationCallSite:
-    """RuleCreationService turns a refusal into a SQL error instead of a crash."""
-
-    def test_refusal_becomes_a_sql_error(self):
-        leaked = next(c["input"] for c in GOLDEN if c["name"] == "export_sql_placeholder_route")
-        result = RuleCreationService().create_rule(
-            RuleCreateRequest(name="Leak", source_type="hyperdx", user_sql=leaked),
-            rule_id="leak",
-        )
-        assert len(result.sql_errors) == 1
-        assert "unrendered template placeholder" in result.sql_errors[0].message
-        assert result.sanitize_summary == {}
-
-    def test_rendered_search_becomes_the_rule_filter(self):
-        sql = next(c["input"] for c in GOLDEN if c["name"] == "search_main_sql_where_and_facets")
-        result = RuleCreationService().create_rule(
-            RuleCreateRequest(name="Facets", source_type="hyperdx", user_sql=sql),
-            rule_id="facets",
-        )
-        assert result.sql_errors == []
-        assert result.rule.source_db == "dfe"
-        assert result.rule.source_table == "main"
-        assert result.rule.where_clause == (
-            "(_source = 'winlogbeat') AND ((toString(_json.`event`.`code`) IN ('4624', '4625')) "
-            "AND (toString(_json.`user`.`name`) NOT IN ('SYSTEM')))"
-        )
-        assert "ORDER BY _timestamp DESC" in result.sanitize_summary["stripped_clauses"]

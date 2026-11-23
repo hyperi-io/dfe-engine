@@ -41,10 +41,12 @@ from dfe_engine.api.deps import (
     require_action,
     require_platform_action,
 )
+from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.clickhouse.quoting import plain_source_name
 from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.customers import CUSTOMER_TENANT_IDS, hunt_customers
@@ -53,7 +55,11 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
-from dfe_engine.hunts.rule_names import missing_rules
+from dfe_engine.hunts.hunt_target_check import is_default_target, resolve_target
+from dfe_engine.hunts.rule_compiler import detection_clause
+from dfe_engine.hunts.rule_creation_service import service_from_settings
+from dfe_engine.hunts.rule_names import RuleNameError, missing_rules, rule_file
+from dfe_engine.hunts.rule_rewriter import RuleRewriter
 from dfe_engine.hunts.run_status import (
     RunStatus,
     clear_auto_disable,
@@ -62,9 +68,10 @@ from dfe_engine.hunts.run_status import (
 )
 from dfe_engine.hunts.schedule import next_due, read_schedule
 from dfe_engine.hunts.spec_loader import interval_seconds_for
-from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError
+from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError, rule_source
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
 from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
+from dfe_engine.yaml_utils import YAMLError, yaml_load
 
 
 def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
@@ -163,6 +170,88 @@ def _validate_hunt_config(
         raise ProblemError(422, f"Not a stored rule: {listed}", code="unknown_rule") from exc
     except ValueError as exc:
         raise ProblemError(422, str(exc), code="validation_error") from exc
+
+
+def _confirm_target(config: dict[str, Any], data_database: str, confirm: bool) -> tuple[str, str]:
+    """The table the hunt writes to, refused unless confirmed when it is not the core one.
+
+    Raises:
+        ProblemError: 400 ``confirmation_required`` when the hunt writes anywhere other than
+            ``<data database>.detection`` and ``confirm`` is not set.
+    """
+    database, table = resolve_target(config, data_database)
+    if not confirm and not is_default_target(database, table, data_database):
+        raise ProblemError(
+            400,
+            f"this hunt writes detections to {database}.{table} and not "
+            f"{data_database}.detection; pass confirm=true to write there",
+            code="confirmation_required",
+        )
+    return database, table
+
+
+def _stored_rule_errors(
+    config: dict[str, Any], settings: Any, rules: Any, service: Any
+) -> list[dict[str, Any]]:
+    """Every error the runner would meet running each stored rule the hunt names.
+
+    A rule with no file yet, or one the validator already refused, is left to it.
+    """
+    data_database = settings.clickhouse.effective_data_database
+    rewriter = RuleRewriter()
+    directory = _rules_dir(settings, rules)
+    problems: list[dict[str, Any]] = []
+    for entry in config.get("rules", []):
+        name = str(entry["rule_name"])
+        try:
+            path = rule_file(directory, name, ".yaml")
+            payload = yaml_load(path) if path.is_file() else None
+        except RuleNameError, YAMLError, UnicodeDecodeError, OSError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        where, source_db, source_table = detection_clause(payload, rewriter)
+        source = rule_source(source_db, source_table) or str(
+            config.get("global_source_table_name") or ""
+        )
+        try:
+            database, table = plain_source_name(source) if source.strip() else ("", "")
+        except ValueError:
+            continue
+        for error in service.check_stored(database or data_database, table, where):
+            entry_error = error.model_dump(exclude_none=True)
+            entry_error["message"] = f"rule '{name}': {error.message}"
+            problems.append(entry_error)
+    return problems
+
+
+def _check_hunt_will_run(
+    config: dict[str, Any], settings: Any, rules: Any, *, confirm: bool
+) -> None:
+    """Refuse a hunt the runner could not run, or one writing to a table nobody confirmed.
+
+    Each stored rule passes the query check a save runs, and the results table is held to
+    the columns the runner's INSERT names. Nothing is checked against ClickHouse where none
+    is configured or reachable.
+
+    Raises:
+        ProblemError: 400 ``confirmation_required`` for an unconfirmed target other than
+            the core detection table, 422 ``invalid_target`` for a table the INSERT does
+            not fit, and 422 ``invalid_sql`` for a rule ClickHouse cannot run.
+    """
+    database, table = _confirm_target(config, settings.clickhouse.effective_data_database, confirm)
+    service = service_from_settings(settings)
+    reason = service.target_error(database, table)
+    if reason is not None:
+        raise ProblemError(422, f"Hunt not saved: {reason}", code=ErrorCode.INVALID_TARGET)
+    problems = _stored_rule_errors(config, settings, rules, service)
+    if problems:
+        raise ProblemError(
+            422,
+            "Hunt not saved: " + "; ".join(p["message"] for p in problems),
+            code=ErrorCode.INVALID_SQL,
+            sql_errors=problems,
+        )
 
 
 router = APIRouter(prefix="/hunts", tags=["hunts"], dependencies=[WRITE_TURN])
@@ -689,8 +778,20 @@ def create_hunt(
     settings: Settings,
     request: Request,
     response: Response,
+    confirm: bool = Query(
+        False,
+        description=(
+            "Must be true when the hunt writes detections anywhere other than "
+            "<data database>.detection"
+        ),
+    ),
 ) -> HuntDetailResponse:
     """Create a new hunt configuration YAML.
+
+    Each rule the hunt names passes the query check a rule save runs, and the results
+    table is checked against the columns the runner writes (422 ``invalid_sql``,
+    ``invalid_target``). A target other than ``<data database>.detection`` needs
+    ``confirm=true`` (400 ``confirmation_required``).
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
@@ -700,6 +801,7 @@ def create_hunt(
         raise ProblemError(409, f"Hunt '{body.name}' already exists", code="conflict")
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings, rules)
+    _check_hunt_will_run(config, settings, rules, confirm=confirm)
     _resolve_customers(request, config)
     outcome = registry.save(body.name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
@@ -753,8 +855,18 @@ def update_hunt(
     settings: Settings,
     request: Request,
     response: Response,
+    confirm: bool = Query(
+        False,
+        description=(
+            "Must be true when the hunt writes detections anywhere other than "
+            "<data database>.detection"
+        ),
+    ),
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration, resolving its customers afresh.
+
+    The checks of the create apply, including ``confirm=true`` for a target other than
+    ``<data database>.detection``.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
@@ -771,6 +883,7 @@ def update_hunt(
     if body.enabled is None and "enabled" in stored:
         config["enabled"] = stored["enabled"]
     _validate_hunt_config(config, settings, rules, _held_rules(stored))
+    _check_hunt_will_run(config, settings, rules, confirm=confirm)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
     _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)

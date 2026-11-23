@@ -82,9 +82,10 @@ dry-run POST /api/v1/pipeline/build
 dry-run POST /api/v1/queries/raw
 dry-run POST /api/v1/queries/views/{label}/execute
 dry-run POST /api/v1/rules
+dry-run POST /api/v1/rules/check
 dry-run POST /api/v1/rules/from-hyperdx
+dry-run POST /api/v1/rules/import
 dry-run POST /api/v1/rules/preview
-dry-run POST /api/v1/rules/validate
 dry-run POST /api/v1/sample
 dry-run POST /api/v1/schemas/definitions/derived/{schema_path}
 dry-run POST /api/v1/schemas/definitions/{schema_path}
@@ -325,9 +326,10 @@ hierarchy POST /api/v1/pipeline/build
 hierarchy POST /api/v1/queries/raw
 hierarchy POST /api/v1/queries/views/{label}/execute
 hierarchy POST /api/v1/rules
+hierarchy POST /api/v1/rules/check
 hierarchy POST /api/v1/rules/from-hyperdx
+hierarchy POST /api/v1/rules/import
 hierarchy POST /api/v1/rules/preview
-hierarchy POST /api/v1/rules/validate
 hierarchy POST /api/v1/sample
 hierarchy POST /api/v1/schemas/definitions/derived/{schema_path}
 hierarchy POST /api/v1/schemas/definitions/{schema_path}

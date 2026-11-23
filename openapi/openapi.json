@@ -12746,7 +12746,7 @@
           "Rules"
         ],
         "summary": "List Rules",
-        "description": "List detection rules with pagination and search.",
+        "description": "List detection rules with pagination and search.\n\nA stored rule with no registered source whose table is a registered source's label is\nlisted under that source. One that names none lists with its stored source as it is.",
         "operationId": "rules.list",
         "parameters": [
           {
@@ -12944,7 +12944,7 @@
           "Rules"
         ],
         "summary": "Create Rule",
-        "description": "Create a new hunt rule via RuleCreationService.\n\nThe rule is written as SQL or as a structured ``condition``, which the engine\ncompiles to the SQL and stores with it. The service sanitizes the SQL,\napplies CEL->SQL transpilation, validates column references, and optionally\nestimates query cost. A rule whose SQL the hunt runner could not compile is\nrefused with 422. The cost preview counts only the orgs the hunts running the\nrule read, cut to the orgs its author may read.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new hunt rule from a registered source and a WHERE clause.\n\nThe rule is written as a ``where_clause`` or as a structured ``condition``, which\nthe engine compiles to the WHERE and stores with it. A CEL filter is ANDed in, or\nstands alone. The service checks the source is registered, reads the WHERE as the\nhunt runner will, has ClickHouse plan it against the source's table, and optionally\nestimates alert volume. A rule the hunt runner could not compile is refused with 422.\nA ``_json`` path the source's recent rows never carried comes back as a warning. The\ncost preview counts only the orgs the hunts running the rule read, cut to the orgs\nits author may read.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "rules.create",
         "requestBody": {
           "required": true,
@@ -12988,7 +12988,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its source is not a registered source, its WHERE is empty, carries a {...} placeholder or a time bound, holds more than a row filter, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), is not SQL ClickHouse can plan against the source's table, or its CEL filter does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13030,13 +13030,105 @@
         }
       }
     },
+    "/api/v1/rules/import": {
+      "post": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Import a SELECT as a Rule's Fields",
+        "description": "Read a SELECT into the source and WHERE clause a rule is saved with, saving nothing.\n\nThe FROM becomes ``source`` when its table is a registered source. Otherwise\n``source`` is null and the caller picks one. The column list, ORDER BY, LIMIT, SETTINGS,\na ``{timestamp_condition}`` placeholder and time bounds on timestamp columns are dropped\nand listed in ``dropped``. GROUP BY, HAVING, a JOIN, a UNION, a WITH clause and a\nsubquery in FROM are refused with 422 ``import_refused``.",
+        "operationId": "rules.import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleImportResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Refused. The body failed validation (code validation_error), or the SELECT has a shape a rule cannot carry: GROUP BY, HAVING, a JOIN, a UNION, a WITH clause or a subquery in FROM (code import_refused, the reason in detail).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "rules",
+          "resource": "rules",
+          "hierarchy": [
+            "rules"
+          ],
+          "verb": "import",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "rule:validate"
+        }
+      }
+    },
     "/api/v1/rules/from-hyperdx": {
       "post": {
         "tags": [
           "Rules"
         ],
-        "summary": "Create Rule From Search",
-        "description": "Create a hunt rule from the SQL a Search view renders to.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile, or that matches every\nevent, is refused with 422. RBAC: ``rule:write`` (data_analyst) --\n``org_viewer`` has neither this grant nor the UI button.",
+        "summary": "Read a Search View as a Rule's Fields",
+        "description": "Read the SQL a Search view renders to into the fields a rule editor opens with.\n\nThe dfe-hyperdx sanitiser strips the view's own meta (time bounds, LIMIT,\n``__hdx_time_bucket``, SETTINGS), then the result is read as ``POST /rules/import``\nreads a SELECT. Nothing is saved, so a rule never lands without a source. A free\nrule name is drawn from the saved-search name. RBAC: ``rule:validate``.",
         "operationId": "rules.from-hyperdx",
         "requestBody": {
           "content": {
@@ -13049,7 +13141,7 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -13080,7 +13172,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused. The body failed validation (code validation_error), or the SELECT has a shape a rule cannot carry: GROUP BY, HAVING, a JOIN, a UNION, a WITH clause or a subquery in FROM (code import_refused, the reason in detail).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13118,23 +13210,23 @@
             "aliases": [],
             "positional": []
           },
-          "action": "rule:write"
+          "action": "rule:validate"
         }
       }
     },
-    "/api/v1/rules/validate": {
+    "/api/v1/rules/check": {
       "post": {
         "tags": [
           "Rules"
         ],
-        "summary": "Validate Rule Sql",
-        "description": "Validate a detection query (SELECT ... FROM ...) without creating a rule.\n\nReturns any syntax errors or validation issues found.",
-        "operationId": "rules.validate",
+        "summary": "Check Rule",
+        "description": "Check a source and WHERE clause as a save would, writing nothing.\n\nAnswers 200 with ``valid`` false and the reasons in ``errors`` for a rule a save\nwould refuse, so an editor can show them as the author types. ``warnings`` carries\nwhat a save accepts but the author should read. The alert-volume preview does not run,\nwhich ``POST /rules/preview`` is for.",
+        "operationId": "rules.check",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SqlValidationRequest"
+                "$ref": "#/components/schemas/RuleCheckRequest"
               }
             }
           },
@@ -13146,7 +13238,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SqlValidationResponse"
+                  "$ref": "#/components/schemas/RuleCheckResponse"
                 }
               }
             }
@@ -13203,7 +13295,7 @@
           "hierarchy": [
             "rules"
           ],
-          "verb": "validate",
+          "verb": "check",
           "read_only": false,
           "cli": {
             "hidden": false,
@@ -13312,7 +13404,7 @@
           "Rules"
         ],
         "summary": "Get Rule",
-        "description": "Get a detection rule by file name.",
+        "description": "Get a detection rule by file name.\n\nA stored rule with no source whose table is a registered source's label is returned\nunder that source.",
         "operationId": "rules.get",
         "parameters": [
           {
@@ -13403,7 +13495,7 @@
           "Rules"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as SQL or as a ``condition``, as on create, and a\nrule replaced with SQL no longer carries a condition.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as a ``where_clause`` or a ``condition`` on a registered\n``source``, as on create, and a rule replaced with a WHERE no longer carries a condition.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
         "operationId": "rules.apply",
         "parameters": [
           {
@@ -13458,7 +13550,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its source is not a registered source, its WHERE is empty, carries a {...} placeholder or a time bound, holds more than a row filter, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), is not SQL ClickHouse can plan against the source's table, or its CEL filter does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -15852,8 +15944,22 @@
           "hunts"
         ],
         "summary": "Create Hunt",
-        "description": "Create a new hunt configuration YAML.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org.",
+        "description": "Create a new hunt configuration YAML.\n\nEach rule the hunt names passes the query check a rule save runs, and the results\ntable is checked against the columns the runner writes (422 ``invalid_sql``,\n``invalid_target``). A target other than ``<data database>.detection`` needs\n``confirm=true`` (400 ``confirmation_required``).\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org.",
         "operationId": "hunts.create",
+        "parameters": [
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Must be true when the hunt writes detections anywhere other than <data database>.detection",
+              "default": false,
+              "title": "Confirm"
+            },
+            "description": "Must be true when the hunt writes detections anywhere other than <data database>.detection"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -16035,7 +16141,7 @@
           "hunts"
         ],
         "summary": "Update Hunt",
-        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
+        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nThe checks of the create apply, including ``confirm=true`` for a target other than\n``<data database>.detection``.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
         "operationId": "hunts.apply",
         "parameters": [
           {
@@ -16046,6 +16152,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Must be true when the hunt writes detections anywhere other than <data database>.detection",
+              "default": false,
+              "title": "Confirm"
+            },
+            "description": "Must be true when the hunt writes detections anywhere other than <data database>.detection"
           }
         ],
         "requestBody": {
@@ -40900,6 +41018,27 @@
         "title": "DraftColumn",
         "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type. For a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
       },
+      "DroppedPartResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "columns, order_by, limit, offset, settings, format, distinct, time_bound or time_placeholder"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "The piece as written"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "DroppedPartResponse",
+        "description": "One piece of the SELECT the rule does not keep."
+      },
       "DryRunEventModel": {
         "properties": {
           "index": {
@@ -49496,6 +49635,56 @@
         "title": "RuleBlockResponse",
         "description": "One block of the receiver's rule set: a source's rows, a profile's, or the default."
       },
+      "RuleCheckRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The registered source whose table the rule reads"
+          },
+          "where_clause": {
+            "type": "string",
+            "title": "Where Clause",
+            "description": "The row filter, as the part after WHERE"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "where_clause"
+        ],
+        "title": "RuleCheckRequest",
+        "description": "A source and WHERE clause to check as a save would, without saving them."
+      },
+      "RuleCheckResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/SqlValidationError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "What a save would accept but the author should read: an alert-volume reading, a _json path recent rows of the source never carried"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "RuleCheckResponse",
+        "description": "Whether a save of the source and WHERE would be accepted, and why not."
+      },
       "RuleCondition": {
         "properties": {
           "field": {
@@ -49615,18 +49804,23 @@
             "description": "low|medium|high|critical",
             "default": "medium"
           },
-          "user_sql": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source",
+            "description": "The registered source whose table the rule reads, by its label (e.g. windows_audit). A label no source carries is refused"
+          },
+          "where_clause": {
             "anyOf": [
               {
-                "type": "string",
-                "minLength": 1
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "User Sql",
-            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table). Give this or ``condition``, not both. A rule saved this way has no ``condition``"
+            "title": "Where Clause",
+            "description": "The row filter, written as the part after WHERE, with no time bound and no {...} placeholder, since the time window comes from the hunt schedule. Give this or ``condition``, not both"
           },
           "condition": {
             "anyOf": [
@@ -49637,7 +49831,7 @@
                 "type": "null"
               }
             ],
-            "description": "The rule's structured condition, which the engine compiles to its SQL and stores with it, so the builder reopens on it. Reads the table of ``source``. Give this or ``user_sql``, not both"
+            "description": "The rule's structured condition, which the engine compiles to its WHERE and stores with it, so the builder reopens on it. Give this or ``where_clause``, not both"
           },
           "cel_filter": {
             "anyOf": [
@@ -49649,7 +49843,7 @@
               }
             ],
             "title": "Cel Filter",
-            "description": "CEL expression filter"
+            "description": "CEL expression ANDed into the WHERE, or the whole filter alone"
           },
           "hunt_name": {
             "anyOf": [
@@ -49662,18 +49856,6 @@
             ],
             "title": "Hunt Name",
             "description": "Parent hunt name"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source",
-            "description": "Source label (e.g. windows_audit)"
           },
           "estimate_cost": {
             "type": "boolean",
@@ -49699,34 +49881,21 @@
             "pattern": "^[A-Za-z0-9_-]{1,128}$",
             "title": "Name",
             "description": "Rule file name (YAML stem); must be unique"
-          },
-          "source_type": {
-            "type": "string",
-            "enum": [
-              "raw",
-              "hyperdx"
-            ],
-            "title": "Source Type",
-            "description": "'raw' (plain SQL) or 'hyperdx' (Search saved search format)",
-            "default": "raw"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
+          "source",
           "name"
         ],
         "title": "RuleCreateRequest",
-        "description": "Create a hunt rule via RuleCreationService."
+        "description": "Create a hunt rule from a registered source and a WHERE clause."
       },
       "RuleCreateResponse": {
         "properties": {
           "rule": {
             "$ref": "#/components/schemas/RuleResponse"
-          },
-          "sanitize_summary": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Sanitize Summary"
           },
           "sql_errors": {
             "items": {
@@ -49751,7 +49920,7 @@
           "rule"
         ],
         "title": "RuleCreateResponse",
-        "description": "The created rule, what sanitising changed, and what the rule is estimated to cost."
+        "description": "The created rule and what it is estimated to cost."
       },
       "RuleEditRequest": {
         "properties": {
@@ -49797,7 +49966,7 @@
               }
             ],
             "title": "Saved Search Name",
-            "description": "Search saved-search name; seeds the rule id and label"
+            "description": "Search saved-search name; seeds the rule name and label"
           },
           "severity": {
             "type": "string",
@@ -49827,7 +49996,7 @@
               }
             ],
             "title": "Source",
-            "description": "Source label (e.g. windows_audit)"
+            "description": "The source the view reads, which wins over the FROM when it is registered"
           }
         },
         "additionalProperties": false,
@@ -49836,46 +50005,166 @@
           "raw_sql"
         ],
         "title": "RuleFromHyperdxRequest",
-        "description": "Create a hunt rule from the SQL a Search view runs.\n\nSearch renders the view to ``raw_sql`` and sends it here. The create\npipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,\nSETTINGS) via the dfe-hyperdx sanitizer, and the engine derives a unique rule id\nfrom the saved-search name. The caller gets that id back and opens\n``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
+        "description": "The SQL a Search view runs, to read into the fields of a rule editor."
       },
       "RuleFromHyperdxResponse": {
         "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id",
-            "description": "Created rule id (YAML stem); open at /rules/{id}"
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "The registered source the FROM names. Null when the author must pick one"
           },
-          "display_name": {
-            "type": "string",
-            "title": "Display Name"
+          "needs_source": {
+            "type": "boolean",
+            "title": "Needs Source",
+            "description": "True when the author must pick a source to save"
           },
-          "sanitize_summary": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Sanitize Summary"
+          "from_table": {
+            "type": "string",
+            "title": "From Table",
+            "description": "The FROM as written, or the placeholders it was"
+          },
+          "where_clause": {
+            "type": "string",
+            "title": "Where Clause",
+            "description": "The row filter with the time window removed, empty when nothing is left"
+          },
+          "dropped": {
+            "items": {
+              "$ref": "#/components/schemas/DroppedPartResponse"
+            },
+            "type": "array",
+            "title": "Dropped",
+            "description": "Everything in the SELECT the rule does not keep"
           },
           "warnings": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Warnings"
+            "title": "Warnings",
+            "description": "What to look at before saving the fields"
           },
-          "sql_errors": {
-            "items": {
-              "$ref": "#/components/schemas/SqlValidationError"
-            },
-            "type": "array",
-            "title": "Sql Errors"
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "A free rule name drawn from the saved-search name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name"
+          },
+          "sanitize_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Sanitize Summary"
           }
         },
         "type": "object",
         "required": [
-          "id",
-          "display_name"
+          "needs_source",
+          "from_table",
+          "where_clause",
+          "name",
+          "display_name",
+          "severity"
         ],
         "title": "RuleFromHyperdxResponse",
-        "description": "The rule created from a Search query."
+        "description": "The fields a rule editor opens pre-filled with. Nothing is saved."
+      },
+      "RuleImportRequest": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Sql",
+            "description": "One ClickHouse SELECT of a single table"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "RuleImportRequest",
+        "description": "A SELECT to read into a source and a WHERE clause."
+      },
+      "RuleImportResponse": {
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "The registered source the FROM names. Null when the author must pick one"
+          },
+          "needs_source": {
+            "type": "boolean",
+            "title": "Needs Source",
+            "description": "True when the author must pick a source to save"
+          },
+          "from_table": {
+            "type": "string",
+            "title": "From Table",
+            "description": "The FROM as written, or the placeholders it was"
+          },
+          "where_clause": {
+            "type": "string",
+            "title": "Where Clause",
+            "description": "The row filter with the time window removed, empty when nothing is left"
+          },
+          "dropped": {
+            "items": {
+              "$ref": "#/components/schemas/DroppedPartResponse"
+            },
+            "type": "array",
+            "title": "Dropped",
+            "description": "Everything in the SELECT the rule does not keep"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "What to look at before saving the fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "needs_source",
+          "from_table",
+          "where_clause"
+        ],
+        "title": "RuleImportResponse",
+        "description": "What a SELECT becomes as a rule's fields. Nothing is saved."
       },
       "RuleOrderRequest": {
         "properties": {
@@ -50127,6 +50416,14 @@
             "title": "Matches Everything",
             "description": "Why a save would be refused for matching every event, when it would"
           },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "What a save would accept but the author should read, such as an unseen _json path"
+          },
           "cost_estimate": {
             "anyOf": [
               {
@@ -50361,18 +50658,23 @@
             "description": "low|medium|high|critical",
             "default": "medium"
           },
-          "user_sql": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source",
+            "description": "The registered source whose table the rule reads, by its label (e.g. windows_audit). A label no source carries is refused"
+          },
+          "where_clause": {
             "anyOf": [
               {
-                "type": "string",
-                "minLength": 1
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "User Sql",
-            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE ... (the FROM names the source table). Give this or ``condition``, not both. A rule saved this way has no ``condition``"
+            "title": "Where Clause",
+            "description": "The row filter, written as the part after WHERE, with no time bound and no {...} placeholder, since the time window comes from the hunt schedule. Give this or ``condition``, not both"
           },
           "condition": {
             "anyOf": [
@@ -50383,7 +50685,7 @@
                 "type": "null"
               }
             ],
-            "description": "The rule's structured condition, which the engine compiles to its SQL and stores with it, so the builder reopens on it. Reads the table of ``source``. Give this or ``user_sql``, not both"
+            "description": "The rule's structured condition, which the engine compiles to its WHERE and stores with it, so the builder reopens on it. Give this or ``where_clause``, not both"
           },
           "cel_filter": {
             "anyOf": [
@@ -50395,7 +50697,7 @@
               }
             ],
             "title": "Cel Filter",
-            "description": "CEL expression filter"
+            "description": "CEL expression ANDed into the WHERE, or the whole filter alone"
           },
           "hunt_name": {
             "anyOf": [
@@ -50408,18 +50710,6 @@
             ],
             "title": "Hunt Name",
             "description": "Parent hunt name"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source",
-            "description": "Source label (e.g. windows_audit)"
           },
           "estimate_cost": {
             "type": "boolean",
@@ -50438,11 +50728,27 @@
             ],
             "title": "Cost Window Minutes",
             "description": "Lookback window in minutes the preview counts over. Absent or 0 uses the deployment's preview window."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Accepted and ignored: the path names the rule"
           }
         },
+        "additionalProperties": false,
         "type": "object",
+        "required": [
+          "source"
+        ],
         "title": "RuleUpdateRequest",
-        "description": "Update an existing hunt rule (re-runs creation pipeline, and ``source_type`` is not accepted)."
+        "description": "Replace a hunt rule, re-running the creation checks on its source and WHERE."
       },
       "SampleBackend": {
         "type": "string",
@@ -55270,43 +55576,7 @@
           "message"
         ],
         "title": "SqlValidationError",
-        "description": "One error in rule SQL, with where it is and a suggested fix."
-      },
-      "SqlValidationRequest": {
-        "properties": {
-          "sql": {
-            "type": "string",
-            "title": "Sql",
-            "description": "Full SELECT ... FROM ... query to validate"
-          }
-        },
-        "type": "object",
-        "required": [
-          "sql"
-        ],
-        "title": "SqlValidationRequest",
-        "description": "Body for validating a rule's SQL."
-      },
-      "SqlValidationResponse": {
-        "properties": {
-          "valid": {
-            "type": "boolean",
-            "title": "Valid"
-          },
-          "errors": {
-            "items": {
-              "$ref": "#/components/schemas/SqlValidationError"
-            },
-            "type": "array",
-            "title": "Errors"
-          }
-        },
-        "type": "object",
-        "required": [
-          "valid"
-        ],
-        "title": "SqlValidationResponse",
-        "description": "Whether rule SQL is valid, and its errors."
+        "description": "One error in a rule, with where it is and a suggested fix."
       },
       "StateRequest": {
         "properties": {

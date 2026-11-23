@@ -14,7 +14,9 @@ declared. The source itself is [source.md](source.md).
 
 ## Rules
 
-A rule is one detection condition on a source's table. `POST /api/v1/rules` takes it as a full `SELECT ... FROM <db>.<table> WHERE ...` in `user_sql` (the FROM names the source table), or as a structured `condition` on a `source`, and never both. A CEL filter may be ANDed in beside either. The engine stores the WHERE it extracts, the source table and the original SQL, which is the file the hunt runner reads.
+A rule is a registered `source` and the WHERE clause that selects its rows. `POST /api/v1/rules` takes the `source` label and a `where_clause` (the part after WHERE), or a structured `condition` in its place, and never both. A CEL filter may be ANDed in beside either, or stand alone. The engine reads the source's table in the data database, stores the WHERE, the table and the SELECT they make, which is the file the hunt runner reads.
+
+A save answers 422 `invalid_sql`, with each reason as `{message, position, suggestion}` in `sql_errors`, for a source no registered source carries, an empty WHERE, a `{...}` placeholder in it (the time window comes from the hunt schedule), a time bound the hunt window replaces, anything past a row filter, a call outside the row, or a condition ClickHouse cannot plan against the source's table. A `_json` path that recent rows of the source never carried comes back as a warning, never a refusal. `POST /api/v1/rules/check` takes `{source, where_clause}` and answers what a save would, writing nothing.
 
 ```yaml
 # rules/brute_force_login.yaml -- the filename stem is the rule's id
@@ -26,7 +28,7 @@ where_clause: "event_id = 4625"
 original_sql: SELECT * FROM dfe.winaudit WHERE event_id = 4625
 ```
 
-A `condition` is one test on a field, or `all` or `any` of several, nested to `x-dfe-max-nesting` groups. `negate` inverts a test or a group. The engine compiles it to `original_sql` and `where_clause` and stores it beside them, so `GET /api/v1/rules/{name}` returns the `condition` and the console reopens its builder on it. A rule saved as SQL has no condition, and a `PUT` with SQL drops one.
+A `condition` is one test on a field, or `all` or `any` of several, nested to `x-dfe-max-nesting` groups. `negate` inverts a test or a group. The engine compiles it to `original_sql` and `where_clause` and stores it beside them, so `GET /api/v1/rules/{name}` returns the `condition` and the console reopens its builder on it. A rule saved with a `where_clause` has no condition, and a `PUT` with one drops it.
 
 ```json
 {"all": [{"field": "user.name", "value": "bob"},
@@ -43,7 +45,7 @@ A `condition` is one test on a field, or `all` or `any` of several, nested to `x
 
 The `RuleCondition` schema in `openapi.json` publishes the operators, the kind of value each takes (`x-dfe-operand-kinds`) and the nesting limit.
 
-A field is a column of the source table when the table has one by that name, otherwise a path inside `_json` (`_json.` in front is accepted). A path is read as the type of its operand. A row without the field fails every test but `exists`, and `negate` does not change that, so `exists` negated finds the rows that lack it. Every value is quoted and every field name is split into identifier parts, so no operand reaches the SQL as text. The hunt window bounds time for every rule, so a condition cannot compare `_timestamp` or the other time columns with `lt`, `lte`, `gt` or `gte`, and a save or preview says so. A text operand cannot hold `{window}` or `{unseen}`, which the runner fills in wherever they sit. A condition is always `source_type` `raw`.
+A field is a column of the source table when the table has one by that name, otherwise a path inside `_json` (`_json.` in front is accepted). A path is read as the type of its operand. A row without the field fails every test but `exists`, and `negate` does not change that, so `exists` negated finds the rows that lack it. Every value is quoted and every field name is split into identifier parts, so no operand reaches the SQL as text. The hunt window bounds time for every rule, so a condition cannot compare `_timestamp` or the other time columns with `lt`, `lte`, `gt` or `gte`, and a save or preview says so. A text operand cannot hold `{window}` or `{unseen}`, which the runner fills in wherever they sit.
 
 `POST /api/v1/rules/preview` takes `{source, condition, cel_filter?, cost_window_minutes?}` and runs what a save runs under the same org fence, then stops. Send `name` when editing a rule so the count follows the hunts that run it. A condition the save would refuse still answers 200, with the reasons in `sql_errors` or `matches_everything`.
 
@@ -53,9 +55,19 @@ A field is a column of the source table when the table has one by that name, oth
  "matches_everything": null, "cost_estimate": {"estimated_rows": 2, "band": "ok"}}
 ```
 
+### Importing a SELECT
+
+`POST /api/v1/rules/import` takes `{sql}` and returns the fields a rule is saved with, saving nothing: `source`, `needs_source`, `from_table`, `where_clause`, `dropped` and `warnings`. The FROM becomes `source` when its table is a registered source in the data database, and otherwise `source` is null and the author picks one. A legacy `{{org_id}}.{{source_table_name}}` FROM always needs a pick. The column list, ORDER BY, LIMIT, OFFSET, SETTINGS, DISTINCT, a `{timestamp_condition}` placeholder and time bounds on timestamp columns are dropped, and each one is listed in `dropped` as written. GROUP BY, HAVING, a JOIN, a UNION, a WITH clause and a subquery in FROM answer 422 `import_refused` with the reason in `detail`.
+
+`POST /api/v1/rules/from-hyperdx` strips a Search view's own meta, then reads the result the same way. It also returns a free rule `name`, the `display_name`, the `severity` and what the sanitiser removed, so the console opens its editor pre-filled. It never saves a rule.
+
+A rule stored before sources were registered is read as the registered source its table names, and the engine log lists, at startup, every stored rule that names none. None is dropped.
+
 `GET /api/v1/hunts?rule=<name>` lists the hunts with exactly that name in `rules`.
 
 A hunt can only name a stored rule: `POST /api/v1/hunts` answers 422 `unknown_rule` for one that is not, and so does a `PUT` that adds one. Under review-required writes a rule is stored once its review merges, so a hunt naming it gets 422 until then. A hunt whose rule file is deleted afterwards stays editable, and its list row and detail carry `missing_rules` and an `error` saying the runner cannot fire it.
+
+A hunt write also runs each stored rule through the query check a rule save runs (422 `invalid_sql`, naming the rule), and reads the results table's columns from `system.columns` against the columns the runner inserts (422 `invalid_target`). A hunt that writes anywhere other than `<data database>.detection` answers 400 `confirmation_required` until the write carries `confirm=true`.
 
 ## Hunts
 

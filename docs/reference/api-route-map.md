@@ -12,9 +12,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 128 | Not placed yet: see its question |
+| decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 327 | |
+| total | 328 | |
 
 ## Questions
 
@@ -22,8 +22,8 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|
 | [apps-depth](#apps-depth) | 22 |
 | [groups-scope](#groups-scope) | 11 |
+| [detection-rules](#detection-rules) | 9 |
 | [compute-helpers](#compute-helpers) | 8 |
-| [detection-rules](#detection-rules) | 8 |
 | [hunts-orgs](#hunts-orgs) | 7 |
 | [synthetic-data](#synthetic-data) | 7 |
 | [queries](#queries) | 6 |
@@ -354,6 +354,22 @@ A group is system- or org-scoped, so `orgs/{org}/groups` cannot own a system gro
 | `GET /api/v1/auth/groups/{name}/sensitive-attributes` | - | - | - | - | decide | 0 |  |
 | `PUT /api/v1/auth/groups/{name}/sensitive-attributes` | - | - | - | - | decide | 0 |  |
 
+### detection-rules
+
+Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
+| `POST /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
+| `POST /api/v1/rules/check` | - | - | - | - | decide | ui 2 |  |
+| `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/import` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
+| `DELETE /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+| `GET /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+| `PUT /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+
 ### compute-helpers
 
 A compute-only helper that owns no resource: an action on the resource it serves, or a shared root for helpers.
@@ -368,21 +384,6 @@ A compute-only helper that owns no resource: an action on the resource it serves
 | `POST /api/v1/authoring/scaffold` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/cel/check` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/cel/check-batch` | - | - | - | - | decide | 0 |  |
-
-### detection-rules
-
-Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `GET /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
-| `POST /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
-| `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules/validate` | - | - | - | - | decide | ui 2 |  |
-| `DELETE /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
-| `GET /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
-| `PUT /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
 
 ### hunts-orgs
 

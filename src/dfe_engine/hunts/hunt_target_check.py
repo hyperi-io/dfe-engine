@@ -1,0 +1,70 @@
+#  Project:      dfe-engine
+#  File:         hunts/hunt_target_check.py
+#  Purpose:      Hold a hunt's results table to the columns the runner writes
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+"""Where a hunt writes its detections, and whether that table takes what the runner inserts.
+
+A hunt writes to ``<data database>.detection`` unless it names a results table. A table
+missing a column the runner's INSERT names fails at the first run, not at the save, so the
+save reads the live columns from ``system.columns`` and refuses the gap.
+"""
+
+from typing import Any
+
+from dfe_engine.clickhouse.quoting import plain_table_name
+from dfe_engine.schema.applier import live_columns
+
+from .hunt_output import HuntResultSchema
+
+DETECTION_TABLE = "detection"
+"""The core table detections land in when a hunt names no other."""
+
+
+def resolve_target(config: dict[str, Any], data_database: str) -> tuple[str, str]:
+    """The database and table a hunt writes to.
+
+    Args:
+        config: The hunt's stored configuration.
+        data_database: The data database, which an unqualified target and the default
+            both land in.
+
+    Returns:
+        ``(database, table)``.
+
+    Raises:
+        ValueError: The configured target is not a plain ``table`` or ``database.table``.
+    """
+    target = str(config.get("global_target_table_name") or "").strip()
+    if not target:
+        return data_database, DETECTION_TABLE
+    database, table = plain_table_name(target)
+    return database or data_database, table
+
+
+def is_default_target(database: str, table: str, data_database: str) -> bool:
+    """Whether the target is the core detection table of the data database."""
+    return (database, table) == (data_database, DETECTION_TABLE)
+
+
+def missing_columns(client: Any, database: str, table: str) -> list[str] | None:
+    """The columns the runner's INSERT names that the table does not have.
+
+    Args:
+        client: A ClickHouse client.
+        database: The target's database.
+        table: The target's table.
+
+    Returns:
+        The missing columns in INSERT order, empty when the table takes every one, or None
+        when the table does not exist.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    present = live_columns(client=client, database=database, table=table)
+    if not present:
+        return None
+    return [column for column in HuntResultSchema().insert_columns() if column not in present]

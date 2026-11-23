@@ -52,9 +52,19 @@ VIEWER_REFUSED = [
     (
         "post",
         "/api/v1/rules",
-        {"name": "viewer_rule", "severity": "low", "user_sql": "event_type = 'login'"},
+        {
+            "name": "viewer_rule",
+            "severity": "low",
+            "source": "windows-audit",
+            "where_clause": "event_type = 'login'",
+        },
     ),
-    ("post", "/api/v1/rules/validate", {"sql": "event_type = 'login'"}),
+    (
+        "post",
+        "/api/v1/rules/check",
+        {"source": "windows-audit", "where_clause": "event_type = 'login'"},
+    ),
+    ("post", "/api/v1/rules/import", {"sql": "SELECT * FROM events WHERE event_type = 'login'"}),
     (
         "post",
         "/api/v1/rules/preview",

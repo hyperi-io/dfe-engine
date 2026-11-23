@@ -142,7 +142,7 @@ def _rule_entries(definition: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
-def _detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[str, str, str]:
+def detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[str, str, str]:
     """A rule's (where_clause, source_db, source_table).
 
     The registry stores the WHERE the rewriter already extracted. A hand-authored
@@ -269,7 +269,7 @@ def compile_hunt_queries(
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' is not a YAML mapping")
             continue
 
-        where, rule_db, rule_table = _detection_clause(payload, rewriter)
+        where, rule_db, rule_table = detection_clause(payload, rewriter)
         if not where:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' has no detection logic")
             continue

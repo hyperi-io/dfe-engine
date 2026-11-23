@@ -35,16 +35,7 @@ class TestRuleCreateRequest:
             user_sql="SELECT * FROM db.tbl WHERE x = 1",
         )
         assert req.name == "Test Rule"
-        assert req.source_type == "raw"
         assert req.severity == "medium"
-
-    def test_hyperdx_source_type(self):
-        req = RuleCreateRequest(
-            name="Test",
-            source_type="hyperdx",
-            user_sql="SELECT count() FROM default.logs WHERE x = 1",
-        )
-        assert req.source_type == "hyperdx"
 
     def test_requires_sql_or_cel(self):
         with pytest.raises(ValueError, match=r"user_sql.*cel_filter"):
@@ -87,7 +78,6 @@ class TestCreateRuleRaw:
         assert result.rule.name == "Certutil Abuse"
         assert result.rule.severity == "high"
         assert "process_name" in result.rule.where_clause
-        assert result.sanitize_summary == {}  # raw = no HyperDX sanitization
 
     def test_raw_strips_generic_time_bounds(self, service):
         """RuleRewriter still strips generic timestamp bounds for raw SQL."""
@@ -142,169 +132,6 @@ class TestCreateRuleRaw:
             rule_id="r3",
         )
         assert result.rule.source == "crowdstrike_edr"
-
-
-# -- HyperDX SQL rule creation ------------------------------
-
-
-class TestCreateRuleHyperDX:
-    """Test rule creation with source_type='hyperdx'."""
-
-    def test_strips_hyperdx_time_bounds(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="HyperDX Test",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT count() FROM default.logs "
-                    "WHERE (timestamp >= fromUnixTimestamp64Milli(1739318400000) "
-                    "AND timestamp <= fromUnixTimestamp64Milli(1739491200000)) "
-                    "AND severity = 'high'"
-                ),
-            ),
-            rule_id="hdx1",
-        )
-        assert result.sql_errors == []
-        assert "fromUnixTimestamp64Milli" not in result.rule.where_clause
-        assert "severity = 'high'" in result.rule.where_clause
-        assert "stripped_time_bounds" in result.sanitize_summary
-
-    def test_strips_settings_and_limit(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Settings Test",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT count() FROM default.logs WHERE x = 1 "
-                    "LIMIT 10 OFFSET 0 "
-                    "SETTINGS optimize_read_in_order = 0"
-                ),
-            ),
-            rule_id="hdx2",
-        )
-        assert result.sql_errors == []
-        assert "SETTINGS" not in result.rule.original_sql
-        assert "LIMIT" not in result.rule.original_sql
-        assert "stripped_settings" in result.sanitize_summary
-        assert "stripped_limit" in result.sanitize_summary
-
-    def test_strips_time_bucket(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Bucket Test",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT countIf((ServiceName = 'api')),"
-                    "toStartOfInterval(toDateTime(TimestampTime), INTERVAL 6 hour) "
-                    "AS `__hdx_time_bucket` "
-                    "FROM default.otel_logs "
-                    "WHERE (TimestampTime >= fromUnixTimestamp64Milli(1741887731578) "
-                    "AND TimestampTime <= fromUnixTimestamp64Milli(1742492531585)) "
-                    "AND ((ServiceName = 'api')) "
-                    "GROUP BY toStartOfInterval(toDateTime(TimestampTime), "
-                    "INTERVAL 6 hour) AS `__hdx_time_bucket` "
-                    "ORDER BY toStartOfInterval(toDateTime(TimestampTime), "
-                    "INTERVAL 6 hour) AS `__hdx_time_bucket`"
-                ),
-            ),
-            rule_id="hdx3",
-        )
-        assert result.sql_errors == []
-        assert "__hdx_time_bucket" not in result.rule.original_sql
-        assert "toStartOfInterval" not in result.rule.original_sql
-        assert "ServiceName = 'api'" in result.rule.where_clause
-        assert result.sanitize_summary.get("had_time_bucket") is True
-
-    def test_preserves_detection_logic(self, service):
-        """HAVING cannot become a row filter, so the request is refused, not widened."""
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Detection Logic",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT count(),severity FROM default.logs "
-                    "WHERE (timestamp >= fromUnixTimestamp64Milli(1739318400000) "
-                    "AND timestamp <= fromUnixTimestamp64Milli(1739491200000)) "
-                    "AND process_name = 'certutil.exe' "
-                    "AND severity IN ('high', 'critical') "
-                    "GROUP BY severity "
-                    "HAVING count(*) > 100 "
-                    "SETTINGS optimize_read_in_order = 0"
-                ),
-            ),
-            rule_id="hdx4",
-        )
-        assert [e.message.split(",")[0] for e in result.sql_errors] == [
-            "HAVING filters aggregated groups"
-        ]
-        assert result.sanitize_summary == {}
-
-    def test_preserves_every_detection_predicate(self, service):
-        """Every user predicate survives. The window, grouping and SETTINGS do not."""
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Detection Logic",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT count(),severity FROM default.logs "
-                    "WHERE (timestamp >= fromUnixTimestamp64Milli(1739318400000) "
-                    "AND timestamp <= fromUnixTimestamp64Milli(1739491200000)) "
-                    "AND process_name = 'certutil.exe' "
-                    "AND severity IN ('high', 'critical') "
-                    "GROUP BY severity "
-                    "SETTINGS optimize_read_in_order = 0"
-                ),
-            ),
-            rule_id="hdx6",
-        )
-        assert result.sql_errors == []
-        assert result.rule.where_clause == (
-            "process_name = 'certutil.exe' AND severity IN ('high', 'critical')"
-        )
-        assert result.rule.source_db == "default"
-        assert result.rule.source_table == "logs"
-
-    def test_literal_holding_clause_words_reaches_the_rule_whole(self, service):
-        """A search term that spells ORDER BY is data, end to end."""
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Literal",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT _timestamp,_json FROM dfe.main WHERE (_timestamp >= "
-                    "fromUnixTimestamp64Milli(1) AND _timestamp <= fromUnixTimestamp64Milli(2)) "
-                    "AND ((toString(`_json`.`message`) = 'failed ORDER BY LIMIT 5; HAVING x')) "
-                    "ORDER BY _timestamp DESC LIMIT 200"
-                ),
-            ),
-            rule_id="hdx7",
-        )
-        assert result.sql_errors == []
-        assert result.rule.where_clause == (
-            "((toString(`_json`.`message`) = 'failed ORDER BY LIMIT 5; HAVING x'))"
-        )
-
-    def test_hyperdx_with_cel_filter(self, service):
-        """HyperDX sanitization + CEL transpilation combined."""
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="HyperDX + CEL",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT * FROM default.logs "
-                    "WHERE (timestamp >= fromUnixTimestamp64Milli(1739318400000) "
-                    "AND timestamp <= fromUnixTimestamp64Milli(1739491200000)) "
-                    "AND severity = 'high'"
-                ),
-                cel_filter='process_name == "certutil.exe"',
-            ),
-            rule_id="hdx5",
-        )
-        assert result.sql_errors == []
-        assert "fromUnixTimestamp64Milli" not in result.rule.where_clause
-        assert "severity" in result.rule.where_clause
-        # CEL transpiled and ANDed
-        assert "process_name" in result.rule.where_clause
 
 
 # -- SQL validation ------------------------------------------
@@ -439,13 +266,6 @@ class TestSqlValidation:
             "WHERE ({{timestamp_condition}}) ORDER BY _timestamp DESC"
         )
         assert errors, "a table left as a template placeholder must not validate"
-
-    def test_hyperdx_sql_that_sanitises_to_nothing_is_an_error(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(name="Nothing", source_type="hyperdx", user_sql="LIMIT 100"),
-            rule_id="nothing",
-        )
-        assert result.sql_errors
 
     def test_sql_errors_in_result(self, service):
         """Validation errors appear in RuleCreateResult."""
@@ -615,69 +435,6 @@ class TestAIAnalysisStub:
         )
         assert stub.cost_estimate is not None
         assert stub.cost_estimate.window_minutes == 10
-
-
-# -- Sanitize summary ---------------------------------------
-
-
-class TestSanitizeSummary:
-    """Test sanitize_summary in results."""
-
-    def test_raw_has_empty_summary(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Raw",
-                user_sql="SELECT 1 FROM db.tbl WHERE x = 1",
-            ),
-            rule_id="sum1",
-        )
-        assert result.sanitize_summary == {}
-
-    def test_hyperdx_records_stripped_time_bounds(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="HyperDX",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT 1 FROM default.logs "
-                    "WHERE (timestamp >= fromUnixTimestamp64Milli(1739318400000) "
-                    "AND timestamp <= fromUnixTimestamp64Milli(1739491200000)) "
-                    "AND x = 1"
-                ),
-            ),
-            rule_id="sum2",
-        )
-        assert result.sql_errors == []
-        assert "stripped_time_bounds" in result.sanitize_summary
-        assert len(result.sanitize_summary["stripped_time_bounds"]) == 2
-
-    def test_hyperdx_records_settings(self, service):
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Settings",
-                source_type="hyperdx",
-                user_sql=(
-                    "SELECT 1 FROM default.logs WHERE x = 1 SETTINGS optimize_read_in_order = 0"
-                ),
-            ),
-            rule_id="sum3",
-        )
-        assert result.sql_errors == []
-        assert "stripped_settings" in result.sanitize_summary
-
-    def test_no_patterns_clean_summary(self, service):
-        """HyperDX mode with clean SQL produces empty summary."""
-        result = service.create_rule(
-            RuleCreateRequest(
-                name="Clean",
-                source_type="hyperdx",
-                user_sql="SELECT 1 FROM default.logs WHERE severity = 'high'",
-            ),
-            rule_id="sum4",
-        )
-        # A refusal also leaves the summary empty, so the clean result is checked first.
-        assert result.sql_errors == []
-        assert result.sanitize_summary == {}
 
 
 # The span grammar as a plain backtracking pattern: the reference for what is masked.

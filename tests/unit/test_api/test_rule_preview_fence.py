@@ -68,7 +68,7 @@ def acme_hunt(client, admin_headers) -> None:
 
 
 def _rule(name: str, **extra) -> dict:
-    return {"name": name, "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'", **extra}
+    return {"name": name, "source": "main", "where_clause": "severity = 'high'", **extra}
 
 
 _ACME = "_org_id IN ('acme-1')"
@@ -95,23 +95,12 @@ class TestThePreviewCountsWhatTheRunReads:
         (sql,) = clickhouse.previews
         assert sql.count(_ACME) == 2
 
-    def test_an_update_and_a_hyperdx_view_are_fenced_too(
-        self, client, admin_headers, clickhouse, acme_hunt
-    ):
+    def test_an_update_is_fenced_too(self, client, admin_headers, clickhouse, acme_hunt):
         assert client.post(RULES, json=_rule("certutil"), headers=admin_headers).is_success
         update = client.put(f"{RULES}/certutil", json=_rule("certutil"), headers=admin_headers)
-        view = client.post(
-            f"{RULES}/from-hyperdx",
-            json={
-                "raw_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
-                "hunt_name": "windows_hunt",
-            },
-            headers=admin_headers,
-        )
 
         assert update.status_code == 200, update.text
-        assert view.status_code == 201, view.text
-        assert [sql.count(_ACME) for sql in clickhouse.previews] == [2, 2, 2]
+        assert [sql.count(_ACME) for sql in clickhouse.previews] == [2, 2]
 
     def test_a_rule_no_hunt_runs_counts_what_its_author_reads(
         self, client, admin_headers, clickhouse, acme_hunt

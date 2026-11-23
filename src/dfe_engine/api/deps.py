@@ -343,6 +343,7 @@ def get_hunt_config_registry_optional():
 SchemaReg = Annotated[Any, Depends(get_schema_registry)]
 DerivedSchemaReg = Annotated[Any, Depends(get_derived_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
+OptionalSourceReg = Annotated[Any | None, Depends(get_source_registry_optional)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
 AlertDestRegistry = Annotated[Any, Depends(get_alert_destinations_registry)]

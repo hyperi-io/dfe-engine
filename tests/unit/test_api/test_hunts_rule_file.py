@@ -39,7 +39,8 @@ _RULE = {
     "name": "certutil",
     "display_name": "Certutil Abuse",
     "severity": "high",
-    "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+    "source": "main",
+    "where_clause": "severity = 'high'",
 }
 
 MISSING = "Rule file not found"

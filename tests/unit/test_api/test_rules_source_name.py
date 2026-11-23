@@ -1,90 +1,108 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_rules_source_name.py
-#  Purpose:      POST and PUT /api/v1/rules refuse a FROM that names no table the runner can scan
+#  Purpose:      POST and PUT /api/v1/rules refuse a source that is no registered table label
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""A rule's FROM is stored as ``source_db`` and ``source_table`` and spliced into ``FROM``.
+"""A rule's ``source`` is a label, and its table is the label in the data database.
 
-A backtick-quoted name reaches the store unquoted, so ``dfe.`main) -- x``` would
-be stored as a table named ``main) -- x``, which the hunt runner drops at compile.
-The API refuses it with 422 instead, naming the problem, and accepts a source
-named for a hyphenated label.
+The label is spliced into ``FROM`` quoted, and stored as ``source_db`` and ``source_table``.
+A name that is no plain table label, or a label no source carries, is refused with 422
+and nothing is written. A hyphenated label is a table name too, so it is accepted.
 """
 
 import pytest
 
-REFUSED_SQL = {
-    "closing bracket and comment": "SELECT * FROM dfe.`main) -- x` WHERE severity = 'high'",
-    "space": "SELECT * FROM dfe.`ma in` WHERE severity = 'high'",
-    "quote in the database": "SELECT * FROM `d'fe`.main WHERE severity = 'high'",
-    "dot in the table": "SELECT * FROM dfe.`a.b` WHERE severity = 'high'",
+pytestmark = pytest.mark.usefixtures("rule_sources")
+
+REFUSED_SOURCES = {
+    "closing bracket and comment": ("main) -- x", "is not a table label"),
+    "space": ("ma in", "is not a table label"),
+    "quote": ("d'fe", "is not a table label"),
+    "database qualified": ("dfe.main", "a label, not a <db>.<table>"),
+    "dot in the label": ("a.b", "a label, not a <db>.<table>"),
+    "no such source": ("never-registered", "not a registered source"),
 }
 
-_KEPT_SQL = "SELECT * FROM dfe.main WHERE severity = 'high'"
+
+def _payload(name: str, source: str) -> dict:
+    return {
+        "name": name,
+        "display_name": "Source",
+        "severity": "high",
+        "where_clause": "severity = 'high'",
+        "source": source,
+    }
 
 
-def _payload(name: str, user_sql: str) -> dict:
-    return {"name": name, "display_name": "Source", "severity": "high", "user_sql": user_sql}
-
-
-def _assert_refused(resp) -> None:
+def _assert_refused(resp, fragment: str) -> None:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_sql"
     messages = [error["message"] for error in body["sql_errors"]]
-    assert any("names no table the hunt runner can scan" in m for m in messages), messages
-    assert any("is not a table name" in m for m in messages), messages
+    assert any(fragment in m for m in messages), messages
 
 
-@pytest.mark.parametrize("user_sql", REFUSED_SQL.values(), ids=list(REFUSED_SQL))
-def test_create_refuses_a_source_that_is_not_a_table_name(client, admin_headers, user_sql):
-    resp = client.post(
-        "/api/v1/rules", json=_payload("bad_source", user_sql), headers=admin_headers
-    )
+@pytest.mark.parametrize(
+    ("source", "fragment"), REFUSED_SOURCES.values(), ids=list(REFUSED_SOURCES)
+)
+def test_create_refuses_a_source_that_is_not_a_registered_label(
+    client, admin_headers, source, fragment
+):
+    resp = client.post("/api/v1/rules", json=_payload("bad_source", source), headers=admin_headers)
 
-    _assert_refused(resp)
+    _assert_refused(resp, fragment)
     assert client.get("/api/v1/rules/bad_source", headers=admin_headers).status_code == 404
 
 
-@pytest.mark.parametrize("user_sql", REFUSED_SQL.values(), ids=list(REFUSED_SQL))
-def test_update_refuses_it_and_keeps_the_stored_source(client, admin_headers, user_sql):
+@pytest.mark.parametrize(
+    ("source", "fragment"), REFUSED_SOURCES.values(), ids=list(REFUSED_SOURCES)
+)
+def test_update_refuses_it_and_keeps_the_stored_source(client, admin_headers, source, fragment):
     created = client.post(
-        "/api/v1/rules", json=_payload("kept_source", _KEPT_SQL), headers=admin_headers
+        "/api/v1/rules", json=_payload("kept_source", "events"), headers=admin_headers
     )
     assert created.status_code == 201, created.text
 
     resp = client.put(
-        "/api/v1/rules/kept_source", json=_payload("kept_source", user_sql), headers=admin_headers
+        "/api/v1/rules/kept_source", json=_payload("kept_source", source), headers=admin_headers
     )
 
-    _assert_refused(resp)
+    _assert_refused(resp, fragment)
     stored = client.get("/api/v1/rules/kept_source", headers=admin_headers).json()
-    assert (stored["source_db"], stored["source_table"]) == ("dfe", "main")
+    assert (stored["source"], stored["source_db"], stored["source_table"]) == (
+        "events",
+        "dfe",
+        "events",
+    )
 
 
-def test_validate_reports_the_source_without_creating_anything(client, admin_headers):
+@pytest.mark.parametrize(
+    ("source", "fragment"), REFUSED_SOURCES.values(), ids=list(REFUSED_SOURCES)
+)
+def test_check_reports_the_source_without_creating_anything(
+    client, admin_headers, source, fragment
+):
     resp = client.post(
-        "/api/v1/rules/validate",
-        json={"sql": REFUSED_SQL["closing bracket and comment"]},
+        "/api/v1/rules/check",
+        json={"source": source, "where_clause": "severity = 'high'"},
         headers=admin_headers,
     )
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["valid"] is False
-    assert any("'dfe.main) -- x' is not a table name" in e["message"] for e in body["errors"])
+    assert any(fragment in e["message"] for e in body["errors"])
+    assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
 
 def test_a_source_named_for_a_hyphenated_label_is_accepted(client, admin_headers):
     resp = client.post(
-        "/api/v1/rules",
-        json=_payload("cisco", "SELECT * FROM dfe.`cisco-ios` WHERE severity = 'high'"),
-        headers=admin_headers,
+        "/api/v1/rules", json=_payload("windows", "windows-audit"), headers=admin_headers
     )
 
     assert resp.status_code == 201, resp.text
     assert resp.json()["sql_errors"] == []
-    stored = client.get("/api/v1/rules/cisco", headers=admin_headers).json()
-    assert (stored["source_db"], stored["source_table"]) == ("dfe", "cisco-ios")
+    stored = client.get("/api/v1/rules/windows", headers=admin_headers).json()
+    assert (stored["source_db"], stored["source_table"]) == ("dfe", "windows-audit")

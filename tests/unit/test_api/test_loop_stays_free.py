@@ -225,11 +225,8 @@ _DEPLOY_REPO_CASES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/v1/auth/setup/retire-admin", None),
     (
         "POST",
-        "/api/v1/rules/from-hyperdx",
-        {
-            "raw_sql": "SELECT 1 FROM default.logs WHERE level = 'error'",
-            "saved_search_name": "Loop probe",
-        },
+        "/api/v1/rules",
+        {"name": "loop-probe", "source": "main", "where_clause": "level = 'error'"},
     ),
     # The local admin is the one account whose doc is mirrored into the deploy repo.
     ("PUT", "/api/v1/auth/accounts/admin", {"name": "Loop Probe"}),
