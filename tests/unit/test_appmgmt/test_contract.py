@@ -65,7 +65,7 @@ LEAF_COUNTS = {
     "dfe-archiver": 82,
     "dfe-fetcher": 343,
     "dfe-transform-vrl": 56,
-    "dfe-transform-vector": 87,
+    "dfe-transform-vector": 88,
 }
 
 APPS = sorted(LEAF_COUNTS)
