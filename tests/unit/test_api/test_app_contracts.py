@@ -759,7 +759,11 @@ class TestClearingBesideACredential:
     """Clearing a field puts the app's default where it was, which moves a credential as a write does."""
 
     BASE = "/api/v1/apps/dfe-fetcher/alpha/config"
-    ENTRY = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7741"}}
+    ENTRY = {
+        "profile": "okta",
+        "topic": "t",
+        "auth": {"token": "rest-tok-7741"},
+    }
 
     def _deploy_with_a_token(self, client, app, admin_headers, tmp_path):
         gc = _wire(app, tmp_path)
@@ -782,11 +786,11 @@ class TestClearingBesideACredential:
         gc = self._deploy_with_a_token(client, app, admin_headers, tmp_path)
         before = gc.head_revision()
 
-        resp = _clear(client, admin_headers, "config.sources.rest.primary.url", base=self.BASE)
+        resp = _clear(client, admin_headers, "config.sources.rest.primary.profile", base=self.BASE)
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "credential_reentry_required"
-        assert resp.json()["path"] == "config.sources.rest.primary.url"
+        assert resp.json()["path"] == "config.sources.rest.primary.profile"
         assert gc.head_revision() == before
         assert "rest-tok-7741" not in resp.text
 
@@ -797,7 +801,7 @@ class TestClearingBesideACredential:
         resp = _clear(
             client,
             admin_headers,
-            "config.sources.rest.primary.url",
+            "config.sources.rest.primary.profile",
             "config.sources.rest.primary.auth.token",
             base=self.BASE,
         )
@@ -1323,7 +1327,11 @@ class TestCredentialsAreNotEchoed:
         gc = _wire(app, tmp_path)
         _deploy_fetcher(client, admin_headers, "alpha")
         base = "/api/v1/apps/dfe-fetcher/alpha"
-        entry = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7731"}}
+        entry = {
+            "profile": "okta",
+            "topic": "t",
+            "auth": {"token": "rest-tok-7731"},
+        }
         resp = client.put(
             f"{base}/config",
             json={"changes": {"config.sources.rest": {"primary": entry}}},
@@ -1334,7 +1342,7 @@ class TestCredentialsAreNotEchoed:
         read = client.get(f"{base}/config", headers=admin_headers)
         field = {f["path"]: f for f in read.json()["fields"]}["config.sources.rest"]
         shown = field["value"]["primary"]
-        assert shown["url"] == "https://api.example"
+        assert shown["profile"] == "okta"
         assert shown["auth"]["token"] == contract.REDACTED
         assert "rest-tok-7731" not in read.text
 
@@ -1350,12 +1358,12 @@ class TestCredentialsAreNotEchoed:
     @pytest.mark.parametrize(
         ("path", "value"),
         [
-            pytest.param("config.sources.rest.primary.url", "https://attacker.example", id="leaf"),
+            pytest.param("config.sources.rest.primary.profile", "attacker", id="leaf"),
             pytest.param(
                 "config.sources.rest",
                 {
                     "primary": {
-                        "url": "https://attacker.example",
+                        "profile": "attacker",
                         "topic": "t",
                         "auth": {"token": contract.REDACTED},
                     }
@@ -1367,11 +1375,15 @@ class TestCredentialsAreNotEchoed:
     def test_a_fetcher_source_moved_beside_its_masked_token_is_refused(
         self, client, app, admin_headers, tmp_path, path, value
     ):
-        """The token nests a mapping below the url it is sent to, and the url is still its."""
+        """The token nests a mapping below the profile that says where it is sent."""
         gc = _wire(app, tmp_path)
         _deploy_fetcher(client, admin_headers, "alpha")
         base = "/api/v1/apps/dfe-fetcher/alpha"
-        entry = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7732"}}
+        entry = {
+            "profile": "okta",
+            "topic": "t",
+            "auth": {"token": "rest-tok-7732"},
+        }
         client.put(
             f"{base}/config",
             json={"changes": {"config.sources.rest": {"primary": entry}}},

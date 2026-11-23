@@ -14,7 +14,6 @@ no default or type is restated here.
 """
 
 import copy
-from dataclasses import replace
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -119,32 +118,12 @@ class InvalidServiceConfigError(ServiceConfigError):
         super().__init__("; ".join(errors))
 
 
-def _option_checks(
-    options: dict[str, contract.DeclaredOption], value: Any, path: str
-) -> tuple[list[str], list[str]]:
-    """Each declared option under ``path`` judged, and each key no option explains."""
-    option = options.get(f"{CONFIG_ROOT}.{path}")
-    if option is not None:
-        if value is None:
-            return [], []
-        refused = contract.check_value(replace(option, path=path), value)
-        return ([refused] if refused else []), []
-    if isinstance(value, dict):
-        errors: list[str] = []
-        warnings: list[str] = []
-        for key, child in value.items():
-            found, unknown = _option_checks(options, child, f"{path}.{key}" if path else str(key))
-            errors += found
-            warnings += unknown
-        return errors, warnings
-    return [], [f"{path} is not an option the app declares, so the app may ignore it"]
-
-
 def judge_config(app_contract: contract.AppContract, config: dict) -> ValidationResult:
     """Whether *config* holds only values the app's own schema takes.
 
-    A type, a closed set or a null the app refuses is an error. A key the schema
-    does not declare is a warning, as is a config judged with no contract mounted.
+    What :func:`contract.judge` refuses is an error. A key no option declares, in a
+    section that takes unnamed keys, is a warning, as is a config judged with no
+    contract mounted.
     """
     if not app_contract.available:
         return ValidationResult(
@@ -152,10 +131,12 @@ def judge_config(app_contract: contract.AppContract, config: dict) -> Validation
             warnings=[f"no config contract is mounted for {app_contract.service}; not checked"],
         )
     prefix = f"{CONFIG_ROOT}."
-    nulls = contract.refused_nulls(app_contract, CONFIG_ROOT, config)
-    errors = [f"{path.removeprefix(prefix)} does not accept a null" for path in nulls]
-    found, warnings = _option_checks(contract.declared_options(app_contract), config, "")
-    errors += found
+    verdict = contract.judge(app_contract, config)
+    errors = [reason.removeprefix(prefix) for reason in verdict.refused.values()]
+    warnings = [
+        f"{path.removeprefix(prefix)} is not an option the app declares, so the app may ignore it"
+        for path in verdict.undeclared
+    ]
     return ValidationResult(valid=not errors, errors=errors, warnings=warnings)
 
 
