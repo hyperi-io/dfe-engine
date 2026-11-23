@@ -122,6 +122,8 @@ def bootstrap_registries(
         _registries["meta_schema"] = SchemaRegistry(
             schemas_directory=settings.schemas.schemas_dir,
             fixtures_directory=fixtures or None,
+            crud=gitcrud,
+            posture=posture,
         )
 
     # A derived schema is a deployment's own artefact, so it follows the sources

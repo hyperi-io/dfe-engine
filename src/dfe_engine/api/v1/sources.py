@@ -2931,7 +2931,8 @@ def _apply_source_schema(
         from dfe_engine.governance.ch.reconciler import fence_tables
 
         # Only a dry run leaves ch unset, and a dry run has returned before this.
-        fence_tables(ch._client, database=db)  # ty: ignore[unresolved-attribute]
+        if ch is not None:
+            fence_tables(ch._client, database=db)
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 

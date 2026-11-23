@@ -86,7 +86,7 @@ _.check_cooldown, _.cooldown_td, _.dispatch, _.ensure_table_exists, _.get_ddl, _
 _.max_alerts_per_run, _.record_fire
 
 # Documented library API (docs/data-plane/schema-classes.md, query-api-python.md).
-_.clone_version, _.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas
+_.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas
 _.to_pydict, _.to_pylist
 
 # Helpers and constants currently used only by tests.
