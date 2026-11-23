@@ -291,3 +291,35 @@ def _no_ch_rbac_reconcile_against_a_real_clickhouse(request):
         yield
     finally:
         _ch_rbac.ch_admin_client, _ch_rbac_bootstrap.ch_admin_client = originals
+
+
+@pytest.fixture(autouse=True)
+def _no_tenant_fence_against_a_real_clickhouse(request):
+    """Test-session guard: no unit test fences tables on a real ClickHouse client.
+
+    ``fence_tables`` takes the client its caller built, so the source deploy route
+    hands it the ClickHouse manager's own, outside the admin-client guard above.
+    That client is the configured server, which beside a developer's local stack
+    would issue row-policy DDL into it. A client of the real driver class is
+    refused. A test's own stand-in still runs the fence.
+    """
+    if any(request.node.get_closest_marker(m) for m in REAL_INFRA_MARKERS):
+        yield
+        return
+
+    from clickhouse_connect.driver.client import Client
+
+    import dfe_engine.governance.ch.reconciler as _reconciler
+
+    real_fence = _reconciler.fence_tables
+
+    def _guarded(admin_client, **kwargs):
+        if isinstance(admin_client, Client):
+            raise RuntimeError("unit tests do not fence tables on a ClickHouse (conftest guard)")
+        return real_fence(admin_client, **kwargs)
+
+    _reconciler.fence_tables = _guarded  # ty: ignore[invalid-assignment]  # the guard swaps in a stand-in for the session
+    try:
+        yield
+    finally:
+        _reconciler.fence_tables = real_fence

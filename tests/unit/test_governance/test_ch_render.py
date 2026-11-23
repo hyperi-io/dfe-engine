@@ -568,9 +568,25 @@ class TestRenderMaterialise:
         """The two tables are manifest objects. The reconciler only writes rows."""
         s = _joined(render_materialise([], []))
         assert "CREATE" not in s
-        # full refresh each run so removed orgs/tiers drop out of the projection
-        assert "TRUNCATE TABLE dfe_meta.orgs" in s
-        assert "TRUNCATE TABLE dfe_meta.ch_tiers" in s
+        # nothing configured: every row is removed, and the table is never emptied first
+        assert "TRUNCATE" not in s
+        assert "ALTER TABLE dfe_meta.orgs DELETE WHERE 1" in s
+        assert "ALTER TABLE dfe_meta.ch_tiers DELETE WHERE 1" in s
+
+    def test_a_run_stopped_after_any_statement_leaves_the_rows_it_started_with(self):
+        """Inserts first and removals last: no prefix of the run empties a table."""
+        org = SimpleNamespace(name="acme", org_ids=["acme"], display_name="", enabled=True)
+        tier = ChTier(name="analyst_tier_2", kind="analyst", default=True)
+        stmts = render_materialise([org], [tier])
+
+        assert [s.split(" (")[0] for s in stmts[:2]] == [
+            "INSERT INTO dfe_meta.orgs",
+            "INSERT INTO dfe_meta.ch_tiers",
+        ]
+        assert stmts[2:] == [
+            "ALTER TABLE dfe_meta.orgs DELETE WHERE name NOT IN ('acme')",
+            "ALTER TABLE dfe_meta.ch_tiers DELETE WHERE name NOT IN ('analyst_tier_2')",
+        ]
 
     def test_inserts_orgs_and_tiers(self):
         org = SimpleNamespace(

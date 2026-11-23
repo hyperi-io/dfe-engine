@@ -579,8 +579,8 @@ class TestGovernanceProjection:
 
         assert result.errors == []
         assert result.projection_missing == []
-        assert "TRUNCATE TABLE dfe_meta.orgs" in client.executed
-        assert "TRUNCATE TABLE dfe_meta.ch_tiers" in client.executed
+        assert "TRUNCATE" not in "\n".join(client.executed)
+        assert "ALTER TABLE dfe_meta.orgs DELETE WHERE name NOT IN ('acme')" in client.executed
         assert any(stmt.startswith("INSERT INTO dfe_meta.orgs") for stmt in client.executed)
         assert any(stmt.startswith("INSERT INTO dfe_meta.ch_tiers") for stmt in client.executed)
 
@@ -945,3 +945,17 @@ class TestFenceTables:
 
         policies = [stmt for stmt in client.executed if "ROW POLICY" in stmt]
         assert (applied, policies) == (case["expected_applied"], case["expected_policies"])
+
+    def test_the_conftest_guard_refuses_a_real_driver_client_and_runs_a_stand_in(self):
+        """The source deploy route reaches the fence by name with the manager's own client."""
+        from clickhouse_connect.driver.httpclient import HttpClient
+
+        from dfe_engine.governance.ch import reconciler
+
+        # Never connected: the guard decides on the class before the client is used.
+        with pytest.raises(RuntimeError, match="conftest guard"):
+            reconciler.fence_tables(object.__new__(HttpClient), database="dfe")
+
+        stand_in = _DiscoveringAdminClient()
+        assert reconciler.fence_tables(stand_in, database="dfe") > 0
+        assert stand_in.executed

@@ -1222,11 +1222,13 @@ class TestGitopsMode:
         monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_BUDGET_SECONDS", "45.5")
         monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_FAILURE_THRESHOLD", "5")
         monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT", "90")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_FAILURE_WINDOW_SECONDS", "600")
         write = GitopsSettings(**_get_env_overrides()["gitops"]).write
         assert write.timeout_seconds == 30.0
         assert write.budget_seconds == 45.5
         assert write.failure_threshold == 5
         assert write.reset_timeout == 90.0
+        assert write.failure_window_seconds == 600.0
 
     def test_pack_thresholds_default_to_gits_own(self):
         from dfe_engine.settings import GitopsSettings

@@ -31,6 +31,7 @@ roleless group, which every OIDC-synced group starts as, and one holding only
 ``org_viewer``, other ``scoped`` roles, or roles the definitions do not declare.
 """
 
+import threading
 from typing import Any
 
 from scalo.logger import logger
@@ -44,6 +45,28 @@ from .models import GroupChBinding
 # Engine roles whose groups also read the otel database (every org's platform
 # telemetry), held at system scope. Analysts and org-scoped groups never do.
 OTEL_READER_ROLES = {"admin", "infra_admin"}
+
+# The reconcile trigger derives after every org or group write and on each retry, so a
+# standing misconfiguration is logged once per detail and again only after it clears.
+_reported: dict[str, tuple[str, ...]] = {}
+_reported_lock = threading.Lock()
+
+
+def _report_problem(group: str, detail: tuple[str, ...]) -> bool:
+    """Record a group's standing problem. Returns whether this detail is new for it."""
+    with _reported_lock:
+        if _reported.get(group) == detail:
+            return False
+        _reported[group] = detail
+        return True
+
+
+def _forget_resolved(groups: list[Any], problems: set[str]) -> None:
+    """Drop the record of each group in this run that no longer has a problem."""
+    with _reported_lock:
+        for group in groups:
+            if group.name not in problems:
+                _reported.pop(group.name, None)
 
 
 def derive_group_bindings(
@@ -60,8 +83,13 @@ def derive_group_bindings(
 
     The tier is left empty so the reconciler resolves it to the default analyst
     tier - the least-privilege end of the tier list.
+
+    A group that cannot be expressed, or holds platform roles beside org markers, is
+    logged the first time, and again only when its detail changes or returns after
+    it was fixed.
     """
     bindings: list[GroupChBinding] = []
+    problems: set[str] = set()
 
     for group in groups:
         scoped = {group.scope_org} if group.scope_org else set()
@@ -80,30 +108,36 @@ def derive_group_bindings(
             continue
 
         if claimed and platform_roles:
-            logger.info(
-                "group holds system-scope platform roles; its CH user is unrestricted "
-                "despite org markers",
-                group=group.name,
-                roles=sorted(roles),
-            )
+            problems.add(group.name)
+            if _report_problem(group.name, ("platform", *sorted(roles))):
+                logger.info(
+                    "group holds system-scope platform roles; its CH user is unrestricted "
+                    "despite org markers",
+                    group=group.name,
+                    roles=sorted(roles),
+                )
             claimed = set()
 
         resolved = {org.name for org in resolve_orgs(claimed, orgs)}
         if claimed and not resolved:
-            logger.error(
-                "group's org markers name no registered org; skipping its CH user",
-                group=group.name,
-                claimed=sorted(claimed),
-            )
+            problems.add(group.name)
+            if _report_problem(group.name, ("unregistered", *sorted(claimed))):
+                logger.error(
+                    "group's org markers name no registered org; skipping its CH user",
+                    group=group.name,
+                    claimed=sorted(claimed),
+                )
             continue
 
         if len(resolved) > 1:
-            logger.error(
-                "group resolves to several orgs; skipping its CH user - "
-                "model the span as one org with many org_ids",
-                group=group.name,
-                orgs=sorted(resolved),
-            )
+            problems.add(group.name)
+            if _report_problem(group.name, ("several", *sorted(resolved))):
+                logger.error(
+                    "group resolves to several orgs; skipping its CH user - "
+                    "model the span as one org with many org_ids",
+                    group=group.name,
+                    orgs=sorted(resolved),
+                )
             continue
 
         bindings.append(
@@ -114,4 +148,5 @@ def derive_group_bindings(
             )
         )
 
+    _forget_resolved(groups, problems)
     return bindings

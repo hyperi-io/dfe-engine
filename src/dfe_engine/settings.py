@@ -1780,13 +1780,16 @@ class GitopsWriteSettings(BaseModel):
     pushes. Field names mirror scalo's :class:`~scalo.resilience.ResilienceConfig`;
     a budget of 0 makes one attempt.
 
-    After ``failure_threshold`` calls in a row run out of budget, a circuit breaker
-    opens: writes answer 503 at once without calling the forge, with ``Retry-After``
-    set to what is left of ``reset_timeout``. Then one write probes the forge, and
-    the breaker closes if the forge answers it or reopens if it runs out of budget
-    too. A refusal, bad credentials or a missing repo is the forge answering, so it
-    never opens the breaker. These two mirror scalo's
-    :class:`~scalo.resilience.CircuitBreakerConfig`.
+    After ``failure_threshold`` writes run out of budget within ``failure_window_seconds``
+    with none getting through, a circuit breaker opens: writes answer 503 at once
+    without calling the forge, with ``Retry-After`` set to what is left of
+    ``reset_timeout``. A write is a fetch and a push, and counts as failed when either
+    ran out of budget, so a forge that serves fetches but drops pushes opens it. Then
+    one write probes the forge, and the breaker closes if the forge answers it or
+    reopens if it runs out of budget too. A refusal, bad credentials or a missing
+    repo is the forge answering, so it never opens the breaker. The threshold and
+    reset timeout mirror scalo's :class:`~scalo.resilience.CircuitBreakerConfig`,
+    which has no window.
 
     """
 
@@ -1808,7 +1811,13 @@ class GitopsWriteSettings(BaseModel):
     failure_threshold: int = Field(
         default=3,
         ge=1,
-        description="Calls in a row that run out of budget before writes fail at once.",
+        description="Writes in a row that run out of budget before writes fail at once.",
+    )
+    # Spent budgets from one outage arrive within minutes, so one from last week must not count.
+    failure_window_seconds: float = Field(
+        default=300.0,
+        gt=0.0,
+        description="How long a write that ran out of budget counts towards the breaker, seconds.",
     )
     # scalo's default: a forge still down costs one probe's budget per window, not one
     # per write, and a recovered one is back in use within the window.
@@ -2687,6 +2696,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_GITOPS_WRITE_TIMEOUT_SECONDS": "gitops.write.timeout_seconds",
             "DFE_ENGINE_GITOPS_WRITE_BUDGET_SECONDS": "gitops.write.budget_seconds",
             "DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT": "gitops.write.reset_timeout",
+            "DFE_ENGINE_GITOPS_WRITE_FAILURE_WINDOW_SECONDS": "gitops.write.failure_window_seconds",
             "DFE_ENGINE_GITOPS_PACK_INTERVAL_SECONDS": "gitops.pack.interval_seconds",
         },
     ),
