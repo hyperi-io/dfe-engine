@@ -33,7 +33,7 @@ from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.models import PROMOTED_FIELD_TYPE, SchemaColumn
 from dfe_engine.source.type_registry import current_use_case
 from dfe_engine.yaml_utils import yaml_load
 
@@ -692,7 +692,9 @@ class SchemaLoader:
     ) -> list[SchemaColumn]:
         """Narrow base columns to the subset a derived schema selects.
 
-        The result is exactly the ``select`` list, in its order. A selected
+        The result is the ``select`` list, in its order, then every promoted base
+        column the list does not name. A promotion adds its column to the meta schema
+        after the selection was written, so the selection cannot name it. A selected
         entry may override ``index`` (the column's index use case) and nothing
         else -- ``expr`` in particular resolves from the base, because it is the
         directive dfe-loader reads back out of the ClickHouse column comment.
@@ -727,6 +729,12 @@ class SchemaLoader:
             use_case = None if index == "none" else current_use_case(index)
             selected.append(base.model_copy(update={"use_case": use_case}))
 
+        chosen = {column.name for column in selected}
+        selected.extend(
+            column
+            for column in base_columns
+            if column.field_type == PROMOTED_FIELD_TYPE and column.name not in chosen
+        )
         return selected
 
     @staticmethod

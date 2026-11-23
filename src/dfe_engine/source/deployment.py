@@ -11,6 +11,7 @@ from scalo.logger import logger
 from dfe_engine.clickhouse.statements import ddl_settings
 from dfe_engine.schema.applier import (
     LiveTtl,
+    live_columns,
     plan_source_table,
     read_table,
     settings_move_for,
@@ -209,6 +210,14 @@ class SchemaDeployResult(BaseModel):
             "table it already has; null when the settings do not move"
         ),
     )
+    columns_added: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The columns this deploy adds (or, on a dry run, would add) to the table "
+            "it already has, in the order the version declares them. Empty when the "
+            "table is new or already carries every column"
+        ),
+    )
     live_table_error: str | None = Field(
         default=None,
         description=(
@@ -351,11 +360,12 @@ def artifact_from_build(result: SchemaBuildResult, *, version: str) -> SourceBui
 
 
 class DeployStatements(NamedTuple):
-    """What a deploy of one source version runs, and the TTL move among it."""
+    """What a deploy of one source version runs, and the TTL move and added columns among it."""
 
     statements: list[str]
     table_exists: bool
     ttl_change: TtlChange | None
+    columns_added: tuple[str, ...] = ()
 
 
 def ttl_change_for_table(
@@ -405,6 +415,22 @@ def settings_change_for_table(
     return SettingsChange(assignments=list(move.assignments), statements=list(move.statements))
 
 
+def columns_added_for_table(
+    source: Source,
+    result: SchemaBuildResult,
+    *,
+    db: str,
+    client: Any,
+) -> tuple[str, ...]:
+    """The columns a deploy of *result* adds to the table the server holds, in declared order.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    live = live_columns(client=client, database=db, table=source.table_name)
+    return tuple(name for name in read_table(result.create_table_ddl).columns if name not in live)
+
+
 def plan_deploy_statements(
     builder: SchemaBuilderV2,
     source: Source,
@@ -426,6 +452,7 @@ def plan_deploy_statements(
     statements: list[str] = [create.strip()] if create.strip() else []
     table_exists = False
     ttl_change: TtlChange | None = None
+    columns_added: tuple[str, ...] = ()
     if ch_client is not None and create:
         planned = plan_source_table(
             ch_client,
@@ -435,6 +462,7 @@ def plan_deploy_statements(
             ttl_days=builder.build_ddl_config_for_version(source, version_id).ttl_days,
         )
         statements, table_exists = list(planned.statements), planned.exists
+        columns_added = planned.columns_added
         if planned.ttl.statement:
             ttl_change = TtlChange(
                 move=planned.ttl.move,
@@ -442,7 +470,9 @@ def plan_deploy_statements(
                 statement=planned.ttl.statement,
             )
     statements += [view_ddl.strip() for view_ddl in (result.view_ddls or {}).values()]
-    return DeployStatements(qualify_ddl_statements(statements, db), table_exists, ttl_change)
+    return DeployStatements(
+        qualify_ddl_statements(statements, db), table_exists, ttl_change, columns_added
+    )
 
 
 def plan_ready_status(

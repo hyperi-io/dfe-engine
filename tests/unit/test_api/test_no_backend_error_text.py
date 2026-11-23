@@ -350,7 +350,7 @@ class TestSources:
         source = SimpleNamespace(source="acme", table_name="acme", deployed_version="1")
         settings = SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="dfe"))
 
-        ttl, settings_change, error = sources_module._dry_run_table_moves(
+        ttl, settings_change, columns_added, error = sources_module._dry_run_table_moves(
             None,
             source,  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
             "1",
@@ -360,6 +360,7 @@ class TestSources:
 
         assert ttl is None
         assert settings_change is None
+        assert columns_added == ()
         assert_hidden(present(error))
         assert_logged(audit_events)
 
