@@ -139,7 +139,8 @@ class SchemaBuilderV2:
                               deploy repo rather than the schemas tree, so the two
                               roots differ. Pass
                               ``DerivedSchemaRegistry.reference_root``. None keeps
-                              them in the schemas tree.
+                              them in the schemas tree. The meta schemas a
+                              deployment writes sit under the same root.
             field_map_registry: Optional FieldMapRegistry for generating standard
                                 views (sigma, ecs, cim, ocsf). When provided and the
                                 source declares views, view DDLs are included
@@ -384,7 +385,7 @@ class SchemaBuilderV2:
         columns: list[SchemaColumn] = []
 
         if schema_cfg.meta_schema:
-            meta_path = self._resolve_path(schema_cfg.meta_schema)
+            meta_path = self.resolve_meta_path(schema_cfg.meta_schema)
             try:
                 columns = SchemaLoader.load_columns(
                     meta_path, version=schema_cfg.meta_schema_version
@@ -411,6 +412,19 @@ class SchemaBuilderV2:
         if self._schemas_base_dir:
             return resolve_schema_yaml_path(self._schemas_base_dir, path_str)
         return Path(path_str)
+
+    def resolve_meta_path(self, path_str: str) -> Path:
+        """Resolve a meta-schema reference in the deploy repo, then the schemas tree.
+
+        With gitops on, the schemas an operator writes sit beside the derived ones
+        under ``derived_base_dir``. The schemas tree holds the shipped ones.
+        """
+        from dfe_engine.schema.registry import meta_deploy_root, resolve_meta_reference
+
+        if not self._schemas_base_dir:
+            return Path(path_str)
+        deploy_root = meta_deploy_root(self._derived_base_dir, self._schemas_base_dir)
+        return resolve_meta_reference(path_str, self._schemas_base_dir, deploy_root)
 
     def resolve_derived_path(self, path_str: str) -> Path:
         """Resolve a ``derived/...`` reference under its own root, then the schemas tree.

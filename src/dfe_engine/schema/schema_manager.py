@@ -197,6 +197,162 @@ def _apply_modifications(
     return cols
 
 
+# -- Document edits -------------------------------------------------
+# In-memory edits, shared by the file operations below and by SchemaRegistry's routed writes.
+
+
+def _load_mapping(path: Path) -> dict[str, Any]:
+    """The YAML mapping at *path*, which must exist."""
+    if not path.exists():
+        raise SchemaLoadError(f"Schema file not found: {path}")
+    data = yaml_load(path)
+    if not isinstance(data, dict):
+        raise SchemaLoadError(f"Schema YAML must be a mapping: {path}")
+    return data
+
+
+def set_current_in(data: dict[str, Any], current: str, *, origin: str) -> None:
+    """Point ``current`` at a version *data* defines. *origin* names it in errors."""
+    versions = data.get("versions", {})
+    if current not in versions:
+        available = ", ".join(sorted(versions.keys())) or "(none)"
+        raise SchemaVersionError(
+            f"Version {current!r} not found in {origin}. Available: {available}"
+        )
+    data["current"] = current
+
+
+def set_summary_in(data: dict[str, Any], version: str, summary: str, *, origin: str) -> None:
+    """Replace the summary of one version entry in *data*."""
+    versions = data.get("versions", {})
+    if version not in versions:
+        available = ", ".join(sorted(versions.keys())) or "(none)"
+        raise SchemaVersionError(
+            f"Version {version!r} not found in {origin}. Available: {available}"
+        )
+
+    entry = versions[version]
+    if not isinstance(entry, dict):
+        raise SchemaLoadError(f"Version entry for {version!r} must be a mapping: {origin}")
+    entry["summary"] = summary
+
+
+def delete_version_in(data: dict[str, Any], version: str, *, origin: str) -> None:
+    """Remove a version entry from *data*, moving ``current`` off it when it was current.
+
+    Raises:
+        SchemaVersionError: The version is missing or is the last one.
+        SchemaLoadError: The versions are not a mapping.
+    """
+    versions = data.get("versions", {})
+    if not isinstance(versions, dict):
+        raise SchemaLoadError(f"Schema versions must be a mapping: {origin}")
+
+    if version not in versions:
+        available = ", ".join(sorted(versions.keys())) or "(none)"
+        raise SchemaVersionError(
+            f"Version {version!r} not found in {origin}. Available: {available}"
+        )
+
+    if len(versions) == 1:
+        raise SchemaVersionError(
+            f"Cannot delete the last remaining version {version!r} in {origin}"
+        )
+
+    del versions[version]
+    if data.get("current") == version:
+        data["current"] = next(reversed(versions))
+
+
+def add_version_in(
+    data: dict[str, Any],
+    new_version: str,
+    columns: Sequence[dict[str, Any] | SchemaColumn],
+    *,
+    origin: str,
+    type: str = "addition",
+    summary: str = "",
+    set_current: bool = True,
+    validate: bool = True,
+) -> None:
+    """Add a version entry to *data*, leaving the existing entries untouched.
+
+    Raises:
+        SchemaVersionError: The version exists, there are no columns, or they do not validate.
+    """
+    versions = data.setdefault("versions", {})
+    if new_version in versions:
+        raise SchemaVersionError(f"Version {new_version!r} already exists in {origin}")
+
+    col_dicts = _normalise_columns(columns)
+    if not col_dicts:
+        raise SchemaVersionError("columns must contain at least one column")
+    if validate:
+        _validate_columns(col_dicts)
+
+    versions[new_version] = {
+        "date": _today(),
+        "type": type,
+        "summary": summary,
+        "columns": col_dicts,
+    }
+
+    if set_current:
+        data["current"] = new_version
+
+
+def _single_version_document(
+    columns: list[dict[str, Any]], version: str, *, type: str, summary: str
+) -> dict[str, Any]:
+    """A schema document holding one version, current."""
+    return {
+        "current": version,
+        "versions": {
+            version: {
+                "date": _today(),
+                "type": type,
+                "summary": summary,
+                "columns": columns,
+            }
+        },
+    }
+
+
+def fork_document(
+    data: dict[str, Any],
+    *,
+    source_version: str | None = None,
+    summary: str,
+    origin: str,
+) -> dict[str, Any]:
+    """A new single-version document carrying one version's columns from *data*.
+
+    The fork keeps the version id it copies and is ``resource_type: custom``,
+    so a core schema can be extended without being modified.
+
+    Raises:
+        SchemaVersionError: The version to copy is not defined.
+        SchemaLoadError: The source holds no version tree.
+    """
+    versions = data.get("versions")
+    if not isinstance(versions, dict):
+        raise SchemaLoadError(f"Schema versions must be a mapping: {origin}")
+    version = source_version or data.get("current")
+    if not version or version not in versions:
+        available = ", ".join(sorted(versions)) or "(none)"
+        raise SchemaVersionError(
+            f"Source version {version!r} not found in {origin}. Available: {available}"
+        )
+    raw_columns = versions[version].get("columns") if isinstance(versions[version], dict) else None
+    if not isinstance(raw_columns, list):
+        raise SchemaLoadError(f"Version {version!r} in {origin} must contain a 'columns' key")
+
+    columns = _normalise_columns([SchemaColumn.model_validate(col) for col in raw_columns])
+    fork = _single_version_document(columns, version, type="model", summary=summary)
+    fork["resource_type"] = "custom"
+    return fork
+
+
 # -- SchemaManager --------------------------------------------------
 
 
@@ -207,45 +363,16 @@ class SchemaManager:
     def set_current(path: str | Path, current: str) -> None:
         """Update the ``current`` marker without modifying version entries."""
         p = Path(path)
-        if not p.exists():
-            raise SchemaLoadError(f"Schema file not found: {p}")
-
-        data = yaml_load(p)
-        if not isinstance(data, dict):
-            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
-
-        versions = data.get("versions", {})
-        if current not in versions:
-            available = ", ".join(sorted(versions.keys())) or "(none)"
-            raise SchemaVersionError(
-                f"Version {current!r} not found in {p}. Available: {available}"
-            )
-
-        data["current"] = current
+        data = _load_mapping(p)
+        set_current_in(data, current, origin=str(p))
         yaml_dump(data, p)
 
     @staticmethod
     def update_version_summary(path: str | Path, version: str, summary: str) -> None:
         """Update only the summary field on an existing version entry."""
         p = Path(path)
-        if not p.exists():
-            raise SchemaLoadError(f"Schema file not found: {p}")
-
-        data = yaml_load(p)
-        if not isinstance(data, dict):
-            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
-
-        versions = data.get("versions", {})
-        if version not in versions:
-            available = ", ".join(sorted(versions.keys())) or "(none)"
-            raise SchemaVersionError(
-                f"Version {version!r} not found in {p}. Available: {available}"
-            )
-
-        entry = versions[version]
-        if not isinstance(entry, dict):
-            raise SchemaLoadError(f"Version entry for {version!r} must be a mapping: {p}")
-        entry["summary"] = summary
+        data = _load_mapping(p)
+        set_summary_in(data, version, summary, origin=str(p))
         yaml_dump(data, p)
 
     @staticmethod
@@ -261,29 +388,8 @@ class SchemaManager:
             SchemaLoadError: If the file is missing or malformed.
         """
         p = Path(path)
-        if not p.exists():
-            raise SchemaLoadError(f"Schema file not found: {p}")
-
-        data = yaml_load(p)
-        if not isinstance(data, dict):
-            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
-
-        versions = data.get("versions", {})
-        if not isinstance(versions, dict):
-            raise SchemaLoadError(f"Schema versions must be a mapping: {p}")
-
-        if version not in versions:
-            available = ", ".join(sorted(versions.keys())) or "(none)"
-            raise SchemaVersionError(
-                f"Version {version!r} not found in {p}. Available: {available}"
-            )
-
-        if len(versions) == 1:
-            raise SchemaVersionError(f"Cannot delete the last remaining version {version!r} in {p}")
-
-        del versions[version]
-        if data.get("current") == version:
-            data["current"] = next(reversed(versions))
+        data = _load_mapping(p)
+        delete_version_in(data, version, origin=str(p))
         yaml_dump(data, p)
 
     @staticmethod
@@ -326,33 +432,17 @@ class SchemaManager:
             SchemaLoadError: If the file is missing or malformed.
         """
         p = Path(path)
-        if not p.exists():
-            raise SchemaLoadError(f"Schema file not found: {p}")
-
-        data = yaml_load(p)
-        if not isinstance(data, dict):
-            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
-
-        versions = data.setdefault("versions", {})
-        if new_version in versions:
-            raise SchemaVersionError(f"Version {new_version!r} already exists in {p}")
-
-        col_dicts = _normalise_columns(columns)
-        if not col_dicts:
-            raise SchemaVersionError("columns must contain at least one column")
-        if validate:
-            _validate_columns(col_dicts)
-
-        versions[new_version] = {
-            "date": _today(),
-            "type": type,
-            "summary": summary,
-            "columns": col_dicts,
-        }
-
-        if set_current:
-            data["current"] = new_version
-
+        data = _load_mapping(p)
+        add_version_in(
+            data,
+            new_version,
+            columns,
+            origin=str(p),
+            type=type,
+            summary=summary,
+            set_current=set_current,
+            validate=validate,
+        )
         yaml_dump(data, p)
 
     @staticmethod
@@ -464,17 +554,7 @@ class SchemaManager:
         if validate:
             _validate_columns(col_dicts)
 
-        data = {
-            "current": initial_version,
-            "versions": {
-                initial_version: {
-                    "date": _today(),
-                    "type": type,
-                    "summary": summary,
-                    "columns": col_dicts,
-                }
-            },
-        }
+        data = _single_version_document(col_dicts, initial_version, type=type, summary=summary)
 
         p.parent.mkdir(parents=True, exist_ok=True)
         yaml_dump(data, p)
