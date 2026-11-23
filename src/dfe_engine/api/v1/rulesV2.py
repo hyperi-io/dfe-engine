@@ -80,6 +80,8 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
 }
 
 # A full statement is not a detection condition. The hunt supplies FROM.
+# ``{{source}}`` is that same stand-in when a builder validates a full query.
+_SOURCE_PLACEHOLDER = re.compile(r"(?i)\bFROM\s+\{\{\s*source\s*\}\}")
 _STATEMENT = re.compile(
     r"(?is)^(select|with|insert|update|delete|create|drop|alter|truncate|grant|revoke|merge)\b"
 )
@@ -297,6 +299,13 @@ class RuleV2Response(BaseModel):
             "Absent when the rule is a WHERE fragment, a CEL filter, or a match"
         ),
     )
+    original_sql: str = Field(
+        default="",
+        description=(
+            "The SQL the rule was written as. Empty when the rule is a WHERE fragment, "
+            "a CEL filter, or a match"
+        ),
+    )
     warnings: list[str] = Field(default_factory=list)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
     created_at: str
@@ -512,16 +521,21 @@ def _create_rule_from_sql(
         name=display,
         severity=body.severity,
         source_type="hyperdx",
-        user_sql=body.sql,
+        user_sql=_with_source_table(body.sql, settings),
     )
 
     fence = _preview_tenant_ids(request, user, hunts, rule_id, None)
-    result = service.create_rule(svc_request, rule_id, tenant_ids=fence)
+    result = service.create_rule(
+        svc_request,
+        rule_id,
+        tenant_ids=fence,
+        plan=_SOURCE_PLACEHOLDER.search(body.sql) is None,
+    )
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
     # Search SQL names a table. The rule keeps the WHERE; the hunt names the source.
     stored = _without_hunt_or_source(result.rule, description=body.description).model_copy(
-        update={"source_type": "hyperdx"}
+        update={"source_type": "hyperdx", "original_sql": body.sql}
     )
     outcome = registry.save(stored, created_by=git_author(user))
     apply_review_headers(response, outcome)
@@ -547,10 +561,17 @@ def validate_rule_sql(
 ):
     """Validate a detection query (SELECT ... FROM ...) without creating a rule.
 
-    Returns any syntax errors or validation issues found.
+    ``FROM {{source}}`` stands in for the table the hunt names. The check fills
+    it with the deployment's data database and landing table so the statement
+    parses, and does not plan that stand-in table: its columns are not the
+    source's. A named table is planned, and the response lists any syntax errors
+    or validation issues.
     """
     service = _rule_service(settings)
-    errors = service.validate_sql(body.sql)
+    errors = service.validate_sql(
+        _with_source_table(body.sql, settings),
+        plan=_SOURCE_PLACEHOLDER.search(body.sql) is None,
+    )
 
     return SqlValidationResponse(
         valid=len(errors) == 0,
@@ -709,6 +730,21 @@ def delete_rule(
 # -- Helpers --------------------------------------------------
 
 
+def _with_source_table(sql: str, settings: Settings) -> str:
+    """``sql`` with ``FROM {{source}}`` replaced by a table the check can read.
+
+    A v2 rule names no source. The placeholder lets a builder validate the query
+    anyway, and the replacement is only for this check.
+    """
+    from dfe_engine.clickhouse.quoting import quote_identifier
+    from dfe_engine.source.models import DEFAULT_LANDING_LABEL
+
+    clickhouse = getattr(settings, "clickhouse", None)
+    database = getattr(clickhouse, "effective_data_database", None) or "dfe"
+    target = f"{quote_identifier(database)}.{quote_identifier(DEFAULT_LANDING_LABEL)}"
+    return _SOURCE_PLACEHOLDER.sub(lambda _match: f"FROM {target}", sql)
+
+
 def _rule_service(settings: Settings):
     """The creation service every rule check and save runs through."""
     from dfe_engine.hunts.rule_creation_service import RuleCreationService
@@ -779,6 +815,7 @@ def _rule_to_response(
         cel_filter=rule.cel_filter,
         match=rule.condition,
         source_type=rule.source_type,
+        original_sql=rule.original_sql,
         warnings=list(rule.warnings),
         sql_errors=sql_errors or [],
         created_at=rule.created_at,
@@ -786,7 +823,11 @@ def _rule_to_response(
 
 
 def _without_hunt_or_source(rule: Rule, *, description: str | None) -> Rule:
-    """A copy that keeps the detection and drops source, hunt, and the original query."""
+    """A copy that keeps the detection and drops source and hunt.
+
+    The copy also drops the query the parser saw. A rule written as SQL puts the
+    author's text back, because that text is what detail returns.
+    """
     return rule.model_copy(
         update={
             "description": description,
@@ -811,8 +852,9 @@ def _rule_from_user_sql(
 ) -> tuple[Rule, list[SqlValidationError]]:
     """The WHERE a full query reduces to. The hunt names the table, so the FROM is dropped.
 
-    ``source_type`` 'hyperdx' runs the Search sanitizer first, which is how a view's
-    rendered SQL becomes a rule.
+    ``FROM {{source}}`` is filled the same way ``POST /rules-v2/validate`` fills it,
+    so a query that validated can be saved. ``source_type`` 'hyperdx' then runs the
+    Search sanitizer, which is how a view's rendered SQL becomes a rule.
     """
     from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
@@ -821,13 +863,14 @@ def _rule_from_user_sql(
             name=display_name,
             severity=body.severity,
             source_type=body.source_type,
-            user_sql=body.user_sql,
+            user_sql=_with_source_table(body.user_sql or "", settings),
             estimate_cost=False,
         ),
         rule_id,
+        plan=_SOURCE_PLACEHOLDER.search(body.user_sql or "") is None,
     )
     stored = _without_hunt_or_source(result.rule, description=description).model_copy(
-        update={"source_type": body.source_type}
+        update={"source_type": body.source_type, "original_sql": body.user_sql or ""}
     )
     errors = _map_sql_errors(result.sql_errors or [])
     if not errors:

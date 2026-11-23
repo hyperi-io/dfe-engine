@@ -9,10 +9,14 @@ from dfe_engine.api.v1.rulesV2 import (
     RuleV2FromHyperdxRequest,
     RuleV2Response,
     RuleV2Summary,
+    SqlValidationRequest,
     _refuse_detection,
     _rule_from_write,
     _rule_to_response,
+    _with_source_table,
+    validate_rule_sql,
 )
+from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
 from dfe_engine.yaml_utils import yaml_load
@@ -24,6 +28,63 @@ class _Hunts:
 
 class _Settings:
     hunts = _Hunts()
+
+
+def test_validate_fills_the_source_placeholder_with_the_landing_table():
+    sql = "SELECT * FROM {{source}} WHERE severity = 'high'"
+    deployment = type("Settings", (), {})()
+    deployment.clickhouse = type("ClickHouse", (), {"effective_data_database": "tenant"})()
+    assert (
+        _with_source_table(sql, deployment)
+        == "SELECT * FROM `tenant`.`main` WHERE severity = 'high'"
+    )
+    assert "{{source}}" in _with_source_table(
+        "SELECT * FROM dfe.main WHERE msg = '{{source}}'", _Settings()
+    )
+
+    result = validate_rule_sql(SqlValidationRequest(sql=sql), user=None, settings=_Settings())
+
+    assert result.valid is True
+    assert result.errors == []
+
+
+def test_a_source_placeholder_is_not_planned_against_the_landing_table(monkeypatch):
+    """A column the landing table lacks is the hunt's source's column, not invalid SQL."""
+
+    class _ClickHouse:
+        def command(self, sql, **_kwargs):
+            if sql.startswith("EXPLAIN PLAN"):
+                raise RuntimeError(
+                    "Code: 47. DB::Exception: Unknown expression or function identifier `test` "
+                    "in scope SELECT 1 FROM dfe.main WHERE test = 'test'."
+                )
+
+        def query(self, _sql, **_kwargs):
+            return type("Result", (), {"result_rows": [(0, 0)]})()
+
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda _self: _ClickHouse())
+    sql = "SELECT * FROM {{source}} WHERE test = 'test'"
+
+    checked = validate_rule_sql(SqlValidationRequest(sql=sql), user=None, settings=_Settings())
+    rule, errors = _rule_from_write(
+        _Settings(),
+        RuleV2CreateRequest(name="placeholder", user_sql=sql),
+        rule_id="placeholder",
+        display_name="Placeholder",
+        description=None,
+    )
+
+    assert checked.valid is True
+    assert errors == []
+    assert rule.where_clause == "test = 'test'"
+
+    named = validate_rule_sql(
+        SqlValidationRequest(sql="SELECT * FROM dfe.main WHERE test = 'test'"),
+        user=None,
+        settings=_Settings(),
+    )
+    assert named.valid is False
+    assert any("cannot plan" in error.message for error in named.errors)
 
 
 def test_create_accepts_a_where_fragment_and_an_optional_description():
@@ -104,6 +165,22 @@ def test_create_refuses_a_full_query_and_the_removed_fields():
         RuleV2CreateRequest(name="hunted", where_clause="severity = 'high'", hunt_name="windows")
 
 
+def test_create_accepts_the_source_placeholder_validate_accepts():
+    sql = "SELECT *\nFROM {{source}} WHERE severity = 'high'"
+    body = RuleV2CreateRequest(name="high", user_sql=sql)
+    checked = validate_rule_sql(SqlValidationRequest(sql=sql), user=None, settings=_Settings())
+    rule, errors = _rule_from_write(
+        _Settings(), body, rule_id="high", display_name="High", description=None
+    )
+
+    assert checked.valid is True
+    assert errors == []
+    assert rule.where_clause == "severity = 'high'"
+    assert rule.source_table is None
+    assert rule.original_sql == sql
+    assert _rule_to_response(rule).original_sql == sql
+
+
 def test_user_sql_keeps_the_where_and_drops_the_table():
     body = RuleV2CreateRequest(
         name="high",
@@ -118,11 +195,12 @@ def test_user_sql_keeps_the_where_and_drops_the_table():
     assert rule.source is None
     assert rule.source_db is None
     assert rule.source_table is None
-    assert rule.original_sql == ""
+    assert rule.original_sql == "SELECT * FROM dfe.main WHERE severity = 'high'"
     assert rule.condition is None
     response = _rule_to_response(rule)
     assert response.match is None
     assert response.source_type == "raw"
+    assert response.original_sql == rule.original_sql
 
 
 def test_hyperdx_user_sql_is_sanitized_to_the_where():
@@ -141,7 +219,10 @@ def test_hyperdx_user_sql_is_sanitized_to_the_where():
     assert "LIMIT" not in rule.where_clause.upper()
     assert rule.source_table is None
     assert rule.description == "From Search"
-    assert _rule_to_response(rule).source_type == "hyperdx"
+    assert rule.original_sql == rendered
+    detail = _rule_to_response(rule)
+    assert detail.source_type == "hyperdx"
+    assert detail.original_sql == rendered
 
 
 def test_hyperdx_source_type_applies_only_to_user_sql():
@@ -235,6 +316,19 @@ def test_description_round_trips_and_the_list_has_no_source_or_hunt(tmp_path):
         )
         detail = _rule_to_response(reg.get("from_search"))
         assert detail.source_type == "hyperdx"
+        assert detail.original_sql == ""
+        reg.save(
+            Rule(
+                rule_id="from_sql",
+                name="From SQL",
+                severity="high",
+                where_clause="`aws-guardduty`.severity >= 7",
+                source_type="raw",
+                original_sql="SELECT * FROM dfe.`aws-guardduty` WHERE `aws-guardduty`.severity >= 7",
+            )
+        )
+        sql_detail = _rule_to_response(reg.get("from_sql"))
+        assert sql_detail.original_sql.startswith("SELECT * FROM dfe.`aws-guardduty`")
         listed = reg.list_rules()
         assert listed[0]["description"] == "Looks for certutil"
     finally:
@@ -254,5 +348,4 @@ def test_description_round_trips_and_the_list_has_no_source_or_hunt(tmp_path):
     assert summary.description is None
     assert "source" not in RuleV2Summary.model_fields
     assert "hunt_name" not in RuleV2Summary.model_fields
-    assert "original_sql" not in RuleV2Response.model_fields
     assert "source_db" not in RuleV2Response.model_fields
