@@ -28,7 +28,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
 
       # Node 25 and later no longer bundle Corepack. Yarn's version comes from dfe-ui's packageManager pin.
       - name: Enable Yarn via Corepack
