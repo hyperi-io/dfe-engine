@@ -292,8 +292,12 @@ def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
 
     The two tables are declared in dfe-schemas and created by the engine's schema
     phase, which is the only path that issues DDL. What is left here is the
-    PROJECTION: each reconcile TRUNCATEs and re-INSERTs so it exactly reflects
-    current config, removed orgs and tiers included.
+    PROJECTION: each reconcile INSERTs every current org and tier, then deletes the
+    rows whose name is no longer configured, so removed orgs and tiers drop out.
+
+    The inserts come first so a run stopped part way leaves the previous rows. The
+    tables are ``ReplacingMergeTree(updated_at)``, so a re-inserted name keeps its
+    newest row once parts merge, and a reader wanting the merged view uses ``FINAL``.
 
     A literal CREATE here would pin ``ReplacingMergeTree(updated)`` with no
     ``ON CLUSTER``, and on a cluster the tables would land on whichever replica
@@ -302,7 +306,7 @@ def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
     database, orgs_name, tiers_name = meta_projection()
     orgs_table = f"{database}.{orgs_name}"
     tiers_table = f"{database}.{tiers_name}"
-    stmts: list[str] = [f"TRUNCATE TABLE {orgs_table}", f"TRUNCATE TABLE {tiers_table}"]
+    stmts: list[str] = []
     for o in orgs:
         ids = ", ".join(_sq(i) for i in (o.org_ids or []))
         display = getattr(o, "display_name", "") or ""
@@ -316,4 +320,17 @@ def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
             f"INSERT INTO {tiers_table} (name, kind, is_default) VALUES "  # noqa: S608 - manifest table, every value escaped by quote_literal
             f"({_sq(t.name)}, {_sq(t.kind)}, {1 if t.default else 0})"
         )
+    stmts.append(_delete_unlisted(orgs_table, [o.name for o in orgs]))
+    stmts.append(_delete_unlisted(tiers_table, [t.name for t in tiers]))
     return stmts
+
+
+def _delete_unlisted(table: str, names: list[str]) -> str:
+    """A mutation removing every row of ``table`` whose name is not in ``names``.
+
+    A mutation rather than a lightweight DELETE, which waits on every replica and
+    would hold the reconcile while one is down.
+    """
+    keep = ", ".join(_sq(n) for n in names)
+    where = f"name NOT IN ({keep})" if names else "1"
+    return f"ALTER TABLE {table} DELETE WHERE {where}"

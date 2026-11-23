@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 import zlib
+from collections import deque
 from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -86,6 +87,44 @@ _BREAKER_PROBES = 1
 # An object that does not read back, which is damage to the clone rather than a disk
 # refusing a write.
 _CORRUPT_OBJECT = (ChecksumMismatch, FileFormatException, ObjectFormatException, zlib.error)
+
+
+class _FailureWindow:
+    """The writes that ran out of budget recently enough to count towards the breaker.
+
+    scalo's breaker counts consecutive failures with no expiry, so the engine keeps
+    the count and tells the breaker only once the threshold is reached inside the window.
+    """
+
+    def __init__(self, window_seconds: float) -> None:
+        self._window = window_seconds
+        self._at: deque[float] = deque()
+
+    def add(self) -> int:
+        """Record a failure now. Returns how many, this one included, are inside the window."""
+        now = time.monotonic()
+        while self._at and now - self._at[0] >= self._window:
+            self._at.popleft()
+        self._at.append(now)
+        return len(self._at)
+
+    def clear(self) -> None:
+        """Forget every failure."""
+        self._at.clear()
+
+
+@dataclass(slots=True)
+class _WriteOutcome:
+    """What the remote calls of one write have shown the breaker so far."""
+
+    # The breaker admitted this write, so it owes the breaker an outcome.
+    admitted: bool = False
+    # Admitted as the half-open probe, which must end however the write does.
+    probing: bool = False
+    # A call got an answer from the forge, a refusal included.
+    answered: bool = False
+    # A call ran out of budget, and the breaker was told.
+    failed: bool = False
 
 
 def _corruption_fields(exc: BaseException) -> dict[str, str]:
@@ -409,14 +448,18 @@ class GitopsRepo:
             unavailable_exc=GitopsUnavailableError,
             sleep=jittered_sleep,
         )
+        # The window below decides when to open it, so it opens on the first failure told.
         self._write_breaker = CircuitBreaker(
             "gitops.write",
             CircuitBreakerConfig(
-                failure_threshold=self._write.failure_threshold,
+                failure_threshold=1,
                 reset_timeout=self._write.reset_timeout,
                 half_open_max_calls=_BREAKER_PROBES,
             ),
         )
+        self._failures = _FailureWindow(self._write.failure_window_seconds)
+        # The open write's breaker outcome, held under the writer lock.
+        self._outcome: _WriteOutcome | None = None
         # When the write breaker last opened, so a rejection can say when to come back.
         self._breaker_opened_at = 0.0
         # The working tree: held to change it or read it, never across a push.
@@ -613,76 +656,126 @@ class GitopsRepo:
         the first failure, as scalo's retry loop counts it, and a retry's timeout is
         capped at what is left of it, so the retries end with the budget.
 
-        The write breaker counts a call that runs out of budget as a failure. A call
-        the forge answers -- a success, or a refusal, bad credentials or a missing
-        repo -- counts as a success, because the breaker tracks whether the forge is
-        reachable and those answers prove it is. While it is open no call is made.
+        The write breaker counts a write whose calls ran out of budget as a failure, and
+        a write whose calls the forge all answered -- a success, or a refusal, bad
+        credentials or a missing repo -- as a success, because the breaker tracks
+        whether the forge is reachable and those answers prove it is. A fetch the
+        forge answers therefore never cancels a push it drops. While it is open no call
+        is made.
 
         Raises:
             GitopsUnavailableError: every attempt failed transiently until the budget ran
                 out, or the breaker is open and the forge was not called.
             GitopsRemoteError: a failure another attempt cannot fix, raised at once.
         """
+        with self._write_outcome() as outcome:
+            self._admit(outcome)
+            deadline: float | None = None
+
+            def attempt() -> T:
+                nonlocal deadline
+                timeout = self._write.timeout_seconds
+                if deadline is not None:
+                    self._metrics.write_retry(op, "retried")
+                    left = max(deadline - time.monotonic(), _MIN_ATTEMPT_TIMEOUT_SECONDS)
+                    timeout = min(timeout, left)
+                try:
+                    return self._remote_op(lambda errstream: call(errstream, timeout))
+                except GitopsRemoteError:
+                    if deadline is None:
+                        deadline = time.monotonic() + self._write.budget_seconds
+                    raise
+
+            try:
+                result = self._write_resilience.run(attempt)
+            except GitopsUnavailableError as exc:
+                self._metrics.write_retry(op, "exhausted")
+                exc.remote = redact_credentials(self._repo_url)
+                # About one back-off step: the pace this clone was retrying at itself.
+                exc.retry_after_seconds = max(1, math.ceil(self._write.wait_max))
+                if self._record_failure(outcome):
+                    exc.retry_after_seconds = self._breaker_retry_after()
+                raise
+            except GitopsRemoteError:
+                outcome.answered = True
+                raise
+            except BaseException:
+                # Not an answer from the forge, so it counts for nothing, but a probe must
+                # still end or the breaker never leaves half-open.
+                if outcome.probing:
+                    self._record_failure(outcome)
+                raise
+            outcome.answered = True
+            return result
+
+    @contextmanager
+    def _write_outcome(self) -> Generator[_WriteOutcome]:
+        """Count the remote calls of one write as a single outcome for the breaker.
+
+        A write is a fetch and then a push, and the breaker tracks whether writes get
+        through, so a fetch the forge answers must not reset the count of a push it
+        drops. A failure is told to the breaker as it happens, and a success when the
+        write ends. Holds the writer lock, so one write's outcome never mixes with
+        another's. A nested block joins the one already open.
+        """
+        with self._write_lock:
+            if self._outcome is not None:
+                yield self._outcome
+                return
+            outcome = self._outcome = _WriteOutcome()
+            try:
+                yield outcome
+            finally:
+                self._outcome = None
+                if outcome.admitted and outcome.answered and not outcome.failed:
+                    self._record_answer()
+
+    def _admit(self, outcome: _WriteOutcome) -> None:
+        """Take the breaker's permission for a write's first call, which covers the rest.
+
+        Raises:
+            GitopsUnavailableError: the breaker is open and the forge was not called.
+        """
+        if outcome.admitted:
+            return
         if not self._write_breaker.try_acquire_probe():
             self._metrics.write_breaker("rejected")
             raise self._breaker_rejection()
-        probing = self._write_breaker.state is CircuitState.HALF_OPEN
-        deadline: float | None = None
+        outcome.admitted = True
+        outcome.probing = self._write_breaker.state is CircuitState.HALF_OPEN
 
-        def attempt() -> T:
-            nonlocal deadline
-            timeout = self._write.timeout_seconds
-            if deadline is not None:
-                self._metrics.write_retry(op, "retried")
-                left = max(deadline - time.monotonic(), _MIN_ATTEMPT_TIMEOUT_SECONDS)
-                timeout = min(timeout, left)
-            try:
-                return self._remote_op(lambda errstream: call(errstream, timeout))
-            except GitopsRemoteError:
-                if deadline is None:
-                    deadline = time.monotonic() + self._write.budget_seconds
-                raise
+    def _record_answer(self) -> None:
+        """Tell the breaker a write got through, which closes it and clears the failure count.
 
-        try:
-            result = self._write_resilience.run(attempt)
-        except GitopsUnavailableError as exc:
-            self._metrics.write_retry(op, "exhausted")
-            exc.remote = redact_credentials(self._repo_url)
-            # About one back-off step: the pace this clone was retrying at itself.
-            exc.retry_after_seconds = max(1, math.ceil(self._write.wait_max))
-            if self._record_forge(reachable=False):
-                exc.retry_after_seconds = self._breaker_retry_after()
-            raise
-        except GitopsRemoteError:
-            self._record_forge(reachable=True)
-            raise
-        except BaseException:
-            # Not an answer from the forge, so it counts for nothing, but a probe must
-            # still end or the breaker never leaves half-open.
-            if probing:
-                self._record_forge(reachable=False)
-            raise
-        self._record_forge(reachable=True)
-        return result
-
-    def _record_forge(self, *, reachable: bool) -> bool:
-        """Feed one write call's outcome to the breaker. Returns whether it is now open.
-
-        Called under the writer lock, so nothing moves the breaker between the reads
-        of its state either side of the record.
+        Called under the writer lock, so nothing moves the breaker between the read
+        of its state and the record.
         """
         before = self._write_breaker.state
-        if reachable:
-            self._write_breaker.record_success()
-        else:
-            self._write_breaker.record_failure()
-        after = self._write_breaker.state
-        if reachable:
-            if before is CircuitState.HALF_OPEN:
-                self._metrics.write_breaker("closed")
-                logger.info("Deploy repo answered a probe write; writes call it again")
-            return False
-        opened = before is CircuitState.HALF_OPEN or after is not CircuitState.CLOSED
+        self._write_breaker.record_success()
+        self._failures.clear()
+        if before is CircuitState.HALF_OPEN:
+            self._metrics.write_breaker("closed")
+            logger.info("Deploy repo answered a probe write; writes call it again")
+
+    def _record_failure(self, outcome: _WriteOutcome) -> bool:
+        """Count a write that ran out of budget. Returns whether the breaker is now open.
+
+        A write counts once however many of its calls ran out of budget. Failures
+        inside ``failure_window_seconds`` count towards the threshold, and the
+        half-open probe reopens the breaker on its own. Called under the writer lock.
+        """
+        if outcome.failed:
+            return self._write_breaker.state is not CircuitState.CLOSED
+        outcome.failed = True
+        before = self._write_breaker.state
+        if before is CircuitState.CLOSED:
+            if self._failures.add() < self._write.failure_threshold:
+                return False
+            self._failures.clear()
+        self._write_breaker.record_failure()
+        opened = before is CircuitState.HALF_OPEN or (
+            self._write_breaker.state is not CircuitState.CLOSED
+        )
         if not opened:
             return False
         self._breaker_opened_at = time.monotonic()
@@ -692,6 +785,7 @@ class GitopsRepo:
                 "Deploy repo writes ran out of retry budget repeatedly: answering 503 "
                 "without calling it until a probe write gets through",
                 failures=self._write.failure_threshold,
+                window_seconds=self._write.failure_window_seconds,
                 probe_after_seconds=self._write.reset_timeout,
             )
         return True
@@ -1120,7 +1214,7 @@ class GitopsRepo:
         and the rest of the block goes into a second commit. A nested block joins the
         one already open.
         """
-        with self._write_lock:
+        with self._write_outcome():
             if self._batch is not None:
                 yield
                 return
@@ -1304,7 +1398,7 @@ class GitopsRepo:
         """
         # The tree lock is taken inside for the local work only, so a read waits for
         # the commit and never for the fetch or the push.
-        with self._write_lock:
+        with self._write_outcome():
             try:
                 return self._publish_locked(artifacts, message, deletions, branch, expected_head)
             finally:
@@ -1331,7 +1425,7 @@ class GitopsRepo:
         """
         if not self._repo_url:
             return PublishResult(changed=False)
-        with self._write_lock:
+        with self._write_outcome():
             remote_head = self._fetch_head(write=True)
             with self._lock:
                 local = self.head_revision()
