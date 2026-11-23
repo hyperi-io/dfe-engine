@@ -348,3 +348,40 @@ class TestReconcilerPinsTheTenant:
         }
         assert {reconciled_world["org_a"], reconciled_world["org_b"]} <= orgs
         assert tiers, "the tier projection is empty"
+
+    def test_a_projection_run_stopped_before_its_removals_leaves_the_old_rows(
+        self, reconciled_world, ch_client
+    ):
+        """The inserts land first, so a run killed after them never leaves a table empty.
+
+        Each prefix of the run is applied in turn, and the tables are read after every
+        statement. The removals then finish the run and the dropped org and tiers go.
+        """
+        from dfe_engine.governance.ch.render import render_materialise
+
+        database, orgs_table, tiers_table = meta_projection()
+
+        def names(table: str) -> set[str]:
+            rows = ch_client.query(f"SELECT name FROM {database}.{table}").result_rows
+            return {r[0] for r in rows}
+
+        before_orgs, before_tiers = names(orgs_table), names(tiers_table)
+        assert before_tiers, "the reconcile projected no tiers to protect"
+        kept = reconciled_world["org_a"]
+        added = SimpleNamespace(
+            name=f"{kept}x", org_ids=[f"{kept}x"], display_name="", enabled=True
+        )
+        kept_org = SimpleNamespace(name=kept, org_ids=[kept], display_name="", enabled=True)
+        statements = render_materialise([kept_org, added], [])
+        removals = [s for s in statements if s.startswith("ALTER TABLE")]
+        inserts = statements[: len(statements) - len(removals)]
+
+        for statement in inserts:
+            ch_client.command(statement)
+            assert before_orgs <= names(orgs_table)
+            assert before_tiers <= names(tiers_table)
+
+        for statement in removals:
+            ch_client.command(statement, settings={"mutations_sync": 2})
+        assert names(orgs_table) == {kept, added.name}
+        assert names(tiers_table) == set()

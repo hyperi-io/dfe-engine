@@ -1631,22 +1631,21 @@ def _chart_value_set(overlay: dict, path: str) -> bool:
 
 
 def chart_supplier(
-    service: str, path: str, overlay: dict | None = None, *, chart_deployed: bool = True
+    service: str, path: str, overlay: dict, *, chart_deployed: bool = True
 ) -> str | None:
     """What the deployment sets this option with, or None where it sets nothing.
 
     ``path`` is the overlay path, ``config.`` rooted, so a caller compares the
     request's own keys rather than re-deriving them. ``overlay`` is the
-    instance's, which decides the options the chart sets only on a value of its own.
+    instance's, which decides the options the chart sets only on a value of its own,
+    so a caller with no overlay passes ``{}`` and says it has none.
     ``chart_deployed`` is as for :func:`_chart_derived`.
     """
     inner = path.split(".", 1)[1] if path.startswith(f"{CONFIG_ROOT}.") else path
-    return _chart_derived(service, overlay or {}, chart_deployed=chart_deployed).get(inner)
+    return _chart_derived(service, overlay, chart_deployed=chart_deployed).get(inner)
 
 
-def chart_env_names(
-    service: str, overlay: dict | None = None, *, chart_deployed: bool = True
-) -> dict[str, str]:
+def chart_env_names(service: str, overlay: dict, *, chart_deployed: bool = True) -> dict[str, str]:
     """Environment names the deployment sets for this app, each with the option it decides.
 
     A supplier in the app's ``deployment_owned`` is either an environment name or a
@@ -1657,7 +1656,7 @@ def chart_env_names(
     ``chart_deployed`` are as for :func:`chart_supplier`.
     """
     out: dict[str, str] = {}
-    derived = _chart_derived(service, overlay or {}, chart_deployed=chart_deployed)
+    derived = _chart_derived(service, overlay, chart_deployed=chart_deployed)
     for inner, supplier in derived.items():
         if ENV_NAME.match(supplier):
             out.setdefault(supplier, f"{CONFIG_ROOT}.{inner}")
