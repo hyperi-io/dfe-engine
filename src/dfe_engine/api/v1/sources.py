@@ -512,7 +512,7 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
                 if change.unpark and not written.review_required:
                     derived.drop_parked(gc, change.app, user.user_id)
                 if written.changed and not written.review_required:
-                    pushed.append(f"{change.app.service}-{change.app.instance}")
+                    pushed.append(change.app.application_name)
             # Each write renders the app config itself, so its hint is the only
             # report of that change: the render below finds the file current.
             hints += written.restart_required
