@@ -550,7 +550,7 @@ def _hard_refresh_pushed(settings: Any, applications: list[str]) -> None:
     """
     if not applications or settings.deployment.target != DeployTarget.KUBERNETES:
         return
-    failed = argo_refresh.refresh_applications(applications)
+    failed = argo_refresh.refresh_applications(applications, crypto_profile=settings.crypto_profile)
     if failed:
         logger.warning(f"Argo CD not asked to refresh: {', '.join(failed)}")
 

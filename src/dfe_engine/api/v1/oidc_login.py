@@ -232,6 +232,7 @@ async def _rebuild_rp(request: Request):
             directory_deadline_seconds=(
                 request.app.state.settings.auth.oidc_login_directory_deadline_seconds
             ),
+            crypto_profile=request.app.state.settings.crypto_profile,
         )
     )
     return request.app.state.oidc_rp
