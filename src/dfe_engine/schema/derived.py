@@ -7,8 +7,10 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """A derived schema is a SELECTION of columns from a meta schema.
 
-It is not an override layer and not an append layer: the result is exactly the
+It is not an override layer and not an append layer: the result is the
 ``select`` list, in its order, and ``index`` is the only key an entry may add.
+A column promoted out of ``_json`` joins the table after the selection, because
+the promotion postdates it.
 ``type``, ``expr``, ``comment`` and ``attribute`` all resolve from the base
 column -- ``expr`` above all, because dfe-loader reads that directive back out
 of the ClickHouse column COMMENT and rewriting it moves where a field is read

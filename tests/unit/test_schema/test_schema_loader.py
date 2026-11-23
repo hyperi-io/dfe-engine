@@ -338,6 +338,15 @@ ABC = [
 ]
 
 
+PROMOTED = SchemaColumn(
+    name="p",
+    type="string",
+    expr="@source: probe.p",
+    use_case="exact_match",
+    field_type="promoted",
+)
+
+
 class TestApplyDerived:
     def test_narrows_the_base_to_the_selection(self, tmp_versioned_schema):
         path = _derived(tmp_versioned_schema, [{"name": "a"}, {"name": "c"}])
@@ -366,6 +375,24 @@ class TestApplyDerived:
         path = _derived(tmp_versioned_schema, [{"name": "a", "index": "range"}])
         result = SchemaLoader.apply_derived_schema(ABC, path)
         assert result[0].expr == "@source: a.path"
+
+    def test_a_promoted_base_column_rides_along_after_the_selection(self, tmp_versioned_schema):
+        path = _derived(tmp_versioned_schema, [{"name": "c"}, {"name": "a"}])
+
+        result = SchemaLoader.apply_derived_schema([*ABC, PROMOTED], path)
+
+        assert [c.name for c in result] == ["c", "a", "p"]
+        assert result[-1].use_case == "exact_match"
+
+    def test_a_promoted_column_the_selection_names_is_taken_once_with_its_index(
+        self, tmp_versioned_schema
+    ):
+        path = _derived(tmp_versioned_schema, [{"name": "p", "index": "none"}, {"name": "a"}])
+
+        result = SchemaLoader.apply_derived_schema([*ABC, PROMOTED], path)
+
+        assert [c.name for c in result] == ["p", "a"]
+        assert result[0].use_case is None
 
     def test_a_name_the_base_does_not_define_is_refused(self, tmp_versioned_schema):
         path = _derived(tmp_versioned_schema, [{"name": "nope"}])

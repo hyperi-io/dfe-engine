@@ -157,8 +157,9 @@ next schema apply moves an existing table onto a changed value with `ALTER
 TABLE ... MODIFY TTL`, and shortening it expires the rows older than the new
 value.
 
-`derived_schema` NARROWS. The table's columns become exactly the names its
-`select` list carries, in that order, after the common header. A name the base
+`derived_schema` NARROWS. The table's columns become the names its
+`select` list carries, in that order, after the common header, then any column
+promoted out of `_json` since the list was written. A name the base
 meta schema does not define is a hard error, never an appended column, and
 `index` is the only per-column key it may set -- `type`, `expr`, `comment` and
 `attribute` all resolve from the base. `additional_fields` is still the append

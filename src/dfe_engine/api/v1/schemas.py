@@ -96,8 +96,12 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaConversionError,
     ElasticSchemaService,
 )
-from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
-from dfe_engine.source.models import Source, SourceHeader, SourceWriteRequest
+from dfe_engine.source.models import (
+    PROMOTED_FIELD_TYPE,
+    Source,
+    SourceHeader,
+    SourceWriteRequest,
+)
 from dfe_engine.source.registry import SourceNotFoundError, SourceValidationError
 from dfe_engine.source.type_registry import TypeRegistry
 
