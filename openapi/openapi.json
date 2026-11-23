@@ -37190,6 +37190,82 @@
         "title": "AppsReconcileResponse",
         "description": "What the reconcile wrote into the deploy repo."
       },
+      "ArgoCondition": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "The condition kind, such as ComparisonError, InvalidSpecError or SyncError."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ArgoCondition",
+        "description": "One condition Argo CD writes on an instance's Application."
+      },
+      "ArgoHealth": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Argo CD's health: Healthy, Progressing, Degraded, Suspended, Missing or Unknown."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ArgoHealth",
+        "description": "The health Argo CD reports for an instance's Application."
+      },
+      "ArgoSync": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Argo CD's sync state: Synced, OutOfSync or Unknown."
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision",
+            "description": "The revision Argo CD last compared, or null before its first compare."
+          },
+          "health": {
+            "$ref": "#/components/schemas/ArgoHealth"
+          },
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/ArgoCondition"
+            },
+            "type": "array",
+            "title": "Conditions",
+            "description": "Argo CD's conditions on the Application, empty when it has none."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "revision",
+          "health",
+          "conditions"
+        ],
+        "title": "ArgoSync",
+        "description": "What Argo CD says about an instance's Application, read when the status is asked."
+      },
       "ArtifactModel": {
         "properties": {
           "name": {
@@ -55373,6 +55449,17 @@
               }
             ],
             "title": "Uptime Seconds"
+          },
+          "sync": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArgoSync"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Argo CD says about the instance's Application. Null off Kubernetes, with no service account mounted, or when the Application cannot be read."
           }
         },
         "type": "object",

@@ -9,9 +9,10 @@
 
 from dataclasses import replace
 
+import httpx
 import pytest
 
-from dfe_engine.appmgmt import catalogue
+from dfe_engine.appmgmt import argo_refresh, catalogue
 from dfe_engine.auth.roles import RoleDefinition
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -204,6 +205,149 @@ class TestCatalogue:
         _deploy(client, admin_headers)
         got = client.get(BASE, headers=admin_headers).json()
         assert got["has_compiled_routing"] is catalogue.descriptor(VRL).has_compiled_routing
+
+
+ARGO_SYNCED = {
+    "status": {
+        "sync": {"status": "Synced", "revision": "3f2a9c1"},
+        "health": {"status": "Healthy"},
+    }
+}
+ARGO_RELEASE_NAME_REFUSED = (
+    'release name "dfe-transform-vector-umbrellavector-dfe-local-dfe-local": '
+    "invalid release name ... the length must not be longer than 53"
+)
+ARGO_COMPARISON_ERROR = {
+    "status": {
+        "sync": {"status": "OutOfSync", "revision": "9b7e0d4"},
+        "health": {"status": "Unknown"},
+        "conditions": [
+            {"type": "ComparisonError", "message": ARGO_RELEASE_NAME_REFUSED, "status": "True"}
+        ],
+    }
+}
+
+
+class TestArgoSync:
+    """The status reads Argo CD's verdict on the instance's Application, and never fails on it."""
+
+    @pytest.mark.parametrize(
+        ("target", "answer", "sent", "expected"),
+        [
+            pytest.param(
+                "kubernetes",
+                (200, ARGO_SYNCED),
+                1,
+                {
+                    "status": "Synced",
+                    "revision": "3f2a9c1",
+                    "health": {"status": "Healthy"},
+                    "conditions": [],
+                },
+                id="synced-and-healthy",
+            ),
+            pytest.param(
+                "kubernetes",
+                (200, ARGO_COMPARISON_ERROR),
+                1,
+                {
+                    "status": "OutOfSync",
+                    "revision": "9b7e0d4",
+                    "health": {"status": "Unknown"},
+                    "conditions": [
+                        {"type": "ComparisonError", "message": ARGO_RELEASE_NAME_REFUSED}
+                    ],
+                },
+                id="comparison-error",
+            ),
+            pytest.param("kubernetes", (403, {"message": "forbidden"}), 1, None, id="forbidden"),
+            pytest.param("kubernetes", (404, {"message": "gone"}), 1, None, id="not-found"),
+            pytest.param(
+                "kubernetes", httpx.ReadTimeout("argo did not answer"), 1, None, id="timeout"
+            ),
+            pytest.param("docker", (200, ARGO_SYNCED), 0, None, id="off-kubernetes"),
+        ],
+    )
+    def test_the_status_carries_argo_cds_verdict_or_none(
+        self,
+        client,
+        app,
+        admin_headers,
+        tmp_path,
+        monkeypatch,
+        target,
+        answer,
+        sent,
+        expected,
+    ):
+        _wire(app, tmp_path, target=target)
+        account = tmp_path / "serviceaccount"
+        account.mkdir()
+        (account / "token").write_text("tkn\n", encoding="utf-8")
+        monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+        seen: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            if isinstance(answer, Exception):
+                raise answer
+            code, body = answer
+            return httpx.Response(code, json=body)
+
+        app.state.argo_transport = httpx.MockTransport(respond)
+        app.state.argo_service_account = account
+
+        resp = client.get("/api/v1/apps/dfe-hyperdx/default/status", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reporting"] is None
+        assert resp.json()["sync"] == expected
+        assert len(seen) == sent
+        if sent:
+            assert seen[0].method == "GET"
+            assert seen[0].url.path == (
+                "/apis/argoproj.io/v1alpha1/namespaces/argocd/applications/dfe-hyperdx-default"
+            )
+            assert seen[0].headers["authorization"] == "Bearer tkn"
+
+    def test_an_unreadable_ca_leaves_the_status_intact(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        _wire(app, tmp_path, target="kubernetes")
+        account = tmp_path / "serviceaccount"
+        account.mkdir()
+        (account / "token").write_text("tkn\n", encoding="utf-8")
+        (account / "ca.crt").write_text("not a certificate\n", encoding="utf-8")
+        monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+        seen: list[httpx.Request] = []
+        app.state.argo_transport = httpx.MockTransport(
+            lambda request: seen.append(request) or httpx.Response(200, json=ARGO_SYNCED)
+        )
+        app.state.argo_service_account = account
+
+        resp = client.get("/api/v1/apps/dfe-hyperdx/default/status", headers=admin_headers)
+
+        assert (resp.status_code, resp.json()["sync"], len(seen)) == (200, None, 0)
+
+    def test_a_read_that_keeps_failing_logs_once(
+        self, client, app, admin_headers, tmp_path, monkeypatch, audit_events
+    ):
+        _wire(app, tmp_path, target="kubernetes")
+        account = tmp_path / "serviceaccount"
+        account.mkdir()
+        (account / "token").write_text("tkn\n", encoding="utf-8")
+        monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+        monkeypatch.setattr(argo_refresh, "_warned", {})
+        app.state.argo_transport = httpx.MockTransport(
+            lambda request: httpx.Response(403, json={"message": "forbidden"})
+        )
+        app.state.argo_service_account = account
+
+        for _ in range(3):
+            client.get("/api/v1/apps/dfe-hyperdx/default/status", headers=admin_headers)
+
+        logged = [e for e in audit_events if e["event"] == "argo application read failed"]
+        assert len(logged) == 1
 
 
 class TestOptionalApps:
