@@ -122,3 +122,4 @@ flowchart TB
 | [hunt-runner-scaling.md](hunt-runner-scaling.md) | pull-based runner, deterministic-due scaling, keda-shim fail-safe |
 | [hunt-match-delivery.md](hunt-match-delivery.md) | where a hunt match is written, who sees it, alert destinations and what the runner sends |
 | [hunt-schedule-smoothing.md](hunt-schedule-smoothing.md) | phase-drift load smoothing (incl. the reference derivation) |
+| [throughput-analysis.md](throughput-analysis.md) | silent sources, sudden drops and seasonal expectation with calendar exceptions (design) |
