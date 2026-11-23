@@ -3,6 +3,44 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.93](https://github.com/hyperi-io/dfe-engine/compare/v1.22.92...v1.22.93) (2026-11-23)
+
+### What's Changed
+* docs(architecture): say what dfe-infra holds by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1206
+* docs(diagrams): house style for every Mermaid diagram by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1207
+* fix(tests): pull Docker Hub test images through scalo's mirror by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1208
+* docs(architecture): engine page to the standard, diagrams to 860 px by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1209
+* docs(diagrams): drop per-diagram config from 12 non-flowchart diagrams by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1210
+* docs(deployment): drop the trailing blank line in transports.md by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1211
+* fix(e2e): drop acceptance step 2.7 by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1217
+* fix(hunts): reject hunts that reference missing rule files by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1216
+* fix(auth): limit system-granted org access (#1218) by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1218
+* fix(auth): block org-keyed reads for system-bound tenant roles by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1219
+* fix(schema): update comments on existing columns by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1220
+* fix(source): test the default version for bare deploy and plan (#1222) by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1222
+* fix(apps): return unknown status for apps with no scalo telemetry by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1223
+* fix(auth): add a managed admin password setting by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1225
+* fix(auth): add an ingest_admin role for machine feeds by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1226
+* fix(orgs): name the org that runs the deployment by @kazmosahebi in https://github.com/hyperi-io/dfe-engine/pull/1224
+* fix(hunts): cap rule condition operands and reject negated time bounds by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1228
+* docs(sigma): say Sigma conversion is in beta by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1227
+* test(secrets): register acme in the HA secrets test by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1229
+* fix(auth): fix Docker password rotation hints by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1230
+* fix(hunts): publish hunt_schedule from the runner by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1231
+* fix(apps): reload receiver destinations without a restart by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1232
+* fix(apps): reject extraEnv without an app environment directory by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1233
+* fix(ci): default main releases to candidates by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1234
+* fix(hunts): publish hunt_schedule on hunt change by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1235
+* fix(api): remove retired transform-wasm compile and test proxy by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1221
+* fix(catalogue): keep a receiver-only entry's match by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1236
+* fix(dashboards): format counts and time values by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1237
+* test(remote): name module servers by xdist worker by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1238
+* fix(retention): apply the stored TTL to every table by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1239
+* fix(deps): bump scalo to 2.32.10 by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1240
+* fix(auth): org roles, sign-in links and re-auth by @kazmosahebi in https://github.com/hyperi-io/dfe-engine/pull/1241
+* fix(tests): bind the views test admin to the deployment org by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1242
+* fix(deps): update python:3.14-slim Docker digest to 9aaa474 by @renovate[bot] in https://github.com/hyperi-io/dfe-engine/pull/1184
+
 ## [1.22.92](https://github.com/hyperi-io/dfe-engine/compare/v1.22.91...v1.22.92) (2026-11-16)
 
 ### Bug Fixes
