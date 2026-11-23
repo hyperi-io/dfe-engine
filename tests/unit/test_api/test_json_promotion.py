@@ -19,11 +19,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from dulwich.object_store import tree_lookup_path
+from dulwich.repo import Repo
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, get_clickhouse_client
+from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.routing import WritePosture
+from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.schema.core_schema import landing_table_name
+from dfe_engine.schema.registry import SchemaRegistry
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -35,7 +41,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from dfe_engine.source.models import Source, SourceHeader, SourceSchema, SourceVersion
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load_string
 from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.core_sources import write_landing_definition
 
@@ -817,6 +823,57 @@ class TestPromoteField:
         schema = src["versions"][cur]["schema"]
         assert schema["meta_schema"] == CORE_FORK_PATH
         assert schema["meta_schema_version"] == "1.1.0"
+
+    @pytest.mark.parametrize(
+        ("environment", "held"),
+        [("production", True), ("dev", False)],
+        ids=["production+team", "dev"],
+    )
+    def test_core_fork_is_one_write_and_goes_to_review_where_main_refuses_it(
+        self, client: TestClient, admin_headers, tmp_path: Path, environment: str, held: bool
+    ):
+        crud = GitCrud(
+            GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
+        )
+        crud.put("sources", "seed", {"source": "seed"}, "seed")
+        previous = _registries["meta_schema"]
+        posture = WritePosture(environment=environment, mode="team")
+        _registries["meta_schema"] = SchemaRegistry(
+            previous._directory, refresh_interval=0, crud=crud, posture=posture
+        )
+        previous.close()
+        before = crud.head_revision()
+
+        resp = client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["schema_version"] == "1.1.0"
+        assert (resp.headers.get("X-DFE-Review-Required") == "true") is held
+        assert (crud.head_revision() == before) is held
+        assert (crud.list("meta_schemas") == []) is held
+        branches = [
+            ref
+            for ref in Repo(str(crud.repo_path)).refs.allkeys()
+            if ref.startswith(b"refs/heads/dfe/")
+        ]
+        assert len(branches) == (1 if held else 0)
+        if held:
+            # The fork and its promoted version are one commit on the branch.
+            repo = Repo(str(crud.repo_path))
+            tip = repo[repo.refs[branches[0]]]
+            _mode, blob = tree_lookup_path(
+                repo.__getitem__,
+                tip.tree,
+                b"config/schemas/definitions/meta/core-source_core_tpl.yaml",
+            )
+            assert list(yaml_load_string(repo[blob].data.decode())["versions"]) == [
+                "1.0.0",
+                "1.1.0",
+            ]
 
     def test_core_meta_schema_dry_run_does_not_fork(
         self, settings: DFESettings, client: TestClient, admin_headers

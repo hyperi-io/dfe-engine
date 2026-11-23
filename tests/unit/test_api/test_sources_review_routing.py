@@ -24,7 +24,9 @@ from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitcrud.routing import WritePosture
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.schema.derived_registry import DerivedSchemaRegistry
+from dfe_engine.schema.registry import SchemaRegistry
 from dfe_engine.source.registry import SourceRegistry
+from dfe_engine.yaml_utils import yaml_dump
 
 SOURCES = "/api/v1/sources"
 
@@ -54,9 +56,14 @@ def deploy_repo(client, tmp_path):
 
 def _rebind(crud, *, environment: str, mode: str, forge=None) -> None:
     posture = WritePosture(environment=environment, mode=mode, forge=forge)
+    schemas_tree = _registries["meta_schema"]._directory
     for key, registry in (
         ("source", SourceRegistry(crud=crud, posture=posture)),
         ("derived_schema", DerivedSchemaRegistry(crud=crud, posture=posture)),
+        (
+            "meta_schema",
+            SchemaRegistry(schemas_tree, refresh_interval=0, crud=crud, posture=posture),
+        ),
     ):
         previous = _registries.get(key)
         close = getattr(previous, "close", None)
@@ -377,3 +384,70 @@ def test_an_ingest_compat_apply_held_for_review_skips_the_apps_and_says_so(
     assert resp.json()["pr_url"] == "http://forge/pr/7"
     assert reconciled == []
     assert not (deploy_repo.repo_path / "config" / "settings" / "ingest-compat.yaml").exists()
+
+
+_META = "/api/v1/schemas/definitions/meta/acme/events"
+_META_VERSION = {
+    "date": "2026-11-24",
+    "type": "model",
+    "summary": "acme events",
+    "columns": [
+        {"name": "event_id", "type": "string", "expr": "@source: id", "_field_type": "base"}
+    ],
+}
+_META_BODY = {"current": "1.0.0", "versions": {"1.0.0": _META_VERSION}}
+_NEW_VERSION = {
+    "type": "addition",
+    "summary": "more",
+    "columns": [
+        {"name": "event_id", "type": "string", "expr": "@source: id", "_field_type": "base"},
+        {"name": "more", "type": "string", "expr": "@source: more", "_field_type": "base"},
+    ],
+}
+_IMPORT = {"path": "meta/acme/imported", "current": "1.0.0", "versions": {"1.0.0": _META_VERSION}}
+
+_CORE = "/api/v1/schemas/definitions/meta/acme/shipped"
+
+# (request, status, refused). A refused write changes nothing in either posture. A core
+# summary change is the core-resource guard's 409, and a core current pointer is the registry's 422.
+_META_WRITES = {
+    "create": (("POST", f"{_META}-new", _META_BODY), 201, False),
+    "add version": (("POST", f"{_META}/versions", _NEW_VERSION), 201, False),
+    "update summary": (("PATCH", f"{_META}?version=1.0.0", {"summary": "changed"}), 200, False),
+    "delete version": (("DELETE", f"{_META}/versions/1.0.0", None), 204, False),
+    "delete": (("DELETE", _META, None), 204, False),
+    "import": (("POST", "/api/v1/schemas/import", _IMPORT), 201, False),
+    "core current": (("PATCH", _CORE, {"current": "1.0.0"}), 422, True),
+    "core summary": (("PATCH", f"{_CORE}?version=1.0.0", {"summary": "changed"}), 409, True),
+}
+
+
+@pytest.mark.parametrize(
+    ("environment", "held"), [("production", True), ("dev", False)], ids=["production+team", "dev"]
+)
+@pytest.mark.parametrize("write", _META_WRITES)
+def test_a_meta_schema_write_carries_the_review_headers_where_main_refuses_it(
+    client, admin_headers, deploy_repo, write, environment, held
+):
+    shipped = _registries["meta_schema"]._directory / "meta" / "acme" / "shipped.yaml"
+    shipped.parent.mkdir(parents=True, exist_ok=True)
+    yaml_dump(
+        {"resource_type": "core", "current": "1.0.0", "versions": {"1.0.0": _META_VERSION}}, shipped
+    )
+    _rebind(deploy_repo, environment="dev", mode="team")
+    assert client.post(_META, json=_META_BODY, headers=admin_headers).status_code == 201
+    assert (
+        client.post(f"{_META}/versions", json=_NEW_VERSION, headers=admin_headers).status_code
+        == 201
+    )
+    _rebind(deploy_repo, environment=environment, mode="team", forge=_RecordingForge())
+    (method, url, body), status_code, refused = _META_WRITES[write]
+    reviewed = held and not refused
+    before = deploy_repo.head_revision()
+
+    resp = client.request(method, url, json=body, headers=admin_headers)
+
+    assert resp.status_code == status_code, resp.text
+    assert (resp.headers.get("X-DFE-Review-Required") == "true") is reviewed
+    assert (resp.headers.get("X-DFE-PR-Url") == "http://forge/pr/7") is reviewed
+    assert (deploy_repo.head_revision() == before) is (held or refused)
