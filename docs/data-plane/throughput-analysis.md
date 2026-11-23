@@ -16,9 +16,9 @@ Status: design. Nothing on this page ships in 2.2.3. Tracked in <https://github.
 
 A source is silent when it has sent nothing for longer than its window. It has dropped when its rate falls well below its recent rate. Both read 2.2's self-monitoring: the receiver and loader counters that land in the otel ClickHouse database on every deployment, the same rates the Components page reads (`src/dfe_engine/appmgmt/queries.yaml`). No new collector, and no data-path change.
 
-Seasonal expectation goes further. A Monday at 09:00 and a Sunday at 03:00 are different normals, so the expectation is the inbound rate for a source at a given time on a given day of the week, and the deviation is how far the actual sits from it. That part is a general-purpose Python package, Apache-2.0, so it can stand on its own. DFE is its first consumer.
+Seasonal expectation goes further. A Monday at 09:00 and a Sunday at 03:00 are different normals, so the expectation is the inbound rate for a source at a given time on a given day of the week, and the deviation is how far the actual sits from it. The engine fits a Prophet model per source once a day and serves the day's expected values from that fit.
 
-Without calendar exceptions it cries wolf every long weekend, and then nobody trusts it. A public holiday is compared against holidays, not a normal Monday. Change freezes, site shutdowns and known outage windows count too. Exceptions are data, a calendar per org or site with holiday defaults by country and region, never code.
+Without calendar exceptions it cries wolf every long weekend, and then nobody trusts it. A public holiday is an off day, fitted like a weekend, so a holiday Monday is never judged as a normal Monday. A change freeze, site shutdown or known outage window is left out of the fit, and its alerts are muted with the reason. Exceptions are data, a calendar per org or site with holiday defaults by country and region from the `holidays` package, never code.
 
 ## What you see
 
