@@ -90,8 +90,9 @@ def default_registry() -> ResourceClassRegistry:
     `sources` (the all-in-one source-definition doc under config/sources - the
     first datamodel class to land in the deploy repo), `derived_schemas` (the
     column selections those sources name), and `hunts` + `rules` (what the hunt
-    runner executes). Meta schemas and fieldmaps stay in the dfe-schemas tree;
-    hunt alert-destinations arrive with the multi-repo work (option A).
+    runner executes), and `meta_schemas` (the meta schemas an operator writes, which
+    the shipped dfe-schemas tree does not carry). Fieldmaps stay in the dfe-schemas
+    tree. Hunt alert-destinations arrive with the multi-repo work (option A).
     """
     return ResourceClassRegistry(
         [
@@ -129,6 +130,15 @@ def default_registry() -> ResourceClassRegistry:
             ResourceClass(
                 "derived_schemas",
                 "config/schemas/derived",
+                rbac_prefix="schema",
+                versioned=True,
+                nested=True,
+            ),
+            # datamodel class - the meta schemas an operator writes, keyed by the full
+            # registry key (meta/beats/filebeat). The shipped ones stay in the schemas tree.
+            ResourceClass(
+                "meta_schemas",
+                "config/schemas/definitions",
                 rbac_prefix="schema",
                 versioned=True,
                 nested=True,

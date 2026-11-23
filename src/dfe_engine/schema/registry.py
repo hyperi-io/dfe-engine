@@ -1,8 +1,15 @@
 """Meta schema Registry - CRUD management for meta schema definitions.
 
-Backed by DirectoryConfigStore (YAML directory as SSoT).
+Two stores behind one surface:
 
-Directory layout::
+- **gitcrud** (gitops on): the schemas an operator writes live in the deploy repo's
+  ``config/schemas/definitions/`` (ResourceClass ``meta_schemas``), so each write is
+  one git commit and a production+team write goes to a review branch. Reads see the
+  deploy repo first, then the schemas tree.
+- **directory** (standalone): DirectoryConfigStore over the schemas tree, which is
+  both the read and the write location.
+
+Directory layout of the schemas tree::
 
     <schemas_directory>/
         azure/
@@ -22,22 +29,67 @@ Usage:
     registry.save_schema(Schema(...))
 """
 
+import copy
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
+from dfe_engine.gitcrud.routing import GovernedWrites, ReviewRouting, WritePosture
+from dfe_engine.names import InvalidNameError
 from dfe_engine.schema.models import MetaSchema
-from dfe_engine.schema.schema_loader import REGISTRIES_SUBDIR
+from dfe_engine.schema.schema_loader import REGISTRIES_SUBDIR, resolve_schema_yaml_path
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.engine import GitCrud
+
+META_CLASS = "meta_schemas"
 
 
 class SchemaError(Exception):
     """Base exception for schema registry errors."""
+
+
+def _class_directory() -> str:
+    """The deploy-repo directory the ``meta_schemas`` class declares."""
+    from dfe_engine.gitcrud.registry import default_registry
+
+    return default_registry().get(META_CLASS).directory
+
+
+def meta_deploy_root(deploy_schemas_root: Path | None, schemas_root: Path | None) -> Path | None:
+    """Where a deployment's own meta-schema documents sit, or None when they sit in the schemas tree.
+
+    ``deploy_schemas_root`` is the deploy repo's ``config/schemas`` (what
+    ``derived_reference_root`` returns with gitops on). It equals the schemas tree
+    when gitops is off, which leaves no second root.
+    """
+    if deploy_schemas_root is None:
+        return None
+    if schemas_root is not None and deploy_schemas_root.resolve() == schemas_root.resolve():
+        return None
+    return deploy_schemas_root / Path(_class_directory()).name
+
+
+def resolve_meta_reference(
+    reference: str, schemas_root: Path, deploy_root: Path | None = None
+) -> Path:
+    """The file a meta-schema reference names: the deploy repo's copy first, then the schemas tree.
+
+    The same precedence ``SchemaRegistry`` reads in, so a source never pins a
+    schema the registry reports missing. A miss returns the schemas tree's candidate.
+    """
+    if deploy_root is not None:
+        candidate = resolve_schema_yaml_path(deploy_root, reference)
+        if candidate.is_file():
+            return candidate
+    return resolve_schema_yaml_path(schemas_root, reference)
 
 
 def _git_would_record(path: Path) -> bool:
@@ -127,7 +179,27 @@ class SchemaRegistry:
         writable: bool | None = None,
         refresh_interval: int = 30,
         fixtures_directory: str | Path | None = None,
+        *,
+        crud: GitCrud | None = None,
+        posture: WritePosture | None = None,
     ) -> None:
+        """Bind the registry to the schemas tree and, with gitops on, the deploy repo.
+
+        Args:
+            schemas_directory: The schemas tree. Read always, written only without ``crud``.
+            writable: Passed to the directory store.
+            refresh_interval: Seconds between directory store refreshes.
+            fixtures_directory: Where e2e schema fixtures sit, outside the tree.
+            crud: Governed Ops engine over the deploy repo. Writes then land in
+                ``config/schemas/definitions/``, one git commit each.
+            posture: Where a gitcrud write lands. A production+team write goes to a
+                review branch. None reads the posture from the loaded settings, with no forge.
+        """
+        self._crud = crud
+        self._posture = posture
+        self._deploy_directory = (
+            crud.repo_path / crud.resource_class(META_CLASS).directory if crud is not None else None
+        )
         self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
         self._fixtures = (
@@ -239,20 +311,59 @@ class SchemaRegistry:
         data = yaml_load(yaml_path)
         return data if isinstance(data, dict) else None
 
-    def _config(self, table: str) -> dict[str, Any] | None:
-        """Schema document from the tree, falling back to a fixture of the same path."""
+    @staticmethod
+    def _readable_key(path: str) -> str | None:
+        """The deploy-repo name for a registry path, or None when the path is unusable."""
+        try:
+            return canonical_schema_path(path)
+        except SchemaValidationError:
+            return None
+
+    def _deploy_doc(self, path: str) -> dict[str, Any] | None:
+        """The document the deploy repo holds at *path*, or None when it holds none."""
+        crud = self._crud
+        key = self._readable_key(path)
+        if crud is None or key is None:
+            return None
+        from dfe_engine.gitcrud.engine import ResourceNotFoundError
+
+        try:
+            doc = crud.get(META_CLASS, key)
+        except ResourceNotFoundError, InvalidNameError:
+            return None
+        return doc if isinstance(doc, dict) else None
+
+    def _deploy_yaml(self, path: str) -> Path | None:
+        """The deploy-repo file for *path*, or None where gitops is off or the path is unusable."""
+        key = self._readable_key(path)
+        if key is None or self._deploy_directory is None:
+            return None
+        return self._deploy_directory / f"{key}.yaml"
+
+    def _stored(self, table: str) -> dict[str, Any] | None:
+        """The document at *table* from the deploy repo, else the tree. Fixtures are not consulted."""
+        doc = self._deploy_doc(table)
+        if doc is not None:
+            return doc
         data = self._store.get(table)
-        if isinstance(data, dict):
+        return data if isinstance(data, dict) else None
+
+    def _config(self, table: str) -> dict[str, Any] | None:
+        """Schema document from the deploy repo or tree, falling back to a fixture of the same path."""
+        data = self._stored(table)
+        if data is not None:
             return data
         return self._fixture_data(table)
 
     def _known_tables(self) -> list[str]:
-        """Tree tables plus fixture paths the tree does not already have."""
+        """Tree tables, then deploy-repo and fixture paths the tree does not already have."""
         tables = list(self._store.list_tables())
         have = set(tables)
-        for table in self._fixture_tables():
+        deployed = self._crud.list(META_CLASS) if self._crud is not None else []
+        for table in (*deployed, *self._fixture_tables()):
             if table not in have:
                 tables.append(table)
+                have.add(table)
         return tables
 
     def delete_fixture(self, path: str) -> bool:
@@ -301,7 +412,7 @@ class SchemaRegistry:
     def get_schema_current_version(self, path: str) -> str:
         """Return ``current`` from cached YAML without full MetaSchema validation."""
         table = self._table_name(path)
-        config_data = self._store.get(table)
+        config_data = self._stored(table)
         if config_data is None:
             raise SchemaNotFoundError(f"Schema not found: '{path}'")
         current = config_data.get("current")
@@ -310,16 +421,79 @@ class SchemaRegistry:
         return current
 
     def schema_version_exists(self, path: str, version: str) -> bool:
-        """Whether ``version`` is already present in on-disk YAML (raw store view)."""
+        """Whether ``version`` is already present in the stored YAML (raw store view)."""
         table = self._table_name(path)
-        config_data = self._store.get(table)
-        if not isinstance(config_data, dict):
+        config_data = self._stored(table)
+        if config_data is None:
             return False
         versions = config_data.get("versions")
         return isinstance(versions, dict) and version in versions
 
-    def save_schema(self, meta_schema: MetaSchema | dict[str, Any]) -> MetaSchema:
-        """Save a meta schema definition."""
+    def _governed_write(
+        self,
+        path: str,
+        write: Callable[[GitCrud, str, str, str, str], Any],
+        *,
+        created_by: str | None,
+        message: str,
+        routing: ReviewRouting | None,
+    ) -> None:
+        """Run a gitcrud write where the posture puts it, folding a review branch into *routing*.
+
+        ``write`` receives the crud, the class key, the actor, the commit message and the branch.
+        """
+        crud = self._crud
+        if crud is None:
+            raise SchemaError("no gitcrud backend to write through")
+        self._yaml_path(path)
+        key = canonical_schema_path(path)
+        actor = created_by or "engine"
+        commit_message = f"{message} (by {created_by})" if created_by else message
+        if self._posture is None:
+            self._posture = WritePosture.from_loaded_settings()
+        writes = GovernedWrites(crud, posture=self._posture)
+        writes(
+            META_CLASS,
+            key,
+            actor,
+            commit_message,
+            lambda branch: write(crud, key, actor, commit_message, branch),
+        )
+        if routing is not None:
+            routing.fold(writes.routing)
+
+    def _governed_put(
+        self,
+        path: str,
+        doc: dict[str, Any],
+        *,
+        created_by: str | None,
+        message: str,
+        routing: ReviewRouting | None,
+    ) -> None:
+        """Write one deploy-repo document."""
+        self._governed_write(
+            path,
+            lambda crud, key, actor, msg, branch: crud.put(
+                META_CLASS, key, doc, actor=actor, message=msg, branch=branch
+            ),
+            created_by=created_by,
+            message=message,
+            routing=routing,
+        )
+
+    def save_schema(
+        self,
+        meta_schema: MetaSchema | dict[str, Any],
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> MetaSchema:
+        """Save a meta schema definition.
+
+        ``routing`` records the write when it went to a review branch instead of main.
+        """
         if isinstance(meta_schema, dict):
             table = str(meta_schema.get("path") or "")
             try:
@@ -333,6 +507,17 @@ class SchemaRegistry:
         config_data = meta_schema.to_yaml_dict()
         table = self._table_name(path=meta_schema.path)
 
+        if self._crud is not None:
+            self._governed_put(
+                meta_schema.path,
+                config_data,
+                created_by=created_by,
+                message=description or f"schema: save {canonical_schema_path(meta_schema.path)}",
+                routing=routing,
+            )
+            logger.info(f"Saved schema {table!r} -> gitcrud {_class_directory()}")
+            return meta_schema
+
         yaml_path = self._yaml_path(table=meta_schema.path)
         yaml_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -343,6 +528,93 @@ class SchemaRegistry:
 
         logger.info(f"Saved schema {table!r} -> {yaml_path!r}")
         return meta_schema
+
+    def read_document(self, path: str) -> dict[str, Any] | None:
+        """A copy of the stored YAML document at *path*, or None when there is none.
+
+        The deploy repo is read first, then the schemas tree. Fixtures are not consulted.
+        """
+        doc = self._deploy_doc(path)
+        if doc is None:
+            yaml_path = self._yaml_path(path)
+            if not yaml_path.is_file():
+                return None
+            loaded = yaml_load(yaml_path)
+            if not isinstance(loaded, dict):
+                raise SchemaValidationError(f"Schema YAML must be a mapping: {path!r}")
+            doc = loaded
+        return copy.deepcopy(doc)
+
+    def write_document(
+        self,
+        path: str,
+        doc: dict[str, Any],
+        *,
+        message: str,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> MetaSchema:
+        """Write one YAML document at *path* and return it parsed, as it reads once merged.
+
+        The document is stored as given, so keys the model does not carry survive.
+        ``routing`` records the write when it went to a review branch instead of main.
+
+        Raises:
+            SchemaValidationError: The document is not a valid meta schema.
+        """
+        canonical = canonical_schema_path(path)
+        try:
+            saved = self._parse_meta_schema(canonical, doc)
+        except ValidationError as exc:
+            raise SchemaValidationError(f"Invalid schema definition: {exc}") from exc
+        saved.path = canonical
+
+        if self._crud is not None:
+            self._governed_put(
+                canonical, doc, created_by=created_by, message=message, routing=routing
+            )
+            logger.info(f"Wrote schema {canonical!r} -> gitcrud {_class_directory()}")
+            return saved
+
+        yaml_path = self._yaml_path(canonical)
+        yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        yaml_dump(doc, yaml_path)
+        self._store._refresh_all()
+        logger.info(f"Wrote schema {canonical!r} -> {yaml_path}")
+        return saved
+
+    def edit_schema(
+        self,
+        path: str,
+        edit: Callable[[dict[str, Any]], None],
+        *,
+        message: str,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> MetaSchema:
+        """Apply *edit* to the stored document at *path* and write the result.
+
+        A custom schema only the schemas tree holds is written to the deploy repo when
+        gitops is on, where the copy then shadows it.
+
+        Raises:
+            SchemaNotFoundError: Neither the deploy repo nor the tree holds the schema.
+            SchemaValidationError: The edited document is not a valid meta schema, or
+                gitops is on and the schema is core.
+        """
+        doc = self.read_document(path)
+        if doc is None:
+            raise SchemaNotFoundError(f"Schema not found: {path!r}")
+        if self._crud is not None and doc.get("resource_type") == "core":
+            # A deploy-repo copy would shadow the shipped document, so later releases would never reach it.
+            raise SchemaValidationError(
+                f"Schema {path!r} is a core schema, which is shipped and changes through a "
+                "release. Promote a field to fork it."
+            )
+        edit(doc)
+        return self.write_document(
+            path, doc, message=message, created_by=created_by, routing=routing
+        )
 
     def save_fixture(self, meta_schema: MetaSchema) -> MetaSchema:
         """Write one schema into the fixtures directory. Never touches the schema tree or git.
@@ -376,21 +648,60 @@ class SchemaRegistry:
         schema.path = path
         return schema
 
-    def notify_schema_file_updated(self, path: str) -> MetaSchema:
-        """Refresh cache after a direct on-disk schema YAML write."""
-        table = self._table_name(path)
-        yaml_path = self._yaml_path(path)
-        if not yaml_path.exists():
-            raise SchemaNotFoundError(f"Schema not found: {path!r}")
+    def _delete_deployed(
+        self,
+        path: str,
+        *,
+        removed_fixture: bool,
+        created_by: str | None,
+        routing: ReviewRouting | None,
+    ) -> None:
+        """Delete a schema from the deploy repo, where a production+team delete goes to review.
 
-        self._store._refresh_all()
-        logger.info(f"Schema file updated {table!r} -> {yaml_path}")
-        return self.get_schema(path)
+        Raises:
+            SchemaValidationError: Only the read-only schemas tree holds the schema.
+        """
+        from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
-    def delete_schema(self, path: str) -> None:
-        """Delete a meta schema."""
+        key = canonical_schema_path(path)
+        try:
+            self._governed_write(
+                path,
+                lambda crud, name, actor, msg, branch: crud.delete(
+                    META_CLASS, name, actor=actor, message=msg, branch=branch
+                ),
+                created_by=created_by,
+                message=f"schema: delete {key}",
+                routing=routing,
+            )
+        except ResourceNotFoundError:
+            if self._store.get(self._table_name(path)) is not None:
+                raise SchemaValidationError(
+                    f"Schema {key!r} is held in the schemas tree, which is read-only when gitops is on"
+                ) from None
+            if not removed_fixture:
+                logger.warning(f"Schema does not exist: {key!r}")
+            return
+        logger.info(f"Deleted schema {key!r} from gitcrud {_class_directory()}")
+
+    def delete_schema(
+        self,
+        path: str,
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> None:
+        """Delete a meta schema.
+
+        ``routing`` records the delete when it went to a review branch instead of main.
+        """
         table = self._table_name(path)
         removed_fixture = self.delete_fixture(path)
+        if self._crud is not None:
+            self._delete_deployed(
+                path, removed_fixture=removed_fixture, created_by=created_by, routing=routing
+            )
+            return
         yaml_path = self._yaml_path(path)
 
         if not (yaml_path.exists()):
@@ -450,7 +761,10 @@ class SchemaRegistry:
             # Resolve YAML path for modified-time (use store table key, not list_schemas filter)
             schema_rel = getattr(schema, "path", None) or table
             yaml_path = self._yaml_path(schema_rel)
-            if not yaml_path.is_file():
+            deployed = self._deploy_yaml(schema_rel)
+            if deployed is not None and deployed.is_file():
+                yaml_path = deployed
+            elif not yaml_path.is_file():
                 fixture = self._fixture_yaml(schema_rel)
                 if fixture is not None:
                     yaml_path = fixture
