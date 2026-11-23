@@ -13770,7 +13770,7 @@
           "Rules V2"
         ],
         "summary": "Create Rule",
-        "description": "Create a detection rule from a CEL filter or a WHERE fragment.\n\nThe rule stores that detection and nothing about a source or a hunt. A hunt\nnames the rules it runs and the table they read. A filter that does not\ntranspile, or a WHERE fragment the hunt runner would refuse, is 422 and\nnothing is written.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a detection rule from one detection form.\n\nThe rule stores that detection and nothing about a source or a hunt. A hunt\nnames the rules it runs and the table they read. A full ``user_sql`` query\nis reduced to its WHERE, and a ``match`` is compiled to one. A filter that\ndoes not transpile, or a detection the hunt runner would refuse, is 422 and\nnothing is written.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "rules-v2.create",
         "requestBody": {
           "required": true,
@@ -13814,7 +13814,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error): give a CEL filter or a WHERE fragment, one of the two, and not a full SQL statement. Or the detection was refused -- the WHERE fragment does not parse, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), reads another table, or the CEL filter does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event (code rule_matches_everything, the detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error): give a WHERE fragment, a CEL filter, a full user_sql query, or a match, one of them, and a WHERE fragment is not a full SQL statement. Or the detection was refused -- the WHERE fragment or the SQL does not parse, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), reads another table, the CEL filter does not transpile, or the match does not compile (code invalid_sql, the errors in sql_errors). Or the rule matches every event (code rule_matches_everything, the detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13906,7 +13906,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error): give a CEL filter or a WHERE fragment, one of the two, and not a full SQL statement. Or the detection was refused -- the WHERE fragment does not parse, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), reads another table, or the CEL filter does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event (code rule_matches_everything, the detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error): give a WHERE fragment, a CEL filter, a full user_sql query, or a match, one of them, and a WHERE fragment is not a full SQL statement. Or the detection was refused -- the WHERE fragment or the SQL does not parse, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), reads another table, the CEL filter does not transpile, or the match does not compile (code invalid_sql, the errors in sql_errors). Or the rule matches every event (code rule_matches_everything, the detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14229,7 +14229,7 @@
           "Rules V2"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule's label, description, severity, and detection.\n\nThe replacement is a CEL filter or a WHERE fragment, as on create. It does\nnot record a source or a hunt. A replacement the hunt runner would refuse is\n422 and the stored rule is left as it was.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Replace a detection rule's label, description, severity, and detection.\n\nThe replacement is one detection form, as on create. It does not record a\nsource or a hunt. A replacement the hunt runner would refuse is 422 and the\nstored rule is left as it was.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "rules-v2.apply",
         "parameters": [
           {
@@ -14284,7 +14284,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error): give a CEL filter or a WHERE fragment, one of the two, and not a full SQL statement. Or the detection was refused -- the WHERE fragment does not parse, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), reads another table, or the CEL filter does not transpile (code invalid_sql, the errors in sql_errors). Or the rule matches every event (code rule_matches_everything, the detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error): give a WHERE fragment, a CEL filter, a full user_sql query, or a match, one of them, and a WHERE fragment is not a full SQL statement. Or the detection was refused -- the WHERE fragment or the SQL does not parse, calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), reads another table, the CEL filter does not transpile, or the match does not compile (code invalid_sql, the errors in sql_errors). Or the rule matches every event (code rule_matches_everything, the detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -51502,7 +51502,7 @@
               }
             ],
             "title": "Where Clause",
-            "description": "Detection condition, the SQL after WHERE. The hunt that runs the rule names the table. Give this or ``cel_filter``, not both, and not a full SELECT"
+            "description": "Detection condition, the SQL after WHERE. The hunt that runs the rule names the table. Not a full SELECT. Give this or one other detection, not more"
           },
           "cel_filter": {
             "anyOf": [
@@ -51515,7 +51515,41 @@
               }
             ],
             "title": "Cel Filter",
-            "description": "CEL expression transpiled to the rule's WHERE. Give this or ``where_clause``, not both"
+            "description": "CEL expression transpiled to the rule's WHERE. Give this or one other detection, not more"
+          },
+          "user_sql": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Sql",
+            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE .... Search sends this when it creates a rule. The stored rule keeps the WHERE and drops the FROM, because the hunt names the table. Set ``source_type`` to 'hyperdx' for SQL a Search view renders. Give this or one other detection, not more"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "hyperdx"
+            ],
+            "title": "Source Type",
+            "description": "'raw' for SQL written by hand, or 'hyperdx' for SQL a Search view renders. Applies to ``user_sql``",
+            "default": "raw"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured match, the same shape as a source match: one test of a field, or ``all`` or ``any`` of several, with ``negate``. The engine compiles it to the rule's WHERE and stores the match so a builder can reopen it. Give this or one other detection, not more"
           },
           "name": {
             "type": "string",
@@ -51531,7 +51565,7 @@
           "name"
         ],
         "title": "RuleV2CreateRequest",
-        "description": "Create a detection rule from a CEL filter or a WHERE fragment."
+        "description": "Create a detection rule from one detection form."
       },
       "RuleV2CreateResponse": {
         "properties": {
@@ -51561,10 +51595,30 @@
       "RuleV2FromHyperdxRequest": {
         "properties": {
           "raw_sql": {
-            "type": "string",
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Raw Sql",
-            "description": "The ClickHouse SELECT the Search view renders to"
+            "description": "The ClickHouse SELECT the Search view renders to. Give this or ``user_sql``"
+          },
+          "user_sql": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Sql",
+            "description": "The same SELECT, under the name the rule pipeline uses. Give this or ``raw_sql``"
           },
           "saved_search_name": {
             "anyOf": [
@@ -51599,11 +51653,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "raw_sql"
-        ],
         "title": "RuleV2FromHyperdxRequest",
-        "description": "Create a hunt rule from the SQL a Search view runs.\n\nSearch renders the view to ``raw_sql`` and sends it here. The create\npipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,\nSETTINGS) via the dfe-hyperdx sanitizer, and the engine derives a unique rule id\nfrom the saved-search name. The caller gets that id back and opens\n``/rules-v2/{id}`` -- no id to invent, no IndexedDB round-trip."
+        "description": "Create a hunt rule from the SQL a Search view runs.\n\nSearch renders the view to ``raw_sql`` (or ``user_sql``, the name the rule\npipeline uses) and sends it here. The create pipeline strips the UI meta\n(time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the dfe-hyperdx\nsanitizer, and the engine derives a unique rule id from the saved-search\nname. The caller gets that id back and opens ``/rules-v2/{id}`` -- no id to\ninvent, no IndexedDB round-trip."
       },
       "RuleV2FromHyperdxResponse": {
         "properties": {
@@ -51688,6 +51739,33 @@
             ],
             "title": "Cel Filter",
             "description": "CEL expression the WHERE was transpiled from, absent when the rule is a WHERE fragment"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The structured match the WHERE was compiled from, in the same shape as a source match. Absent when the rule was written as SQL, a WHERE fragment, or CEL"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "raw",
+                  "hyperdx"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type",
+            "description": "How the rule's SQL was written: raw, or hyperdx for SQL a Search view renders. Absent when the rule is a WHERE fragment, a CEL filter, or a match"
           },
           "warnings": {
             "items": {
@@ -51804,7 +51882,7 @@
               }
             ],
             "title": "Where Clause",
-            "description": "Detection condition, the SQL after WHERE. The hunt that runs the rule names the table. Give this or ``cel_filter``, not both, and not a full SELECT"
+            "description": "Detection condition, the SQL after WHERE. The hunt that runs the rule names the table. Not a full SELECT. Give this or one other detection, not more"
           },
           "cel_filter": {
             "anyOf": [
@@ -51817,7 +51895,41 @@
               }
             ],
             "title": "Cel Filter",
-            "description": "CEL expression transpiled to the rule's WHERE. Give this or ``where_clause``, not both"
+            "description": "CEL expression transpiled to the rule's WHERE. Give this or one other detection, not more"
+          },
+          "user_sql": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Sql",
+            "description": "Full detection query: SELECT ... FROM <db>.<table> WHERE .... Search sends this when it creates a rule. The stored rule keeps the WHERE and drops the FROM, because the hunt names the table. Set ``source_type`` to 'hyperdx' for SQL a Search view renders. Give this or one other detection, not more"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "hyperdx"
+            ],
+            "title": "Source Type",
+            "description": "'raw' for SQL written by hand, or 'hyperdx' for SQL a Search view renders. Applies to ``user_sql``",
+            "default": "raw"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured match, the same shape as a source match: one test of a field, or ``all`` or ``any`` of several, with ``negate``. The engine compiles it to the rule's WHERE and stores the match so a builder can reopen it. Give this or one other detection, not more"
           }
         },
         "additionalProperties": false,

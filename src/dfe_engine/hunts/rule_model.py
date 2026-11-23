@@ -39,7 +39,7 @@ Usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -177,6 +177,13 @@ class Rule(BaseModel):
     )
     had_select_star: bool = Field(default=False, description="Whether user used SELECT *")
     original_sql: str = Field(default="", description="Original user SQL")
+    source_type: Literal["raw", "hyperdx"] | None = Field(
+        default=None,
+        description=(
+            "How user_sql was written: raw, or hyperdx for SQL a Search view renders. "
+            "Absent when the rule was not written as SQL"
+        ),
+    )
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source name for registry")
     warnings: list[str] = Field(default_factory=list, description="Parse warnings")

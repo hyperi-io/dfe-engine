@@ -1,8 +1,8 @@
 # ruff: noqa: N999
-"""Rules router -- a rule is a CEL filter or a WHERE fragment, shared by hunts.
+"""Rules router -- a detection shared by hunts, written several ways.
 
 GET    /api/v1/rules-v2              -> Paginated list (search)
-POST   /api/v1/rules-v2              -> Create a rule from a CEL filter or a WHERE fragment
+POST   /api/v1/rules-v2              -> Create a rule
 GET    /api/v1/rules-v2/{name}    -> Rule detail
 PUT    /api/v1/rules-v2/{name}    -> Update rule
 DELETE /api/v1/rules-v2/{name}    -> Delete rule
@@ -10,13 +10,15 @@ POST   /api/v1/rules-v2/validate     -> Validate SQL without creating
 POST   /api/v1/rules-v2/preview      -> Compile a condition and check it as a save would, saving nothing
 
 A rule names no source and no hunt. The hunt that runs it names the source table
-and the rules it runs. Create and update take either ``cel_filter`` or
-``where_clause``, and the stored rule keeps that detection without a full SQL query.
+and the rules it runs. Create and update take one detection: a ``where_clause``,
+a ``cel_filter``, a full ``user_sql`` (what Search sends when it creates a rule),
+or a ``match`` in the same shape as a source match. The stored rule keeps the
+WHERE that detection compiles to.
 """
 
 import functools
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import sqlglot
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -45,7 +47,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
-from dfe_engine.hunts.rule_condition import RuleCondition
+from dfe_engine.hunts.rule_condition import RuleCondition, RuleConditionError, compile_condition
 from dfe_engine.hunts.rule_creation_service import CostEstimate
 from dfe_engine.hunts.rule_guard import (
     match_everything,
@@ -64,11 +66,13 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
     422: {
         "description": (
             "Refused, nothing written. The body failed validation (code validation_error): "
-            "give a CEL filter or a WHERE fragment, one of the two, and not a full SQL "
-            "statement. Or the detection was refused -- the WHERE fragment does not parse, "
+            "give a WHERE fragment, a CEL filter, a full user_sql query, or a match, "
+            "one of them, and a WHERE fragment is not a full SQL statement. Or the "
+            "detection was refused -- the WHERE fragment or the SQL does not parse, "
             "calls a function that reads outside the row (url, s3, a dictionary) or sends "
-            "it to another service (the ai* functions), reads another table, or the CEL "
-            "filter does not transpile (code invalid_sql, the errors in sql_errors). "
+            "it to another service (the ai* functions), reads another table, the CEL "
+            "filter does not transpile, or the match does not compile "
+            "(code invalid_sql, the errors in sql_errors). "
             "Or the rule matches every event (code rule_matches_everything, the detection "
             "WHERE in context)."
         ),
@@ -113,7 +117,11 @@ Description = Annotated[str | None, BeforeValidator(_empty_text)]
 
 
 class _RuleWriteFields(BaseModel):
-    """Fields a create or update sets. A rule is a CEL filter or a WHERE fragment."""
+    """Fields a create or update sets.
+
+    One detection: a WHERE fragment, a CEL filter, a full ``user_sql`` query, or a
+    ``match`` in the same shape as a source match.
+    """
 
     model_config = {"extra": "forbid"}
 
@@ -128,28 +136,63 @@ class _RuleWriteFields(BaseModel):
         min_length=1,
         description=(
             "Detection condition, the SQL after WHERE. The hunt that runs the rule names "
-            "the table. Give this or ``cel_filter``, not both, and not a full SELECT"
+            "the table. Not a full SELECT. Give this or one other detection, not more"
         ),
     )
     cel_filter: Description = Field(
         default=None,
         min_length=1,
         description=(
-            "CEL expression transpiled to the rule's WHERE. Give this or ``where_clause``, not both"
+            "CEL expression transpiled to the rule's WHERE. Give this or one other detection, not more"
+        ),
+    )
+    user_sql: Description = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Full detection query: SELECT ... FROM <db>.<table> WHERE .... Search sends "
+            "this when it creates a rule. The stored rule keeps the WHERE and drops the "
+            "FROM, because the hunt names the table. Set ``source_type`` to 'hyperdx' "
+            "for SQL a Search view renders. Give this or one other detection, not more"
+        ),
+    )
+    source_type: Literal["raw", "hyperdx"] = Field(
+        default="raw",
+        description=(
+            "'raw' for SQL written by hand, or 'hyperdx' for SQL a Search view renders. "
+            "Applies to ``user_sql``"
+        ),
+    )
+    match: RuleCondition | None = Field(
+        default=None,
+        description=(
+            "Structured match, the same shape as a source match: one test of a field, "
+            "or ``all`` or ``any`` of several, with ``negate``. The engine compiles it "
+            "to the rule's WHERE and stores the match so a builder can reopen it. "
+            "Give this or one other detection, not more"
         ),
     )
 
     @model_validator(mode="after")
-    def _cel_or_where(self) -> _RuleWriteFields:
-        if (self.where_clause is None) == (self.cel_filter is None):
-            raise ValueError("give 'where_clause' or 'cel_filter', one of the two")
+    def _one_detection(self) -> _RuleWriteFields:
+        given = [
+            name
+            for name in ("where_clause", "cel_filter", "user_sql", "match")
+            if getattr(self, name) is not None
+        ]
+        if len(given) != 1:
+            raise ValueError(
+                "give 'where_clause', 'cel_filter', 'user_sql' or 'match', one of them"
+            )
+        if self.source_type != "raw" and self.user_sql is None:
+            raise ValueError("source_type 'hyperdx' applies to a rule written as user_sql")
         if self.where_clause is not None and _STATEMENT.match(_normalize_where(self.where_clause)):
             raise ValueError("where_clause is the detection condition, not a full SQL statement")
         return self
 
 
 class RuleV2CreateRequest(_RuleWriteFields):
-    """Create a detection rule from a CEL filter or a WHERE fragment."""
+    """Create a detection rule from one detection form."""
 
     name: RuleName = Field(description="Rule file name (YAML stem); must be unique")
 
@@ -240,6 +283,20 @@ class RuleV2Response(BaseModel):
         default=None,
         description="CEL expression the WHERE was transpiled from, absent when the rule is a WHERE fragment",
     )
+    match: RuleCondition | None = Field(
+        default=None,
+        description=(
+            "The structured match the WHERE was compiled from, in the same shape as a "
+            "source match. Absent when the rule was written as SQL, a WHERE fragment, or CEL"
+        ),
+    )
+    source_type: Literal["raw", "hyperdx"] | None = Field(
+        default=None,
+        description=(
+            "How the rule's SQL was written: raw, or hyperdx for SQL a Search view renders. "
+            "Absent when the rule is a WHERE fragment, a CEL filter, or a match"
+        ),
+    )
     warnings: list[str] = Field(default_factory=list)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
     created_at: str
@@ -266,24 +323,44 @@ class RuleV2CreateResponse(BaseModel):
 class RuleV2FromHyperdxRequest(BaseModel):
     """Create a hunt rule from the SQL a Search view runs.
 
-    Search renders the view to ``raw_sql`` and sends it here. The create
-    pipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,
-    SETTINGS) via the dfe-hyperdx sanitizer, and the engine derives a unique rule id
-    from the saved-search name. The caller gets that id back and opens
-    ``/rules-v2/{id}`` -- no id to invent, no IndexedDB round-trip.
+    Search renders the view to ``raw_sql`` (or ``user_sql``, the name the rule
+    pipeline uses) and sends it here. The create pipeline strips the UI meta
+    (time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the dfe-hyperdx
+    sanitizer, and the engine derives a unique rule id from the saved-search
+    name. The caller gets that id back and opens ``/rules-v2/{id}`` -- no id to
+    invent, no IndexedDB round-trip.
     """
 
     model_config = {"extra": "forbid"}
 
-    raw_sql: str = Field(
+    raw_sql: Description = Field(
+        default=None,
         min_length=1,
-        description="The ClickHouse SELECT the Search view renders to",
+        description="The ClickHouse SELECT the Search view renders to. Give this or ``user_sql``",
+    )
+    user_sql: Description = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The same SELECT, under the name the rule pipeline uses. Give this or ``raw_sql``"
+        ),
     )
     saved_search_name: str | None = Field(
         default=None, description="Search saved-search name; seeds the rule id and label"
     )
     severity: Severity = Field(default="medium", description="low|medium|high|critical")
     description: Description = Field(default=None, description="What the rule detects")
+
+    @model_validator(mode="after")
+    def _one_query(self) -> RuleV2FromHyperdxRequest:
+        if (self.raw_sql is None) == (self.user_sql is None):
+            raise ValueError("give 'raw_sql' or 'user_sql', one of the two")
+        return self
+
+    @property
+    def sql(self) -> str:
+        """The SELECT Search sent, under whichever name it used."""
+        return self.user_sql or self.raw_sql or ""
 
 
 class RuleV2FromHyperdxResponse(BaseModel):
@@ -357,11 +434,12 @@ def create_rule(
     registry: RuleReg,
     response: Response,
 ):
-    """Create a detection rule from a CEL filter or a WHERE fragment.
+    """Create a detection rule from one detection form.
 
     The rule stores that detection and nothing about a source or a hunt. A hunt
-    names the rules it runs and the table they read. A filter that does not
-    transpile, or a WHERE fragment the hunt runner would refuse, is 422 and
+    names the rules it runs and the table they read. A full ``user_sql`` query
+    is reduced to its WHERE, and a ``match`` is compiled to one. A filter that
+    does not transpile, or a detection the hunt runner would refuse, is 422 and
     nothing is written.
 
     A production+team write is routed to a review branch instead of the branch the
@@ -424,7 +502,7 @@ def _create_rule_from_sql(
     hunts: OptionalHuntConfigReg,
 ) -> RuleV2FromHyperdxResponse:
     """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
-    from dfe_engine.hunts.rule_creation_service import RuleV2CreateRequest as SvcRequest
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
     rule_id = _unique_rule_id(registry, body.saved_search_name)
     display = body.saved_search_name or default_display_name(rule_id)
@@ -434,7 +512,7 @@ def _create_rule_from_sql(
         name=display,
         severity=body.severity,
         source_type="hyperdx",
-        user_sql=body.raw_sql,
+        user_sql=body.sql,
     )
 
     fence = _preview_tenant_ids(request, user, hunts, rule_id, None)
@@ -442,7 +520,9 @@ def _create_rule_from_sql(
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
     # Search SQL names a table. The rule keeps the WHERE; the hunt names the source.
-    stored = _without_hunt_or_source(result.rule, description=body.description)
+    stored = _without_hunt_or_source(result.rule, description=body.description).model_copy(
+        update={"source_type": "hyperdx"}
+    )
     outcome = registry.save(stored, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", rule_id, "created", review_audit_detail(outcome))
@@ -506,7 +586,7 @@ def preview_rule(
     with 200 and its reasons in ``sql_errors`` or ``matches_everything``, so a builder can
     show them as the author edits. A body that is not a condition at all is 422.
     """
-    from dfe_engine.hunts.rule_creation_service import RuleV2CreateRequest as SvcRequest
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
     rule_id = body.name or "preview"
     hunt_name = body.hunt_name
@@ -568,9 +648,9 @@ def update_rule(
 ):
     """Replace a detection rule's label, description, severity, and detection.
 
-    The replacement is a CEL filter or a WHERE fragment, as on create. It does
-    not record a source or a hunt. A replacement the hunt runner would refuse is
-    422 and the stored rule is left as it was.
+    The replacement is one detection form, as on create. It does not record a
+    source or a hunt. A replacement the hunt runner would refuse is 422 and the
+    stored rule is left as it was.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
@@ -632,12 +712,16 @@ def delete_rule(
 def _rule_service(settings: Settings):
     """The creation service every rule check and save runs through."""
     from dfe_engine.hunts.rule_creation_service import RuleCreationService
-    from dfe_engine.settings import get_clickhouse_config
+    from dfe_engine.settings import HuntsSettings, get_clickhouse_config
 
+    clickhouse = getattr(settings, "clickhouse", None)
+    hunts = settings.hunts
+    if not isinstance(hunts, HuntsSettings):
+        hunts = HuntsSettings(lookup_databases=list(getattr(hunts, "lookup_databases", []) or []))
     return RuleCreationService(
-        ch_config=get_clickhouse_config(settings),
-        hunts=settings.hunts,
-        data_database=settings.clickhouse.effective_data_database,
+        ch_config=get_clickhouse_config(settings) if clickhouse is not None else None,
+        hunts=hunts,
+        data_database=getattr(clickhouse, "effective_data_database", None),
     )
 
 
@@ -693,6 +777,8 @@ def _rule_to_response(
         severity=rule.severity,
         where_clause=rule.where_clause,
         cel_filter=rule.cel_filter,
+        match=rule.condition,
+        source_type=rule.source_type,
         warnings=list(rule.warnings),
         sql_errors=sql_errors or [],
         created_at=rule.created_at,
@@ -713,6 +799,76 @@ def _without_hunt_or_source(rule: Rule, *, description: str | None) -> Rule:
             "had_select_star": False,
         }
     )
+
+
+def _rule_from_user_sql(
+    settings: Settings,
+    body: _RuleWriteFields,
+    *,
+    rule_id: str,
+    display_name: str,
+    description: str | None,
+) -> tuple[Rule, list[SqlValidationError]]:
+    """The WHERE a full query reduces to. The hunt names the table, so the FROM is dropped.
+
+    ``source_type`` 'hyperdx' runs the Search sanitizer first, which is how a view's
+    rendered SQL becomes a rule.
+    """
+    from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
+
+    result = _rule_service(settings).create_rule(
+        SvcRequest(
+            name=display_name,
+            severity=body.severity,
+            source_type=body.source_type,
+            user_sql=body.user_sql,
+            estimate_cost=False,
+        ),
+        rule_id,
+    )
+    stored = _without_hunt_or_source(result.rule, description=description).model_copy(
+        update={"source_type": body.source_type}
+    )
+    errors = _map_sql_errors(result.sql_errors or [])
+    if not errors:
+        errors = _where_errors(settings, stored.where_clause)
+    return stored, errors
+
+
+def _rule_from_match(
+    settings: Settings,
+    match: RuleCondition,
+    *,
+    rule_id: str,
+    display_name: str,
+    description: str | None,
+    severity: str,
+) -> tuple[Rule, list[SqlValidationError]]:
+    """The WHERE a structured match compiles to, stored beside the match.
+
+    A field is read the way a source match reads one: a name starting with ``_``
+    is a column, and any other name is a path inside the record.
+    """
+    try:
+        where = compile_condition(match)
+    except RuleConditionError as exc:
+        rule = Rule(
+            rule_id=rule_id,
+            name=display_name,
+            description=description,
+            severity=severity,
+            condition=match,
+        )
+        return rule, [SqlValidationError(message=str(exc))]
+    rule = Rule(
+        rule_id=rule_id,
+        name=display_name,
+        description=description,
+        severity=severity,
+        where_clause=where,
+        condition=match,
+    )
+    return rule, _where_errors(settings, where)
 
 
 def _rule_from_write(
@@ -746,6 +902,25 @@ def _rule_from_write(
             ]
         errors = _where_errors(settings, rule.where_clause)
         return _without_hunt_or_source(rule, description=description), errors
+
+    if body.user_sql is not None:
+        return _rule_from_user_sql(
+            settings,
+            body,
+            rule_id=rule_id,
+            display_name=display_name,
+            description=description,
+        )
+
+    if body.match is not None:
+        return _rule_from_match(
+            settings,
+            body.match,
+            rule_id=rule_id,
+            display_name=display_name,
+            description=description,
+            severity=body.severity,
+        )
 
     where = _normalize_where(body.where_clause or "")
     errors = _where_errors(settings, where)
