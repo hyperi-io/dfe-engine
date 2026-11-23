@@ -35,7 +35,7 @@ from scalo.logger.filters import MASK_VALUE, mask_url_userinfo
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
-from dfe_engine.gitcrud.engine import flatten, get_path, set_path
+from dfe_engine.gitcrud.engine import del_path, flatten, get_path, set_path
 from dfe_engine.manifest import ManifestError, manifest_path
 from dfe_engine.masking import (
     CREDENTIAL_MAP,
@@ -949,14 +949,22 @@ def _wholly_masked(shown: Any) -> bool:
     return isinstance(shown, list) and bool(shown) and all(_wholly_masked(i) for i in shown)
 
 
-def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
+def _number_or_absent(value: Any) -> bool:
+    """Whether ``value`` is a number, or nothing at all."""
+    if isinstance(value, _Missing):
+        return True
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _field_unchanged(written: Any, stored: Any, shown: Any, *, numbers_move: bool = False) -> bool:
     """Whether one field beside a masked credential leaves it where it was set.
 
     A masked value, or a list of them, is judged by its own restore, and a value the
     read showed only as a credential may be typed again. A URL whose password alone
     was masked may take a new password and nothing else. A mapping, or a list as
     long as the stored one, is judged item by item, so a setting inside a neighbour
-    that also holds a credential still counts. Anything else is exactly as stored.
+    that also holds a credential still counts. Anything else is exactly as stored,
+    except that ``numbers_move`` lets a number be added, changed or dropped.
     """
     if _holds_mask(written) or _wholly_masked(shown):
         return True
@@ -966,16 +974,23 @@ def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
         seen = shown if isinstance(shown, dict) else {}
         return all(
             _field_unchanged(
-                written.get(key, MISSING), stored.get(key, MISSING), seen.get(key, MISSING)
+                written.get(key, MISSING),
+                stored.get(key, MISSING),
+                seen.get(key, MISSING),
+                numbers_move=numbers_move,
             )
             for key in written.keys() | stored.keys()
         )
     if isinstance(written, list) and isinstance(stored, list) and len(written) == len(stored):
         views = shown if isinstance(shown, list) and len(shown) == len(stored) else None
         return all(
-            _field_unchanged(item, stored[i], views[i] if views else MISSING)
+            _field_unchanged(
+                item, stored[i], views[i] if views else MISSING, numbers_move=numbers_move
+            )
             for i, item in enumerate(written)
         )
+    if numbers_move and _number_or_absent(written) and _number_or_absent(stored):
+        return True
     return written == stored
 
 
@@ -991,11 +1006,12 @@ def _require_unchanged_holder(
 
     A field holds one when it is a masked credential or a mapping with one as its
     own field, so ``brokers`` beside a ``sasl`` mapping holding a masked password
-    counts, and a credential nested deeper does not. Only a field that is not a
-    mapping counts as changed: a mapping beside the credential is judged at its own
-    level, so ``producer.retries`` beside ``sasl`` passes. A document root never
-    counts, per :data:`_DOCUMENT_ROOTS`. ``remedy`` ends the refusal with what the
-    caller can do.
+    counts, and a credential nested deeper does not. A mapping beside the credential
+    counts as changed unless only numbers in it changed, because any text in it,
+    such as a URL in dfe-fetcher's ``vars`` or inline ``profile``, can name where the
+    credential is sent, and ``producer.retries`` beside ``sasl`` cannot. A document
+    root never counts, per :data:`_DOCUMENT_ROOTS`. ``remedy`` ends the refusal with
+    what the caller can do.
 
     Raises:
         CredentialReentryError: A field beside a masked credential was changed,
@@ -1014,10 +1030,11 @@ def _require_unchanged_holder(
     changed = sorted(
         str(key)
         for key in (value.keys() | kept.keys()) - masked
-        if not isinstance(value.get(key), dict)
-        and not isinstance(kept.get(key), dict)
-        and not _field_unchanged(
-            value.get(key, MISSING), kept.get(key, MISSING), seen.get(key, MISSING)
+        if not _field_unchanged(
+            value.get(key, MISSING),
+            kept.get(key, MISSING),
+            seen.get(key, MISSING),
+            numbers_move=isinstance(value.get(key), dict) or isinstance(kept.get(key), dict),
         )
     )
     if changed:
@@ -1124,55 +1141,56 @@ def require_clear_keeps_credentials(doc: dict, path: str) -> None:
     whole mapping that holds it, sends it nowhere new.
 
     Raises:
-        CredentialReentryError: ``path`` sits beside a credential in the same mapping.
+        CredentialReentryError: ``path`` sits beside a credential in a mapping above it.
     """
     if not credential_var(doc, path):
         _require_unchanged_enclosing_holder(doc, path, MISSING)
 
 
 def _require_unchanged_enclosing_holder(doc: dict, path: str, value: Any) -> None:
-    """Refuse a write at ``path`` that changes the mapping it sits in beside a credential.
+    """Refuse a write at ``path`` that changes any mapping above it beside a credential.
 
-    Only the parent of ``path`` is judged, as :func:`_require_unchanged_holder` judges
-    a write of it, so ``kafka.brokers`` is refused beside ``kafka.sasl.password`` and
-    ``kafka.producer.retries`` is not. A document root is never judged, per
-    :data:`_DOCUMENT_ROOTS`. The mapping is judged as a read showed it with ``value``
-    written in, so every credential in it stands masked beside the change. A
-    :data:`MISSING` value is judged as the field removed.
+    Each mapping above ``path``, below its document root per :data:`_DOCUMENT_ROOTS`,
+    is judged as :func:`_require_unchanged_holder` judges a write of it, so
+    ``kafka.brokers`` is refused beside ``kafka.sasl.password``, and so is
+    ``sources.rest.a.vars.base_url`` beside ``sources.rest.a.auth.token``, while
+    ``kafka.producer.retries`` is not. Each mapping is judged as a read showed it with
+    ``value`` written in, so every credential in it stands masked beside the change.
+    A :data:`MISSING` value is judged as the field removed.
 
     Raises:
         CredentialReentryError: ``value`` changes a field beside that credential, or
             lands inside a mapping the read showed as one mask.
     """
     parts = path.split(".")
-    if len(parts) < 2:
-        return
-    holder = ".".join(parts[:-1])
-    if holder in _DOCUMENT_ROOTS:
-        return
-    stored = get_path(doc, holder, MISSING)
-    if not isinstance(stored, dict):
-        return
-    shown = shown_var(doc, holder, stored)
-    if not _carries_mask(shown):
-        return
-    if not isinstance(shown, dict):
-        raise CredentialReentryError(
-            f"{holder} was read as {REDACTED!r} whole, so {path} inside it cannot be "
-            f"written alone: write {holder} in full"
+    for depth in range(len(parts) - 1, 0, -1):
+        holder = ".".join(parts[:depth])
+        if holder in _DOCUMENT_ROOTS:
+            return
+        stored = get_path(doc, holder, MISSING)
+        if not isinstance(stored, dict):
+            continue
+        shown = shown_var(doc, holder, stored)
+        if not _carries_mask(shown):
+            continue
+        if not isinstance(shown, dict):
+            raise CredentialReentryError(
+                f"{holder} was read as {REDACTED!r} whole, so {path} inside it cannot be "
+                f"written alone: write {holder} in full"
+            )
+        inner = ".".join(parts[depth:])
+        written = copy.deepcopy(shown)
+        if isinstance(value, _Missing):
+            del_path(written, inner)
+        else:
+            set_path(written, inner, value)
+        _require_unchanged_holder(
+            written,
+            stored,
+            shown,
+            holder,
+            remedy=f"write {holder} whole, with its credentials typed again",
         )
-    written = copy.deepcopy(shown)
-    if isinstance(value, _Missing):
-        written.pop(parts[-1], None)
-    else:
-        set_path(written, parts[-1], value)
-    _require_unchanged_holder(
-        written,
-        stored,
-        shown,
-        holder,
-        remedy=f"write {holder} whole, with its credentials typed again",
-    )
 
 
 def redact_var(doc: dict, path: str, value: Any) -> Any:
