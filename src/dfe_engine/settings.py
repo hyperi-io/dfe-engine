@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from dfe_schemas.clickhouse import platform_override
 from pydantic import BaseModel, Field, field_validator, model_validator
+from scalo.crypto import CryptoProfile
 
 from .names import MAX_NAME_LENGTH
 from .orgs.available_ids import DEFAULT_LIMIT as AVAILABLE_IDS_LIMIT
@@ -2374,6 +2375,16 @@ class DFESettings(BaseModel):
             "dev/development/local/test/ci for local development. DFE_ENGINE_ENV."
         ),
     )
+    crypto_profile: CryptoProfile = Field(
+        default=CryptoProfile.PROD,
+        description=(
+            "TLS profile of the engine's outbound HTTPS clients: the OIDC providers and "
+            "the Argo refresh. 'prod' is a TLS 1.2 floor, 'highsec' TLS 1.3 only with "
+            "post-quantum key exchange, 'devtest' prod algorithms with quieter warnings. "
+            "SCALO_TLS_VERIFY and SCALO_TLS_ALLOW_WEAK still apply. "
+            "DFE_ENGINE_CRYPTO_PROFILE."
+        ),
+    )
     e2e_server: bool = Field(
         default=False,
         description=(
@@ -2576,6 +2587,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_STACK_MANIFEST_REPOSITORY": "stack_manifest_repository",
             "DFE_ENGINE_UI_VERSION": "ui_version",
             "DFE_ENGINE_ENV": "env",
+            "DFE_ENGINE_CRYPTO_PROFILE": "crypto_profile",
         },
     ),
     (

@@ -858,6 +858,7 @@ async def _refresh_rp(request: Request) -> None:
             directory_deadline_seconds=(
                 request.app.state.settings.auth.oidc_login_directory_deadline_seconds
             ),
+            crypto_profile=request.app.state.settings.crypto_profile,
         )
     )
 

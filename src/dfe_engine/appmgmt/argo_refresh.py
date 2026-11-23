@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import httpx
-from scalo.crypto import ssl_context
+from scalo.crypto import CryptoProfile, ssl_context
 from scalo.logger import logger
 
 ARGO_NAMESPACE = "argocd"
@@ -47,6 +47,7 @@ def refresh_applications(
     *,
     transport: httpx.BaseTransport | None = None,
     service_account: Path = _SERVICE_ACCOUNT,
+    crypto_profile: CryptoProfile = CryptoProfile.PROD,
 ) -> list[str]:
     """Annotate each named Application for a hard refresh and return the ones that failed.
 
@@ -57,6 +58,7 @@ def refresh_applications(
         names: Argo Application names, deduplicated here.
         transport: An httpx transport in place of the cluster connection, for tests.
         service_account: The mounted service account directory.
+        crypto_profile: TLS profile of the connection to the Kubernetes API.
     """
     wanted = list(dict.fromkeys(names))
     if not wanted:
@@ -77,7 +79,7 @@ def refresh_applications(
     ca = service_account / "ca.crt"
     with httpx.Client(
         transport=transport,
-        verify=ssl_context(cafile=str(ca) if ca.is_file() else None),
+        verify=ssl_context(crypto_profile, cafile=str(ca) if ca.is_file() else None),
         timeout=_TIMEOUT_SECONDS,
         headers={
             "Authorization": f"Bearer {token}",

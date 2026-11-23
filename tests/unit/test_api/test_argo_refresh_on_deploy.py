@@ -12,6 +12,7 @@ which Applications are named and that nothing is sent off Kubernetes.
 """
 
 import pytest
+from scalo.crypto import CryptoProfile
 
 from dfe_engine.appmgmt import argo_refresh
 from tests.unit.test_api.test_app_contracts import _deploy_vrl, _wire
@@ -53,3 +54,23 @@ def test_a_refresh_the_cluster_refuses_does_not_fail_the_pass(
 
     _set_state(client, admin_headers, "dormant")
     _set_state(client, admin_headers, "active")
+
+
+def test_the_refresh_goes_out_on_the_settings_tls_profile(
+    client, app, admin_headers, tmp_path, monkeypatch
+):
+    _wire(app, tmp_path)
+    assert _deploy_vrl(client, admin_headers, "edge").status_code == 200
+    app.state.settings.deployment.target = "kubernetes"
+    app.state.settings.crypto_profile = CryptoProfile.HIGHSEC
+    profiles: list[CryptoProfile] = []
+    monkeypatch.setattr(
+        argo_refresh,
+        "refresh_applications",
+        lambda names, *, crypto_profile: profiles.append(crypto_profile) or [],
+    )
+
+    _set_state(client, admin_headers, "dormant")
+    _set_state(client, admin_headers, "active")
+
+    assert profiles == [CryptoProfile.HIGHSEC]

@@ -8,18 +8,22 @@
 
 """Unit tests for OIDC relying-party claim extraction and userinfo filling."""
 
-from __future__ import annotations
+import ssl
 
 import pytest
 
+from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import (
     UserinfoSubjectMismatchError,
+    build_relying_party,
     extract_identity,
     fill_from_userinfo_endpoint,
     merge_userinfo_claims,
     needs_directory_groups,
     needs_userinfo,
 )
+from dfe_engine.settings import load_settings
 from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
 from tests.unit.test_auth.test_oidc.rp_cases import (
@@ -131,3 +135,32 @@ class TestFillFromUserinfoEndpoint:
             token=case["token"],
         )
         assert claims == case["expected_claims"]
+
+
+class TestProviderTls:
+    """Every provider call goes out on the TLS profile the settings name."""
+
+    @pytest.mark.parametrize(
+        ("profile", "floor"),
+        [
+            (None, ssl.TLSVersion.TLSv1_2),
+            ("prod", ssl.TLSVersion.TLSv1_2),
+            ("highsec", ssl.TLSVersion.TLSv1_3),
+        ],
+    )
+    def test_the_provider_client_takes_the_settings_profile(
+        self, tmp_path, monkeypatch, profile, floor
+    ):
+        monkeypatch.delenv("DFE_ENGINE_CRYPTO_PROFILE", raising=False)
+        if profile is not None:
+            monkeypatch.setenv("DFE_ENGINE_CRYPTO_PROFILE", profile)
+        settings = load_settings()
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("corp-sso", OIDCProvider(type="generic", issuer="https://sso.example.com"))
+
+        rp = build_relying_party(registry, crypto_profile=settings.crypto_profile)
+
+        assert rp is not None
+        session = rp._client("corp-sso")._get_oauth_client()
+        context = session._transport._pool._ssl_context
+        assert (context.minimum_version, context.verify_mode) == (floor, ssl.CERT_REQUIRED)
