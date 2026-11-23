@@ -6,6 +6,7 @@ from unittest import mock
 
 import pytest
 from pydantic import ValidationError
+from scalo.crypto import CryptoProfile
 
 from dfe_engine.settings import (
     APISettings,
@@ -300,6 +301,22 @@ class TestEnvOverrides:
 
     def test_clickhouse_default_ttl_days_refuses_a_negative(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "-1")
+        with pytest.raises(ValidationError):
+            load_settings()
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(None, "prod"), ("prod", "prod"), ("highsec", "highsec"), ("devtest", "devtest")],
+    )
+    def test_crypto_profile_comes_from_the_environment(self, monkeypatch, value, expected):
+        monkeypatch.delenv("DFE_ENGINE_CRYPTO_PROFILE", raising=False)
+        if value is not None:
+            monkeypatch.setenv("DFE_ENGINE_CRYPTO_PROFILE", value)
+        assert load_settings().crypto_profile is CryptoProfile(expected)
+
+    @pytest.mark.parametrize("value", ["weak", "PROD", "high-sec"])
+    def test_crypto_profile_refuses_an_unknown_name(self, monkeypatch, value):
+        monkeypatch.setenv("DFE_ENGINE_CRYPTO_PROFILE", value)
         with pytest.raises(ValidationError):
             load_settings()
 
