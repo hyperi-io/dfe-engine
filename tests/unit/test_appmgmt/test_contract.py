@@ -2189,7 +2189,60 @@ class TestANullTheAppRefusesIsFound:
         assert contract.refused_nulls(absent, "config.routing.default_db", None) == []
 
 
-class TestEveryOverlayWriteRefusesANullTheAppRefuses:
+class TestJudge:
+    """A config block is judged as the app would load it, inside maps and lists too."""
+
+    @pytest.fixture(autouse=True)
+    def _mounted(self, monkeypatch):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(FIXTURES))
+
+    @pytest.mark.parametrize(
+        ("service", "config", "refused"),
+        [
+            # A misspelt key in a section that refuses unnamed keys.
+            (
+                "dfe-fetcher",
+                {"sources": {"rest": {"acme": {"profile": "okta", "topc": "acme"}}}},
+                ["config.sources.rest.acme.topc"],
+            ),
+            # Family keys on the map that holds instances by id.
+            (
+                "dfe-fetcher",
+                {"sources": {"rest": {"enabled": True, "topic": "rest"}}},
+                ["config.sources.rest.enabled", "config.sources.rest.topic"],
+            ),
+            ("dfe-loader", {"routing": {"default_db": None}}, ["config.routing.default_db"]),
+            ("dfe-loader", {"buffer": {"flush_rows": "lots"}}, ["config.buffer.flush_rows"]),
+        ],
+    )
+    def test_what_the_app_stops_on_is_refused(self, service, config, refused):
+        assert list(contract.judge(contract.contract(service), config).refused) == refused
+
+    @pytest.mark.parametrize(
+        ("service", "config"),
+        [
+            ("dfe-fetcher", {"sources": {"rest": {"acme": {"profile": "okta", "topic": "a"}}}}),
+            ("dfe-loader", {"buffer": {"flush_rows": 5000}, "routing": {"default_db": "dfe"}}),
+            ("dfe-loader", {}),
+        ],
+    )
+    def test_a_config_the_app_loads_is_not_refused(self, service, config):
+        assert contract.judge(contract.contract(service), config).refused == {}
+
+    def test_an_unnamed_key_the_app_reads_past_is_only_undeclared(self):
+        verdict = contract.judge(contract.contract("dfe-loader"), {"routing": {"made_up": 1}})
+
+        assert (verdict.refused, verdict.undeclared) == ({}, ["config.routing.made_up"])
+
+    def test_with_no_contract_mounted_nothing_is_judged(self, tmp_path):
+        absent = contract.load_contract("dfe-fetcher", tmp_path)
+
+        verdict = contract.judge(absent, {"sources": {"rest": {"enabled": True}}})
+
+        assert (verdict.refused, verdict.undeclared) == ({}, [])
+
+
+class TestEveryOverlayWriteRefusesWhatTheAppStopsOn:
     """The deploy repo's write path judges a deployed overlay, whichever caller wrote it."""
 
     OVERLAY = "dfe-loader-default-values"
@@ -2210,14 +2263,14 @@ class TestEveryOverlayWriteRefusesANullTheAppRefuses:
         crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": "dfe"}), actor="alice")
         before = crud.head_revision()
 
-        with pytest.raises(contract.RefusedNullError) as refused:
+        with pytest.raises(contract.RefusedConfigError) as refused:
             crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": None}), actor="alice")
-        with pytest.raises(contract.RefusedNullError):
+        with pytest.raises(contract.RefusedConfigError):
             crud.set_key(
                 "helmvars", self.OVERLAY, "config.routing.source_to_table.edr", None, "alice"
             )
         # The ApplicationSet deploys a hand-named overlay too, so its deploy block decides.
-        with pytest.raises(contract.RefusedNullError):
+        with pytest.raises(contract.RefusedConfigError):
             crud.put(
                 "helmvars", "custom-loader-values", self._overlay({"default_db": None}), "alice"
             )
@@ -2225,6 +2278,20 @@ class TestEveryOverlayWriteRefusesANullTheAppRefuses:
         assert refused.value.paths == ["config.routing.default_db"]
         assert crud.head_revision() == before
         assert crud.get("helmvars", self.OVERLAY)["config"]["routing"] == {"default_db": "dfe"}
+
+    def test_a_raw_write_with_a_key_the_app_stops_on_commits_nothing(self, crud):
+        crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": "dfe"}), actor="alice")
+        before = crud.head_revision()
+        fetcher = {
+            "deploy": {"service": "dfe-fetcher", "instance": "default"},
+            "config": {"sources": {"rest": {"enabled": True}}},
+        }
+
+        with pytest.raises(contract.RefusedConfigError) as refused:
+            crud.put("helmvars", "dfe-fetcher-default-values", fetcher, actor="alice")
+
+        assert refused.value.paths == ["config.sources.rest.enabled"]
+        assert crud.head_revision() == before
 
     @pytest.mark.parametrize(
         ("name", "doc"),

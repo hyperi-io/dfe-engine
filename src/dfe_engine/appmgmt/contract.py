@@ -153,19 +153,24 @@ class MaskedValueError(ValueError):
     """The refusal code a route answers with."""
 
 
-class RefusedNullError(ValueError):
-    """Raised when an app's config would carry a null its parser refuses.
+class RefusedConfigError(ValueError):
+    """Raised when an app's config holds a value or a key its parser refuses.
 
-    The app stops at startup on such a null, so the write is refused before it
-    reaches the deploy repo.
+    The app stops at startup on it, so the write is refused before it reaches the
+    deploy repo.
+
+    Attributes:
+        paths: The overlay path of each refusal.
+        reasons: One sentence per refusal, in the same order.
     """
 
     code = "invalid_value"
     """The refusal code a route answers with."""
 
-    def __init__(self, paths: list[str]) -> None:
-        self.paths = paths
-        super().__init__(f"{', '.join(paths)} does not accept a null")
+    def __init__(self, refusals: dict[str, str]) -> None:
+        self.paths = list(refusals)
+        self.reasons = list(refusals.values())
+        super().__init__(", ".join(self.reasons))
 
 
 class CredentialReentryError(MaskedValueError):
@@ -1424,18 +1429,129 @@ def refused_nulls(app_contract: AppContract, path: str, value: Any) -> list[str]
     return _refused_nulls(value, node, root, path)
 
 
-def check_overlay(doc: dict) -> None:
-    """Refuse an instance overlay whose ``config:`` block holds a null its app refuses.
+def _denies_unnamed_keys(node: dict | None, root: dict) -> bool:
+    """Whether a mapping held to ``node`` stops the app on a key the schema does not name.
 
-    The app's chart renders that block as the app's file verbatim, nulls
-    included, so the refusal has to happen before the overlay is written. An
-    overlay naming no app in the manifest is not an app's config and passes.
+    serde's ``deny_unknown_fields`` publishes ``additionalProperties: false``. A key
+    named by any variant of an enum is taken, so every object branch has to deny it.
+    """
+    if node is None:
+        return False
+    objects = [b for b in _branches(node, root) if "properties" in b or b.get("type") == "object"]
+    return bool(objects) and all(b.get("additionalProperties") is False for b in objects)
+
+
+def _stated_types(node: dict, root: dict) -> set[str]:
+    """The JSON types ``node`` and its branches name, empty where none is named."""
+    named: set[str] = set()
+    for branch in _branches(node, root):
+        found = branch.get("type")
+        named |= {found} if isinstance(found, str) else set(found or ())
+    named.discard("null")
+    return named
+
+
+def _refused_shapes(value: Any, node: dict | None, root: dict, path: str) -> dict[str, str]:
+    """Each path in ``value`` holding a type its schema does not take, or an unnamed key it refuses.
+
+    Reaches inside maps and lists, which the option walk takes as one value each.
+    """
+    if value is None or node is None:
+        return {}
+    named = _stated_types(node, root)
+    held = _json_type(value)
+    if named and held not in named and not (held == "integer" and "number" in named):
+        return {path: f"{path} takes {' or '.join(sorted(named))}, not {held}"}
+    found: dict[str, str] = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = _schema_child(node, str(key), root)
+            here = f"{path}.{key}"
+            if child is None and _denies_unnamed_keys(node, root):
+                found[here] = f"{here} is not a key the app reads, and the app stops on it"
+            else:
+                found |= _refused_shapes(item, child, root, here)
+    elif isinstance(value, list):
+        items = _schema_items(node, root)
+        for index, item in enumerate(value):
+            found |= _refused_shapes(item, items, root, f"{path}[{index}]")
+    return found
+
+
+def _judge_options(
+    options: dict[str, DeclaredOption], value: Any, path: str
+) -> tuple[dict[str, str], list[str]]:
+    """Each declared option under ``path`` judged by type and closed set, and each key none explains."""
+    option = options.get(path)
+    if option is not None:
+        reason = "" if value is None else check_value(option, value)
+        return ({path: reason} if reason else {}), []
+    if not isinstance(value, dict):
+        return {}, [path]
+    wrong: dict[str, str] = {}
+    unexplained: list[str] = []
+    for key, child in value.items():
+        found, missing = _judge_options(options, child, f"{path}.{key}")
+        wrong |= found
+        unexplained += missing
+    return wrong, unexplained
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigJudgement:
+    """What an app makes of a ``config:`` block, by overlay path.
+
+    Attributes:
+        refused: Each path the app stops on at startup, with the reason: a null
+            the field does not take, a wrong type, a value outside a closed set,
+            or a key a section that refuses unnamed keys does not name.
+        undeclared: Each path no option declares in a section that takes unnamed
+            keys. The app reads past it, so the value has no effect.
+    """
+
+    refused: dict[str, str]
+    undeclared: list[str]
+
+
+def judge(app_contract: AppContract, config: dict) -> ConfigJudgement:
+    """Judge ``config`` as the app's whole ``config:`` block against its contract.
+
+    With no contract mounted nothing is judged.
+    """
+    if not app_contract.available:
+        return ConfigJudgement(refused={}, undeclared=[])
+    root = app_contract.schema
+    refused = {
+        path: f"{path} does not accept a null"
+        for path in refused_nulls(app_contract, CONFIG_ROOT, config)
+    }
+    wrong, unexplained = _judge_options(declared_options(app_contract), config, CONFIG_ROOT)
+    refused |= {path: reason for path, reason in wrong.items() if path not in refused}
+    for path, reason in _refused_shapes(config, root, root, CONFIG_ROOT).items():
+        if not _under_any(path, refused):
+            refused[path] = reason
+    undeclared = [p for p in unexplained if not _under_any(p, refused)]
+    return ConfigJudgement(refused=refused, undeclared=undeclared)
+
+
+def _under_any(path: str, refused: dict[str, str]) -> bool:
+    """Whether ``path`` is a refused path or sits inside one."""
+    return any(path == r or path.startswith((f"{r}.", f"{r}[")) for r in refused)
+
+
+def check_overlay(doc: dict) -> None:
+    """Refuse an instance overlay whose ``config:`` block its app would stop on.
+
+    The app's chart renders that block as the app's file verbatim, so the
+    refusal has to happen before the overlay is written. Every writer meets it,
+    the source compilers included. An overlay naming no app in the manifest is
+    not an app's config and passes.
 
     With no contract mounted for the app the overlay passes, and the first such
-    write warns, because nothing then stops a refused null reaching the pod.
+    write warns, because nothing then stops a refused value reaching the pod.
 
     Raises:
-        RefusedNullError: The block holds a null a declared field does not take.
+        RefusedConfigError: The block holds what :func:`judge` refuses.
     """
     service = str(get_path(doc, DEPLOY_SERVICE_PATH, default="") or "")
     config = doc.get(CONFIG_ROOT)
@@ -1448,14 +1564,14 @@ def check_overlay(doc: dict) -> None:
             _UNJUDGED.add(service)
             logger.warning(
                 "no config contract is mounted for this app, so its overlay writes are "
-                "not checked for a null the app refuses at startup",
+                "not checked for a value the app refuses at startup",
                 app=service,
                 contract_dir=str(contract_root() or ""),
             )
         return
-    refused = refused_nulls(found, CONFIG_ROOT, config)
+    refused = judge(found, config).refused
     if refused:
-        raise RefusedNullError(refused)
+        raise RefusedConfigError(refused)
 
 
 def check_env_value(value: Any) -> str:
