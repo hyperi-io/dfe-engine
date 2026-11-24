@@ -13,11 +13,14 @@ adds is stored by name.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from common.hunt_files import store_rule_file
 
 from dfe_engine.api.deps import get_hunt_config_registry
+from dfe_engine.hunts.hunt_output import HuntResultSchema
+from dfe_engine.hunts.rule_creation_service import RuleCreationService
 
 HUNTS = "/api/v1/hunts"
 _HUNT = {
@@ -77,3 +80,51 @@ def test_an_edit_keeps_the_entry_of_each_rule_that_stays(client, admin_headers, 
     stored = get_hunt_config_registry().get("windows_hunt")
     assert stored["cron"] == "*/10 * * * *"
     assert stored["rules"] == expected
+
+
+class _ClickHouse:
+    """Holds only the tables it names, each with every column the runner inserts."""
+
+    def __init__(self, tables: set[tuple[str, str]]) -> None:
+        self.tables = tables
+
+    def command(self, *_args, **_kwargs) -> str:
+        """Plan every rule."""
+        return ""
+
+    def query(self, _sql: str, parameters: dict | None = None, **_kwargs) -> SimpleNamespace:
+        """Answer the ``system.columns`` read for the table the parameters name."""
+        named = parameters or {}
+        held = (named["db"], named["tbl"]) in self.tables
+        columns = HuntResultSchema().insert_columns() if held else []
+        return SimpleNamespace(result_rows=[(name, "String") for name in columns])
+
+
+@pytest.mark.usefixtures("hunt_with_overrides")
+@pytest.mark.parametrize(
+    ("tables", "status"),
+    [
+        pytest.param(
+            {("dfe", "windows_detections"), ("dfe", "detection")},
+            200,
+            id="the kept target exists",
+        ),
+        pytest.param({("dfe", "detection")}, 422, id="the kept target is missing"),
+    ],
+)
+def test_the_save_checks_the_kept_override_target(
+    client, admin_headers, monkeypatch, tables, status
+):
+    stub = _ClickHouse(tables)
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda _self: stub)
+
+    resp = client.put(
+        f"{HUNTS}/windows_hunt",
+        json={**_HUNT, "cron": "*/10 * * * *", "rules": ["certutil"]},
+        headers=admin_headers,
+    )
+
+    assert resp.status_code == status, resp.text
+    if status == 422:
+        assert resp.json()["code"] == "invalid_target"
+        assert "dfe.windows_detections" in resp.json()["detail"]

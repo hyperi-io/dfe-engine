@@ -58,7 +58,8 @@ holding no org's rows.
 """
 
 from collections import Counter
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +143,70 @@ def _rule_entries(definition: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
-def _detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[str, str, str]:
+@dataclass(frozen=True)
+class RuleTables:
+    """The table a hunt's rule reads and the table it writes detections to."""
+
+    source_db: str
+    source_table: str
+    target_db: str
+    target_table: str
+
+
+def rule_tables(
+    entry: Mapping[str, Any],
+    rule_db: str,
+    rule_table: str,
+    *,
+    hunt_source: str,
+    hunt_target: str,
+    default_target: str,
+    default_database: str,
+) -> RuleTables:
+    """Where one rule of a hunt reads and writes, as the runner resolves both.
+
+    The source is the entry's ``source_table_name``, else the rule's own table, else
+    the hunt's. The target is the entry's ``target_table_name``, else the hunt's, else
+    ``default_target``. An unqualified source reads ``default_database``, and an
+    unqualified target lands beside its source.
+
+    Args:
+        entry: The hunt's entry for the rule.
+        rule_db: The rule's stored database.
+        rule_table: The rule's stored table.
+        hunt_source: The hunt's ``global_source_table_name``.
+        hunt_target: The hunt's ``global_target_table_name``.
+        default_target: ``db.table`` used when neither the entry nor the hunt names one.
+        default_database: The data database.
+
+    Raises:
+        ValueError: Why the rule resolves to no source or target the runner can use.
+    """
+    source = (
+        str(entry.get("source_table_name") or "") or rule_source(rule_db, rule_table) or hunt_source
+    )
+    # The source reaches FROM as text and can arrive straight from the deploy repo.
+    try:
+        source_db, source_table = plain_source_name(source) if source.strip() else ("", "")
+    except ValueError as exc:
+        raise ValueError(f"source refused: {exc}") from None
+    source_db = source_db or default_database
+    if not source_db or not source_table:
+        raise ValueError("resolves to no db.table source")
+    target = str(entry.get("target_table_name") or "") or hunt_target or default_target
+    if not target.strip():
+        raise ValueError("resolves to no target table")
+    # A hunt YAML can also be committed straight into the deploy repo, so the API's check of
+    # the target is not the only gate it passes.
+    try:
+        target_db, target_table = plain_table_name(target)
+    except ValueError as exc:
+        raise ValueError(f"target refused: {exc}") from None
+    # An unqualified target lands beside its source, never in a guessed database.
+    return RuleTables(source_db, source_table, target_db or source_db, target_table)
+
+
+def detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[str, str, str]:
     """A rule's (where_clause, source_db, source_table).
 
     The registry stores the WHERE the rewriter already extracted. A hand-authored
@@ -269,7 +333,7 @@ def compile_hunt_queries(
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' is not a YAML mapping")
             continue
 
-        where, rule_db, rule_table = _detection_clause(payload, rewriter)
+        where, rule_db, rule_table = detection_clause(payload, rewriter)
         if not where:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' has no detection logic")
             continue
@@ -281,35 +345,21 @@ def compile_hunt_queries(
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {refusal}")
             continue
 
-        source = (
-            str(entry.get("source_table_name") or "")
-            or rule_source(rule_db, rule_table)
-            or hunt_source
-        )
-        # The source reaches FROM as text and can arrive straight from the deploy repo.
         try:
-            source_db, source_table = plain_source_name(source) if source.strip() else ("", "")
+            tables = rule_tables(
+                entry,
+                rule_db,
+                rule_table,
+                hunt_source=hunt_source,
+                hunt_target=hunt_target,
+                default_target=default_target,
+                default_database=default_database,
+            )
         except ValueError as exc:
-            logger.error(f"hunt {hunt_id}: rule '{rule_name}' source refused: {exc}")
+            logger.error(f"hunt {hunt_id}: rule '{rule_name}' {exc}")
             continue
-        source_db = source_db or default_database
-        if not source_db or not source_table:
-            logger.error(f"hunt {hunt_id}: rule '{rule_name}' resolves to no db.table source")
-            continue
-
-        target = str(entry.get("target_table_name") or "") or hunt_target or default_target
-        if not target.strip():
-            logger.error(f"hunt {hunt_id}: rule '{rule_name}' resolves to no target table")
-            continue
-        # A hunt YAML can also be committed straight into the deploy repo, so the
-        # API's check of the target is not the only gate it passes.
-        try:
-            target_db, target_table = plain_table_name(target)
-        except ValueError as exc:
-            logger.error(f"hunt {hunt_id}: rule '{rule_name}' target refused: {exc}")
-            continue
-        # An unqualified target lands beside its source, never in a guessed database.
-        target_db = target_db or source_db
+        source_db, source_table = tables.source_db, tables.source_table
+        target_db, target_table = tables.target_db, tables.target_table
 
         display_name = str(payload.get("display_name") or payload.get("name") or rule_name)
         severity = str(payload.get("severity") or "medium")

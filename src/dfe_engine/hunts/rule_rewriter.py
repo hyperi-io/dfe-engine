@@ -55,7 +55,7 @@ def strip_time_placeholder(where: str) -> str:
 
 
 # Common timestamp column patterns in DFE tables.
-_TIMESTAMP_COLUMNS = frozenset(
+TIMESTAMP_COLUMNS = frozenset(
     {
         "timestamp",
         "_timestamp",
@@ -99,7 +99,7 @@ class RuleRewriter:
             timestamp_columns: Additional timestamp column names to
                 strip from WHERE clauses. Merged with the default set.
         """
-        self._ts_columns = _TIMESTAMP_COLUMNS | (timestamp_columns or frozenset())
+        self._ts_columns = TIMESTAMP_COLUMNS | (timestamp_columns or frozenset())
 
     def parse_user_sql(self, sql: str) -> ParsedRule:
         """Parse a user-supplied SQL SELECT statement.

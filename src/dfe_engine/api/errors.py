@@ -45,6 +45,8 @@ class ErrorCode:
     PASSWORD_CHANGE_REQUIRED = "password_change_required"  # noqa: S105, RUF100 - an error code, not a password
     INVALID_SQL = "invalid_sql"
     RULE_MATCHES_EVERYTHING = "rule_matches_everything"
+    IMPORT_REFUSED = "import_refused"
+    INVALID_TARGET = "invalid_target"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
     SECRETS_UNAVAILABLE = "secrets_unavailable"

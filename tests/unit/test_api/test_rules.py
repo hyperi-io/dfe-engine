@@ -5,6 +5,8 @@ import pytest
 from dfe_engine.api.deps import get_rule_registry
 from dfe_engine.hunts.rule_model import Rule
 
+pytestmark = pytest.mark.usefixtures("rule_sources")
+
 # What HyperDX's search export emitted before it rendered the view's own table:
 # the legacy template, which names no table and does not parse.
 _HYPERDX_TEMPLATE_SQL = (
@@ -25,9 +27,17 @@ def _sample_create_payload(**overrides):
         "name": "test_rule",
         "display_name": "Test Rule",
         "severity": "high",
-        "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
-        "source": "windows-audit",
+        "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+        "source": "main",
     }
+    payload.update(overrides)
+    return payload
+
+
+def _where_payload(**overrides):
+    """A create body written as a ``where_clause`` on a registered source, with no SQL."""
+    payload = _sample_create_payload(where_clause="severity = 'high'", source="windows-audit")
+    del payload["user_sql"]
     payload.update(overrides)
     return payload
 
@@ -54,6 +64,76 @@ class TestRulesValidate:
         )
         assert resp.status_code == 422
         assert resp.json()["code"] == "validation_error"
+
+
+class TestRulesImport:
+    """POST /api/v1/rules/import -- a SELECT read into a source and a WHERE, nothing written."""
+
+    def _import(self, client, headers, sql):
+        return client.post("/api/v1/rules/import", json={"sql": sql}, headers=headers)
+
+    def test_a_registered_table_becomes_the_source(self, client, admin_headers):
+        resp = self._import(
+            client,
+            admin_headers,
+            "SELECT a FROM dfe.`windows-audit` WHERE _timestamp >= now() - INTERVAL 1 HOUR "
+            "AND severity = 'high' ORDER BY a LIMIT 10",
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (body["source"], body["needs_source"]) == ("windows-audit", False)
+        assert body["where_clause"] == "severity = 'high'"
+        assert {part["kind"] for part in body["dropped"]} == {
+            "columns",
+            "order_by",
+            "limit",
+            "time_bound",
+        }
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT * FROM {{org_id}}.{{source_table_name}} WHERE a = 1",
+            "SELECT * FROM stranger WHERE a = 1",
+        ],
+        ids=["template", "unregistered table"],
+    )
+    def test_a_table_that_is_no_source_needs_a_pick(self, client, admin_headers, sql):
+        body = self._import(client, admin_headers, sql).json()
+        assert (body["source"], body["needs_source"]) == (None, True)
+        assert body["where_clause"] == "a = 1"
+
+    @pytest.mark.parametrize(
+        ("sql", "fragment"),
+        [
+            pytest.param("SELECT count() FROM events GROUP BY a", "GROUP BY", id="group by"),
+            pytest.param(
+                "SELECT count() FROM events GROUP BY a HAVING count() > 1", "GROUP BY", id="having"
+            ),
+            pytest.param("SELECT * FROM a JOIN b ON a.x = b.x", "joins", id="join"),
+            pytest.param("SELECT * FROM a UNION ALL SELECT * FROM b", "unions", id="union"),
+            pytest.param("WITH x AS (SELECT 1) SELECT * FROM x", "WITH", id="with"),
+            pytest.param("SELECT * FROM (SELECT * FROM t) WHERE a = 1", "subquery", id="subquery"),
+            pytest.param("not sql at all ((", "does not parse", id="garbage"),
+        ],
+    )
+    def test_a_shape_a_rule_cannot_carry_is_422_with_the_reason(
+        self, client, admin_headers, sql, fragment
+    ):
+        resp = self._import(client, admin_headers, sql)
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "import_refused"
+        assert fragment in resp.json()["detail"]
+
+    def test_a_blank_body_is_a_validation_error(self, client, admin_headers):
+        resp = self._import(client, admin_headers, "")
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
+
+    def test_it_needs_a_login(self, client):
+        resp = client.post("/api/v1/rules/import", json={"sql": "SELECT * FROM events WHERE a = 1"})
+        assert resp.status_code == 401
 
 
 class TestRulesListAndDetail:
@@ -131,6 +211,44 @@ class TestRulesListAndDetail:
         resp = client.get("/api/v1/rules", headers=viewer_headers)
         assert resp.status_code == 200
 
+    @pytest.mark.parametrize(
+        ("stored", "listed_under"),
+        [
+            pytest.param(
+                {"source": None, "source_db": "dfe", "source_table": "windows-audit"},
+                "windows-audit",
+                id="no source, table is a registered source",
+            ),
+            pytest.param(
+                {"source": "stale-label", "source_db": "dfe", "source_table": "events"},
+                "events",
+                id="unregistered source, table is a registered source",
+            ),
+            pytest.param(
+                {"source": "stale-label", "source_db": "dfe", "source_table": "stranger"},
+                "stale-label",
+                id="names no registered source, listed as stored",
+            ),
+            pytest.param(
+                {"source": None, "source_db": "dfe", "source_table": "stranger"},
+                None,
+                id="names nothing, listed with no source",
+            ),
+        ],
+    )
+    def test_a_rule_stored_before_sources_were_registered_is_read_as_its_table(
+        self, client, admin_headers, stored, listed_under
+    ):
+        get_rule_registry().save(
+            Rule(rule_id="older", name="Older", where_clause="a = 1", **stored)
+        )
+
+        listed = client.get("/api/v1/rules", headers=admin_headers).json()["items"][0]
+        detail = client.get("/api/v1/rules/older", headers=admin_headers).json()
+
+        assert listed["source"] == listed_under
+        assert detail["source"] == listed_under
+
 
 @pytest.mark.usefixtures("customer_orgs")
 class TestRulesUpdateAndDelete:
@@ -167,7 +285,7 @@ class TestRulesUpdateAndDelete:
             f"/api/v1/rules/{rule_name}",
             json={
                 "severity": "high",
-                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "user_sql": "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'",
                 "source": "windows-audit",
                 "source_type": "",
             },
@@ -258,7 +376,7 @@ class TestRulesCreate:
             json={
                 "name": "my_rule",
                 "severity": "high",
-                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "user_sql": "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'",
                 "source": "windows-audit",
             },
             headers=admin_headers,
@@ -307,6 +425,168 @@ class TestRulesCreate:
         data = resp.json()
         assert isinstance(data["valid"], bool)
         assert isinstance(data["errors"], list)
+
+    @pytest.mark.parametrize(
+        "extra",
+        [{}, {"cel_filter": "", "hunt_name": "", "display_name": None}],
+        ids=["advanced fields unset", "advanced fields blank"],
+    )
+    def test_the_console_create_body_is_saved(self, client, admin_headers, extra):
+        """The body the console's rule editor posts: full SQL, ``source_type`` raw, no source."""
+        body = {
+            "name": "console_rule",
+            "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+            "severity": "medium",
+            "source_type": "raw",
+            "estimate_cost": True,
+            "cost_window_minutes": 0,
+            **extra,
+        }
+
+        resp = client.post("/api/v1/rules", json=body, headers=admin_headers)
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["rule"]["where_clause"] == "severity = 'high'"
+        assert resp.json()["sanitize_summary"] == {}
+
+    def test_a_hyperdx_source_type_goes_to_from_hyperdx_instead(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="hdx", source_type="hyperdx"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert client.get("/api/v1/rules/hdx", headers=admin_headers).status_code == 404
+
+
+# Each refusal leaves nothing written, on create and on update.
+_WHERE_REFUSALS = [
+    pytest.param(
+        {"source": "no-such-source"},
+        "invalid_sql",
+        "not a registered source",
+        id="unknown source",
+    ),
+    pytest.param({"where_clause": ""}, "invalid_sql", "WHERE clause is empty", id="empty where"),
+    pytest.param({"where_clause": "  "}, "invalid_sql", "WHERE clause is empty", id="blank where"),
+    pytest.param(
+        {"where_clause": "a = 1 AND {timestamp_condition}"},
+        "invalid_sql",
+        "hunt schedule",
+        id="time placeholder",
+    ),
+    pytest.param(
+        {"where_clause": "a = {window}"}, "invalid_sql", "{window}", id="window placeholder"
+    ),
+    pytest.param(
+        {"where_clause": "_timestamp > now() - INTERVAL 1 HOUR"},
+        "invalid_sql",
+        "hunt window bounds time",
+        id="time bound",
+    ),
+    pytest.param(
+        {"where_clause": "a = 1 LIMIT 5"},
+        "invalid_sql",
+        "more than a row filter",
+        id="clause past the filter",
+    ),
+    pytest.param(
+        {"where_clause": "url('http://x') = 1"},
+        "invalid_sql",
+        "may not call",
+        id="call outside the row",
+    ),
+    pytest.param(
+        {"where_clause": "a = 1", "cel_filter": "this is not CEL ("},
+        "invalid_sql",
+        "CEL filter refused",
+        id="cel filter that does not transpile",
+    ),
+    pytest.param(
+        {"where_clause": "1 = 1"}, "rule_matches_everything", "always true", id="matches everything"
+    ),
+    pytest.param(
+        {"user_sql": "SELECT * FROM dfe.main WHERE a = 1"},
+        "validation_error",
+        "one of the three",
+        id="where and sql",
+    ),
+    pytest.param(
+        {"where_clause": "a = 1", "condition": {"field": "a", "operator": "equals", "value": "1"}},
+        "validation_error",
+        "one of the three",
+        id="where and condition",
+    ),
+]
+
+
+class TestRulesWrittenAsAWhere:
+    """POST and PUT /api/v1/rules with a ``where_clause`` on a registered ``source``."""
+
+    def test_it_reads_the_source_table(self, client, admin_headers):
+        resp = client.post("/api/v1/rules", json=_where_payload(), headers=admin_headers)
+
+        assert resp.status_code == 201, resp.text
+        rule = client.get("/api/v1/rules/test_rule", headers=admin_headers).json()
+        assert rule["source"] == "windows-audit"
+        assert (rule["source_db"], rule["source_table"]) == ("dfe", "windows-audit")
+        assert rule["where_clause"] == "severity = 'high'"
+        assert rule["original_sql"] == "SELECT * FROM `dfe`.`windows-audit` WHERE severity = 'high'"
+
+    def test_a_where_with_no_source_is_a_validation_error(self, client, admin_headers):
+        body = _where_payload()
+        del body["source"]
+
+        resp = client.post("/api/v1/rules", json=body, headers=admin_headers)
+
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
+
+    @pytest.mark.usefixtures("customer_orgs")
+    def test_update_moves_the_rule_to_another_source(self, client, admin_headers):
+        client.post("/api/v1/rules", json=_where_payload(), headers=admin_headers)
+
+        resp = client.put(
+            "/api/v1/rules/test_rule",
+            json=_where_payload(source="events", where_clause="user = 'root'"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        stored = client.get("/api/v1/rules/test_rule", headers=admin_headers).json()
+        assert (stored["source"], stored["source_table"]) == ("events", "events")
+        assert stored["where_clause"] == "user = 'root'"
+
+    @pytest.mark.parametrize(("change", "code", "fragment"), _WHERE_REFUSALS)
+    def test_a_refused_create_writes_nothing(self, client, admin_headers, change, code, fragment):
+        resp = client.post(
+            "/api/v1/rules", json=_where_payload(name="refused", **change), headers=admin_headers
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == code
+        assert fragment in resp.text
+        assert client.get("/api/v1/rules/refused", headers=admin_headers).status_code == 404
+
+    @pytest.mark.parametrize(("change", "code", "fragment"), _WHERE_REFUSALS)
+    def test_a_refused_update_keeps_the_stored_rule(
+        self, client, admin_headers, change, code, fragment
+    ):
+        payload = _where_payload(name="kept")
+        assert client.post("/api/v1/rules", json=payload, headers=admin_headers).status_code == 201
+
+        resp = client.put(
+            "/api/v1/rules/kept", json=_where_payload(**change), headers=admin_headers
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == code
+        assert fragment in resp.text
+        stored = client.get("/api/v1/rules/kept", headers=admin_headers).json()
+        assert stored["where_clause"] == payload["where_clause"]
+        assert stored["sql_errors"] == []
 
 
 class TestRulesFromHyperdx:

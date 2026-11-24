@@ -1048,3 +1048,68 @@ class TestUserinfo:
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "userinfo")
         assert (line["status"], line["code"]) == (401, "invalid_token")
+        assert line["event"].endswith(f"({line['error_type']}, HTTP 401)"), line["event"]
+
+    @pytest.mark.parametrize(
+        ("prepare", "named"),
+        [
+            pytest.param(
+                lambda idp: setattr(idp, "userinfo_body", "not json"),
+                "JSONDecodeError",
+                id="a body that is not JSON",
+            ),
+            pytest.param(
+                lambda idp: setattr(
+                    idp, "userinfo_body", json.dumps({"sub": "someone-else", "email": SENTINEL})
+                ),
+                "UserinfoSubjectMismatchError",
+                id="another subject",
+            ),
+        ],
+    )
+    async def test_the_line_names_why_the_claims_were_not_used(
+        self, local_idp: LocalIdp, audit_events: list[dict], prepare, named
+    ) -> None:
+        """A plain-text log shows only the event, so the event names the failure's class."""
+        prepare(local_idp)
+
+        await fill_from_userinfo_endpoint(
+            claims={"sub": "u1"},
+            client=make_oauth_client(server_metadata_url=local_idp.metadata_url),
+            issuer=local_idp.base_url,
+            token={"access_token": "t", "token_type": "Bearer"},
+        )
+
+        line = failure_line(audit_events, "userinfo")
+        assert line["error_type"] == named
+        assert named in line["event"]
+        assert_no_sentinel(logged(audit_events))
+        assert f"{local_idp.base_url}/userinfo" not in logged(audit_events)
+
+    async def test_a_userinfo_endpoint_nobody_answers_is_named_as_unreachable(
+        self, audit_events: list[dict]
+    ) -> None:
+        with socket.socket() as spare:
+            spare.bind(("127.0.0.1", 0))
+            closed = spare.getsockname()[1]
+        idp = LocalIdp()
+        idp.start()
+        try:
+            client = make_oauth_client(server_metadata_url=idp.metadata_url)
+            client.server_metadata = {
+                **idp.metadata(),
+                "userinfo_endpoint": f"http://127.0.0.1:{closed}/userinfo",
+                "_loaded_at": 1,
+            }
+            await fill_from_userinfo_endpoint(
+                claims={"sub": "u1"},
+                client=client,
+                issuer=idp.base_url,
+                token={"access_token": "t", "token_type": "Bearer"},
+            )
+        finally:
+            idp.stop()
+
+        line = failure_line(audit_events, "userinfo")
+        assert line["transport_failure"] == "connection_refused"
+        assert line["event"].endswith(f"({line['error_type']}, connection_refused)"), line["event"]

@@ -7,6 +7,8 @@ PUT    /api/v1/rules/{name}    -> Update rule
 DELETE /api/v1/rules/{name}    -> Delete rule
 POST   /api/v1/rules/validate     -> Validate SQL/CEL without creating
 POST   /api/v1/rules/preview      -> Compile a condition and check it as a save would, saving nothing
+POST   /api/v1/rules/import       -> Read a SELECT into a source and WHERE, saving nothing
+POST   /api/v1/rules/from-hyperdx -> Create a rule from the SQL a Search view runs
 """
 
 import functools
@@ -23,8 +25,10 @@ from dfe_engine.api.deps import (
     CurrentUser,
     HuntConfigReg,
     OptionalHuntConfigReg,
+    OptionalSourceReg,
     RuleReg,
     Settings,
+    SourceReg,
     held_tenant_ids,
     require_action,
 )
@@ -37,10 +41,17 @@ from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
 from dfe_engine.hunts.rule_condition import RuleCondition
-from dfe_engine.hunts.rule_creation_service import CostEstimate
+from dfe_engine.hunts.rule_creation_service import CostEstimate, service_from_settings
 from dfe_engine.hunts.rule_guard import source_label
+from dfe_engine.hunts.rule_import import (
+    DroppedPart,
+    ImportRefusedError,
+    RuleImport,
+    import_select,
+)
 from dfe_engine.hunts.rule_model import Severity
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
+from dfe_engine.hunts.rule_sources import resolved_source, source_check
 from dfe_engine.names import MAX_NAME_LENGTH, RuleName
 
 router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
@@ -54,10 +65,23 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
             "name (letters, digits, '_' and '-'), has no WHERE to detect with, or "
             "calls a function that reads outside the row (url, s3, a dictionary) or sends "
             "it to another service (the ai* functions), or carries a CEL filter that "
-            "does not transpile (code invalid_sql, the errors in sql_errors). "
+            "does not transpile. A ``source`` that is not a registered source is refused, "
+            "and so is a ``where_clause`` that is empty, carries a {...} placeholder or a "
+            "time bound, or holds more than a row filter (code invalid_sql, the errors in "
+            "sql_errors). "
             "Or the rule matches "
             "every event in its source (code rule_matches_everything, the source and "
             "detection WHERE in context)."
+        ),
+    },
+}
+
+_IMPORT_REFUSED_RESPONSES: dict[int | str, dict] = {
+    422: {
+        "description": (
+            "Refused. The body failed validation (code validation_error), or the SELECT has "
+            "a shape a rule cannot carry: GROUP BY, HAVING, a JOIN, a UNION, a WITH clause "
+            "or a subquery in FROM (code import_refused, the reason in detail)."
         ),
     },
 }
@@ -77,8 +101,16 @@ class _RuleWriteFields(BaseModel):
         min_length=1,
         description=(
             "Full detection query: SELECT ... FROM <db>.<table> WHERE ... "
-            "(the FROM names the source table). Give this or ``condition``, not both. "
-            "A rule saved this way has no ``condition``"
+            "(the FROM names the source table). Give this, ``where_clause`` or "
+            "``condition``, one of the three. A rule saved this way has no ``condition``"
+        ),
+    )
+    where_clause: str | None = Field(
+        default=None,
+        description=(
+            "The row filter on the table of ``source``, written as the part after WHERE, "
+            "with no time bound and no {...} placeholder, since the time window comes from "
+            "the hunt schedule. Give this, ``user_sql`` or ``condition``, one of the three"
         ),
     )
     condition: RuleCondition | None = Field(
@@ -86,12 +118,17 @@ class _RuleWriteFields(BaseModel):
         description=(
             "The rule's structured condition, which the engine compiles to its SQL and stores "
             "with it, so the builder reopens on it. Reads the table of ``source``. "
-            "Give this or ``user_sql``, not both"
+            "Give this, ``user_sql`` or ``where_clause``, one of the three"
         ),
     )
     cel_filter: str | None = Field(default=None, description="CEL expression filter")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
-    source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
+    source: str | None = Field(
+        default=None,
+        description=(
+            "Source label (e.g. windows_audit). A label no registered source carries is refused"
+        ),
+    )
     estimate_cost: bool = Field(
         default=True,
         description=(
@@ -108,9 +145,18 @@ class _RuleWriteFields(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _sql_or_condition(self) -> _RuleWriteFields:
-        if (self.user_sql is None) == (self.condition is None):
-            raise ValueError("give 'user_sql' or 'condition', one of the two")
+    def _detection_is_written_once(self) -> _RuleWriteFields:
+        written = [
+            name
+            for name, value in (
+                ("user_sql", self.user_sql),
+                ("where_clause", self.where_clause),
+                ("condition", self.condition),
+            )
+            if value is not None
+        ]
+        if len(written) != 1:
+            raise ValueError("give 'user_sql', 'where_clause' or 'condition', one of the three")
         return self
 
 
@@ -119,17 +165,17 @@ class RuleCreateRequest(_RuleWriteFields):
 
     name: RuleName = Field(description="Rule file name (YAML stem); must be unique")
 
-    source_type: Literal["raw", "hyperdx"] = Field(
+    source_type: Literal["raw"] = Field(
         default="raw",
-        description="'raw' (plain SQL) or 'hyperdx' (Search saved search format)",
+        description="'raw' (plain SQL). SQL a Search view renders goes to POST /rules/from-hyperdx",
     )
 
     @model_validator(mode="after")
-    def _condition_names_its_source(self) -> RuleCreateRequest:
-        if self.condition is not None and not self.source:
-            raise ValueError("a condition reads a source's table, so name the source")
-        if self.condition is not None and self.source_type != "raw":
-            raise ValueError("a condition is compiled by the engine, so its source_type is 'raw'")
+    def _compiled_detection_names_its_source(self) -> RuleCreateRequest:
+        if (self.condition is not None or self.where_clause is not None) and not self.source:
+            raise ValueError(
+                "a where_clause or condition reads a source's table, so name the source"
+            )
         return self
 
 
@@ -249,6 +295,48 @@ class RuleCreateResponse(BaseModel):
     cost_estimate: CostEstimate | None = None
 
 
+class RuleImportRequest(BaseModel):
+    """A SELECT to read into a source and a WHERE clause."""
+
+    model_config = {"extra": "forbid"}
+
+    sql: str = Field(min_length=1, description="One ClickHouse SELECT of a single table")
+
+
+class DroppedPartResponse(BaseModel):
+    """One piece of the SELECT the rule does not keep."""
+
+    kind: str = Field(
+        description=(
+            "columns, order_by, limit, offset, settings, format, distinct, time_bound "
+            "or time_placeholder"
+        )
+    )
+    text: str = Field(description="The piece as written")
+
+
+class RuleImportResponse(BaseModel):
+    """What a SELECT becomes as a rule's fields. Nothing is saved."""
+
+    source: str | None = Field(
+        default=None,
+        description="The registered source the FROM names. Null when the author must pick one",
+    )
+    needs_source: bool = Field(  # noqa: V107
+        description="True when the author must pick a source to save"
+    )
+    from_table: str = Field(description="The FROM as written, or the placeholders it was")
+    where_clause: str = Field(
+        description="The row filter with the time window removed, empty when nothing is left"
+    )
+    dropped: list[DroppedPartResponse] = Field(
+        default_factory=list, description="Everything in the SELECT the rule does not keep"
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="What to look at before saving the fields"
+    )
+
+
 class RuleFromHyperdxRequest(BaseModel):
     """Create a hunt rule from the SQL a Search view runs.
 
@@ -305,6 +393,7 @@ RulesList = Annotated[
 def list_rules(
     user: CurrentUser,
     registry: RuleReg,
+    sources: OptionalSourceReg,
     query: RulesList,
     search: str | None = Query(
         None,
@@ -313,8 +402,12 @@ def list_rules(
     severity: str | None = Query(None, description="Filter by severity"),
     source: str | None = Query(None, description="Filter by source label"),
 ):
-    """List detection rules with pagination and search."""
-    raw = registry.list_rules()
+    """List detection rules with pagination and search.
+
+    A stored rule with no registered source whose table is a registered source's label is
+    listed under that source. One that names none lists with its stored source as it is.
+    """
+    raw = _with_resolved_sources(registry.list_rules(), sources)
 
     if severity is not None:
         sev = severity.lower()
@@ -343,18 +436,20 @@ def create_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    sources: SourceReg,
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
 ):
     """Create a new hunt rule via RuleCreationService.
 
-    The rule is written as SQL or as a structured ``condition``, which the engine
-    compiles to the SQL and stores with it. The service sanitizes the SQL,
-    applies CEL->SQL transpilation, validates column references, and optionally
-    estimates query cost. A rule whose SQL the hunt runner could not compile is
-    refused with 422. The cost preview counts only the orgs the hunts running the
-    rule read, cut to the orgs its author may read.
+    The rule is written as SQL, as a ``where_clause`` on ``source``, or as a structured
+    ``condition``, which the engine compiles to the SQL and stores with it. A named
+    ``source`` must be a registered source. The service applies CEL->SQL transpilation,
+    validates column references, and optionally estimates query cost. A rule whose SQL
+    the hunt runner could not compile is refused with 422. A ``_json`` path the source's
+    recent rows never carried comes back as a warning. The cost preview counts only the
+    orgs the hunts running the rule read, cut to the orgs its author may read.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
@@ -364,7 +459,7 @@ def create_rule(
     if registry.name_exists(body.name):
         raise ProblemError(409, f"Rule '{body.name}' already exists", code="conflict")
 
-    service = _rule_service(settings)
+    service = _rule_service(settings, sources)
     display = (
         body.display_name if body.display_name is not None else default_display_name(body.name)
     )
@@ -374,6 +469,7 @@ def create_rule(
         severity=body.severity,
         source_type=body.source_type,
         user_sql=body.user_sql,
+        where_clause=body.where_clause,
         condition=body.condition,
         cel_filter=body.cel_filter,
         hunt_name=body.hunt_name,
@@ -390,6 +486,27 @@ def create_rule(
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", body.name, "created", review_audit_detail(outcome))
     return _build_create_response(result)
+
+
+@router.post(
+    "/import",
+    summary="Import a SELECT as a Rule's Fields",
+    response_model=RuleImportResponse,
+    responses=_IMPORT_REFUSED_RESPONSES,
+    dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
+)
+def import_rule(
+    body: RuleImportRequest, user: CurrentUser, settings: Settings, sources: SourceReg
+) -> RuleImportResponse:
+    """Read a SELECT into the source and WHERE clause a rule is saved with, saving nothing.
+
+    The FROM becomes ``source`` when its table is a registered source. Otherwise
+    ``source`` is null and the caller picks one. The column list, ORDER BY, LIMIT, SETTINGS,
+    a ``{timestamp_condition}`` placeholder and time bounds on timestamp columns are dropped
+    and listed in ``dropped``. GROUP BY, HAVING, a JOIN, a UNION, a WITH clause and a
+    subquery in FROM are refused with 422 ``import_refused``.
+    """
+    return _import_response(_read_select(body.sql, settings, sources))
 
 
 @router.post(
@@ -460,7 +577,7 @@ def _create_rule_from_sql(
         id=rule_id,
         display_name=result.rule.name,
         sanitize_summary=result.sanitize_summary or {},
-        warnings=[*result.rule.warnings, *result.volume_warnings],
+        warnings=[*result.rule.warnings, *result.volume_warnings, *result.json_path_warnings],
         sql_errors=_map_sql_errors(result.sql_errors or []),
     )
 
@@ -482,17 +599,7 @@ def validate_rule_sql(
     service = _rule_service(settings)
     errors = service.validate_sql(body.sql)
 
-    return SqlValidationResponse(
-        valid=len(errors) == 0,
-        errors=[
-            SqlValidationError(
-                message=e.message,
-                position=getattr(e, "position", None),
-                suggestion=getattr(e, "suggestion", None),
-            )
-            for e in errors
-        ],
-    )
+    return SqlValidationResponse(valid=len(errors) == 0, errors=_map_sql_errors(errors))
 
 
 @router.post(
@@ -505,6 +612,7 @@ def preview_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    sources: SourceReg,
     request: Request,
     hunts: OptionalHuntConfigReg,
 ) -> RulePreviewResponse:
@@ -535,7 +643,7 @@ def preview_rule(
         cost_window_minutes=body.cost_window_minutes,
     )
     fence = _preview_tenant_ids(request, user, hunts, body.name or "", hunt_name)
-    result = _rule_service(settings).create_rule(svc_request, rule_id, tenant_ids=fence)
+    result = _rule_service(settings, sources).create_rule(svc_request, rule_id, tenant_ids=fence)
     return RulePreviewResponse(
         user_sql=result.rule.original_sql,
         source_db=result.rule.source_db,
@@ -552,14 +660,22 @@ def preview_rule(
     response_model=RuleResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_read"]))],
 )
-def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Settings):
-    """Get a detection rule by file name."""
+def get_rule(
+    name: str, user: CurrentUser, registry: RuleReg, settings: Settings, sources: OptionalSourceReg
+):
+    """Get a detection rule by file name.
+
+    A stored rule with no source whose table is a registered source's label is returned
+    under that source.
+    """
     try:
         rule = registry.get(name)
     except RuleNotFoundError:
         raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
     sql_errors = _sql_errors_for_original_sql(settings, rule.original_sql)
-    return _rule_to_response(rule, sql_errors=sql_errors)
+    return _rule_to_response(
+        rule, sql_errors=sql_errors, source=_resolved(rule.source, rule.source_table, sources)
+    )
 
 
 @router.put(
@@ -574,14 +690,17 @@ def update_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    sources: SourceReg,
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
 ):
     """Replace a detection rule (re-runs creation pipeline, preserves created_at).
 
-    The replacement is written as SQL or as a ``condition``, as on create, and a
-    rule replaced with SQL no longer carries a condition.
+    The replacement is written as SQL, a ``where_clause`` or a ``condition``, as on
+    create, and a rule replaced with SQL or a WHERE no longer carries a condition. With
+    no ``source`` in the body the stored one stands, read as the registered source its
+    table names when it names none. Only a source the body sets or changes must be registered.
 
     A replacement the hunt runner could not compile is refused with 422 and the
     stored rule is left as it was. A production+team write is routed to a review
@@ -595,15 +714,22 @@ def update_rule(
 
     from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
-    service = _rule_service(settings)
+    # Only a source the request sets or changes must be registered, so a stored rule stays editable.
+    changes_source = body.source is not None and body.source != existing.source
+    service = _rule_service(settings, sources if changes_source else None)
     effective_display = body.display_name if body.display_name is not None else existing.name
-    effective_source = body.source if body.source is not None else existing.source
+    effective_source = (
+        body.source
+        if body.source is not None
+        else _resolved(existing.source, existing.source_table, sources)
+    )
     effective_hunt = body.hunt_name if body.hunt_name is not None else existing.hunt_name
     svc_request = SvcRequest(
         name=effective_display,
         severity=body.severity,
         source_type="raw",
         user_sql=body.user_sql,
+        where_clause=body.where_clause,
         condition=body.condition,
         cel_filter=body.cel_filter,
         hunt_name=effective_hunt,
@@ -656,15 +782,57 @@ def delete_rule(
 # -- Helpers --------------------------------------------------
 
 
-def _rule_service(settings: Settings):
-    """The creation service every rule check and save runs through."""
-    from dfe_engine.hunts.rule_creation_service import RuleCreationService
-    from dfe_engine.settings import get_clickhouse_config
+def _rule_service(settings: Settings, sources: Any = None):
+    """The creation service every rule check and save runs through.
 
-    return RuleCreationService(
-        ch_config=get_clickhouse_config(settings),
-        hunts=settings.hunts,
-        data_database=settings.clickhouse.effective_data_database,
+    Args:
+        settings: The engine settings.
+        sources: The source registry. With it a rule naming a label it does not carry is refused.
+    """
+    return service_from_settings(
+        settings, is_source=source_check(sources) if sources is not None else None
+    )
+
+
+def _resolved(source: str | None, source_table: str | None, sources: Any) -> str | None:
+    """The registered source a stored rule reads, else the source it stored."""
+    if sources is None:
+        return source
+    return resolved_source(source, source_table, source_check(sources)) or source
+
+
+def _with_resolved_sources(rows: list[dict], sources: Any) -> list[dict]:
+    """The registry's rows, each under the registered source it reads."""
+    return [
+        {**row, "source": _resolved(row.get("source"), row.get("source_table"), sources)}
+        for row in rows
+    ]
+
+
+def _read_select(sql: str, settings: Settings, sources: Any) -> RuleImport:
+    """Read a SELECT into a rule's fields, or answer 422 ``import_refused`` with the reason."""
+    try:
+        return import_select(
+            sql,
+            is_source=source_check(sources),
+            data_database=settings.clickhouse.effective_data_database,
+        )
+    except ImportRefusedError as exc:
+        raise ProblemError(422, str(exc), code=ErrorCode.IMPORT_REFUSED) from exc
+
+
+def _dropped(part: DroppedPart) -> DroppedPartResponse:
+    return DroppedPartResponse(kind=part.kind, text=part.text)
+
+
+def _import_response(imported: RuleImport) -> RuleImportResponse:
+    return RuleImportResponse(
+        source=imported.source,
+        needs_source=imported.source is None,
+        from_table=imported.from_table,
+        where_clause=imported.where_clause,
+        dropped=[_dropped(part) for part in imported.dropped],
+        warnings=imported.warnings,
     )
 
 
@@ -719,8 +887,13 @@ def _rule_to_response(
     *,
     sql_errors: list[SqlValidationError] | None = None,
     volume_warnings: list[str] | None = None,
+    source: str | None = None,
 ) -> RuleResponse:
-    """A rule as the API returns it, with the create-time volume reading beside its stored warnings."""
+    """A rule as the API returns it, with the create-time readings beside its stored warnings.
+
+    ``source`` overrides the stored one, which a rule saved before sources were registered
+    takes from its table.
+    """
     return RuleResponse(
         name=rule.rule_id,
         display_name=rule.name,
@@ -732,7 +905,7 @@ def _rule_to_response(
         condition=rule.condition,
         original_sql=rule.original_sql,
         hunt_name=rule.hunt_name,
-        source=rule.source,
+        source=source if source is not None else rule.source,
         warnings=[*rule.warnings, *(volume_warnings or [])],
         sql_errors=sql_errors or [],
         created_at=rule.created_at,
@@ -824,7 +997,9 @@ def _build_create_response(result) -> RuleCreateResponse:
     sql_errors = _map_sql_errors(result.sql_errors or [])
     return RuleCreateResponse(
         rule=_rule_to_response(
-            result.rule, sql_errors=sql_errors, volume_warnings=result.volume_warnings
+            result.rule,
+            sql_errors=sql_errors,
+            volume_warnings=[*result.volume_warnings, *result.json_path_warnings],
         ),
         sanitize_summary=result.sanitize_summary or {},
         sql_errors=sql_errors,

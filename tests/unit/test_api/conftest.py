@@ -113,6 +113,25 @@ def customer_orgs(api_settings: DFESettings) -> tuple[str, ...]:
     return CUSTOMER_ORGS
 
 
+# The sources the rule tests save against, beside the seeded landing source `main`.
+RULE_SOURCES = ("windows-audit", "events", "cisco-ios")
+
+
+@pytest.fixture
+def rule_sources(client: TestClient) -> tuple[str, ...]:
+    """Register the sources a rule write must name. Depends on ``client``, which builds the registry."""
+    for name in RULE_SOURCES:
+        _registries["source"].save_source(
+            {
+                "source": name,
+                "enabled": True,
+                "match": {"field": "tags.collector.type", "value": name},
+                "schema": {"engine": "MergeTree"},
+            }
+        )
+    return RULE_SOURCES
+
+
 @pytest.fixture
 def certutil_rule(client: TestClient, api_settings: DFESettings) -> None:
     """Store the ``certutil`` rule file, which a hunt write refuses to name until it exists."""
