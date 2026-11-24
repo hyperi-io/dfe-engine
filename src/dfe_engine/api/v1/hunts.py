@@ -41,6 +41,7 @@ from dfe_engine.api.deps import (
     require_action,
     require_platform_action,
 )
+from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
@@ -53,7 +54,11 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
-from dfe_engine.hunts.rule_names import missing_rules
+from dfe_engine.hunts.hunt_target_check import DETECTION_TABLE
+from dfe_engine.hunts.rule_compiler import RuleTables, detection_clause, rule_tables
+from dfe_engine.hunts.rule_creation_service import service_from_settings
+from dfe_engine.hunts.rule_names import RuleNameError, missing_rules, rule_file
+from dfe_engine.hunts.rule_rewriter import RuleRewriter
 from dfe_engine.hunts.run_status import (
     RunStatus,
     clear_auto_disable,
@@ -65,6 +70,7 @@ from dfe_engine.hunts.spec_loader import interval_seconds_for
 from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
 from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
+from dfe_engine.yaml_utils import YAMLError, yaml_load
 
 
 def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
@@ -163,6 +169,80 @@ def _validate_hunt_config(
         raise ProblemError(422, f"Not a stored rule: {listed}", code="unknown_rule") from exc
     except ValueError as exc:
         raise ProblemError(422, str(exc), code="validation_error") from exc
+
+
+def _runnable_rules(
+    config: dict[str, Any], settings: Any, rules: Any
+) -> list[tuple[str, str, RuleTables]]:
+    """Each stored rule the hunt names, with its WHERE and its tables as the runner resolves them.
+
+    A rule with no file yet, one the validator already refused, or one the runner resolves
+    to no source or target is left out, since the runner skips it and logs why.
+    """
+    data_database = settings.clickhouse.effective_data_database
+    rewriter = RuleRewriter()
+    directory = _rules_dir(settings, rules)
+    runnable: list[tuple[str, str, RuleTables]] = []
+    for entry in config.get("rules", []):
+        name = str(entry["rule_name"])
+        try:
+            path = rule_file(directory, name, ".yaml")
+            payload = yaml_load(path) if path.is_file() else None
+        except RuleNameError, YAMLError, UnicodeDecodeError, OSError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        where, rule_db, rule_table = detection_clause(payload, rewriter)
+        try:
+            tables = rule_tables(
+                entry,
+                rule_db,
+                rule_table,
+                hunt_source=str(config.get("global_source_table_name") or ""),
+                hunt_target=str(config.get("global_target_table_name") or ""),
+                default_target=f"{data_database}.{DETECTION_TABLE}",
+                default_database=data_database,
+            )
+        except ValueError:
+            continue
+        runnable.append((name, where, tables))
+    return runnable
+
+
+def _check_hunt_will_run(config: dict[str, Any], settings: Any, rules: Any) -> None:
+    """Refuse a hunt the runner could not run.
+
+    Each stored rule passes the query check a save runs against the table the runner reads
+    for it, and each results table a rule writes to is held to the columns the runner's
+    INSERT names. Nothing is checked against ClickHouse where none is configured or reachable.
+
+    Raises:
+        ProblemError: 422 ``invalid_target`` for a table the INSERT does not fit, and 422
+            ``invalid_sql`` for a rule ClickHouse cannot run.
+    """
+    service = service_from_settings(settings)
+    runnable = _runnable_rules(config, settings, rules)
+    targets = dict.fromkeys((tables.target_db, tables.target_table) for _, _, tables in runnable)
+    reasons = [
+        reason for database, table in targets if (reason := service.target_error(database, table))
+    ]
+    if reasons:
+        raise ProblemError(
+            422, "Hunt not saved: " + "; ".join(reasons), code=ErrorCode.INVALID_TARGET
+        )
+    problems: list[dict[str, Any]] = []
+    for name, where, tables in runnable:
+        for error in service.check_stored(tables.source_db, tables.source_table, where):
+            entry_error = error.model_dump(exclude_none=True)
+            entry_error["message"] = f"rule '{name}': {error.message}"
+            problems.append(entry_error)
+    if problems:
+        raise ProblemError(
+            422,
+            "Hunt not saved: " + "; ".join(p["message"] for p in problems),
+            code=ErrorCode.INVALID_SQL,
+            sql_errors=problems,
+        )
 
 
 router = APIRouter(prefix="/hunts", tags=["hunts"], dependencies=[WRITE_TURN])
@@ -692,6 +772,10 @@ def create_hunt(
 ) -> HuntDetailResponse:
     """Create a new hunt configuration YAML.
 
+    Each rule the hunt names passes the query check a rule save runs, and the results
+    table is checked against the columns the runner writes (422 ``invalid_sql``,
+    ``invalid_target``).
+
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
     ``unknown_org`` when a customer names no registered org.
@@ -700,6 +784,7 @@ def create_hunt(
         raise ProblemError(409, f"Hunt '{body.name}' already exists", code="conflict")
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings, rules)
+    _check_hunt_will_run(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(body.name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
@@ -756,6 +841,8 @@ def update_hunt(
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration, resolving its customers afresh.
 
+    The rule and results-table checks of the create apply.
+
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
     ``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a
@@ -771,6 +858,7 @@ def update_hunt(
     if body.enabled is None and "enabled" in stored:
         config["enabled"] = stored["enabled"]
     _validate_hunt_config(config, settings, rules, _held_rules(stored))
+    _check_hunt_will_run(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
     _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)

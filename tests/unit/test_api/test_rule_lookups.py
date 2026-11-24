@@ -16,7 +16,9 @@ import pytest
 
 from dfe_engine.settings import DFESettings
 
-LOOKUP = "SELECT * FROM dfe.main WHERE process_name IN (SELECT ioc FROM threat.iocs)"
+pytestmark = pytest.mark.usefixtures("rule_sources")
+
+LOOKUP = "process_name IN (SELECT ioc FROM threat.iocs)"
 
 
 @pytest.fixture
@@ -26,12 +28,12 @@ def api_settings(api_settings: DFESettings) -> DFESettings:
     return api_settings.model_copy(update={"hunts": hunts})
 
 
-def _payload(name: str, user_sql: str) -> dict:
+def _payload(name: str, where_clause: str) -> dict:
     return {
         "name": name,
         "display_name": "IOC match",
         "severity": "high",
-        "user_sql": user_sql,
+        "where_clause": where_clause,
         "source": "windows-audit",
     }
 
@@ -49,7 +51,7 @@ def _payload(name: str, user_sql: str) -> dict:
 def test_a_lookup_in_a_listed_database_is_saved(client, admin_headers, condition):
     resp = client.post(
         "/api/v1/rules",
-        json=_payload("ioc_match", f"SELECT * FROM dfe.main WHERE {condition}"),
+        json=_payload("ioc_match", condition),
         headers=admin_headers,
     )
 
@@ -76,7 +78,7 @@ def test_a_lookup_past_the_listed_databases_is_refused_and_never_written(
 ):
     resp = client.post(
         "/api/v1/rules",
-        json=_payload("ioc_match", f"SELECT * FROM dfe.main WHERE {condition}"),
+        json=_payload("ioc_match", condition),
         headers=admin_headers,
     )
 
@@ -105,10 +107,11 @@ def test_an_update_to_an_unlisted_database_keeps_the_stored_lookup(client, admin
 
 
 def test_validate_takes_the_listed_databases_too(client, admin_headers):
-    listed = client.post("/api/v1/rules/validate", json={"sql": LOOKUP}, headers=admin_headers)
+    sql = f"SELECT * FROM dfe.main WHERE {LOOKUP}"
+    listed = client.post("/api/v1/rules/validate", json={"sql": sql}, headers=admin_headers)
     unlisted = client.post(
         "/api/v1/rules/validate",
-        json={"sql": LOOKUP.replace("threat.iocs", "intel.iocs")},
+        json={"sql": sql.replace("threat.iocs", "intel.iocs")},
         headers=admin_headers,
     )
 

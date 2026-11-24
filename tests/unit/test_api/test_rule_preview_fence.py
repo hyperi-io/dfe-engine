@@ -68,7 +68,7 @@ def acme_hunt(client, admin_headers) -> None:
 
 
 def _rule(name: str, **extra) -> dict:
-    return {"name": name, "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'", **extra}
+    return {"name": name, "source": "main", "where_clause": "severity = 'high'", **extra}
 
 
 _ACME = "_org_id IN ('acme-1')"

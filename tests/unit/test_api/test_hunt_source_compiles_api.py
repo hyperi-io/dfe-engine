@@ -21,7 +21,7 @@ from dfe_engine.hunts.rule_registry import RuleRegistry
 from dfe_engine.hunts.schedule_publish import spec_sources
 from dfe_engine.hunts.spec_loader import load_specs
 
-pytestmark = pytest.mark.usefixtures("customer_orgs")
+pytestmark = pytest.mark.usefixtures("customer_orgs", "rule_sources")
 
 _HUNT = {
     "display_name": "Certutil Abuse",
@@ -41,7 +41,7 @@ def test_a_hunt_over_a_hyphenated_source_saves_and_compiles(client, admin_header
         "/api/v1/rules",
         json={
             "name": "certutil",
-            "user_sql": "SELECT * FROM dfe.`cisco-ios` WHERE process_name = 'certutil.exe'",
+            "where_clause": "process_name = 'certutil.exe'",
             "source": "cisco-ios",
         },
         headers=admin_headers,

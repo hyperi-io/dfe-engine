@@ -20,7 +20,7 @@ from dfe_engine.source.models import validate_source_name
 
 
 def _rule_name(name: str) -> None:
-    RuleCreateRequest(name=name, user_sql="SELECT 1 FROM dfe.main WHERE a = 1")
+    RuleCreateRequest(name=name, source="main", where_clause="a = 1")
 
 
 def _hunt_name(name: str) -> None:
