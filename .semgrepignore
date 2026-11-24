@@ -1,0 +1,4 @@
+:include .gitignore
+
+# A Jinja template, not YAML: semgrep's YAML parser fails on its {% %} tags.
+src/dfe_engine/pipeline/pipeline_template.yaml
