@@ -58,6 +58,7 @@ from dfe_engine.hunts.hunt_target_check import DETECTION_TABLE
 from dfe_engine.hunts.rule_compiler import RuleTables, detection_clause, rule_tables
 from dfe_engine.hunts.rule_creation_service import service_from_settings
 from dfe_engine.hunts.rule_names import RuleNameError, missing_rules, rule_file
+from dfe_engine.hunts.rule_registry import RuleNotFoundError
 from dfe_engine.hunts.rule_rewriter import RuleRewriter
 from dfe_engine.hunts.run_status import (
     RunStatus,
@@ -333,9 +334,20 @@ class HuntSummary(BaseModel):
 
 
 class HuntRuleEntry(BaseModel):
-    """Per-rule hunt configuration as stored in YAML."""
+    """One rule a hunt runs, as the hunt YAML names it.
+
+    ``description`` is read from the stored rule when the detail is built. It is
+    not written back onto the hunt.
+    """
 
     rule_name: str
+    description: str | None = Field(
+        default=None,
+        description=(
+            "What the stored rule detects. Absent when the rule file is missing "
+            "or the rule has no description"
+        ),
+    )
     target_table_name: str | None = None
     source: str | None = Field(
         default=None,
@@ -682,6 +694,22 @@ def _flag_missing_rules(detail: HuntDetailResponse, rules_dir: Any) -> HuntDetai
     return detail
 
 
+def _attach_rule_descriptions(detail: HuntDetailResponse, rules: Any) -> HuntDetailResponse:
+    """Copy each named rule's description onto the detail. A missing file stays blank."""
+    if rules is None:
+        return detail
+    described: list[HuntRuleEntry] = []
+    for entry in detail.rules:
+        description = None
+        try:
+            description = rules.get(entry.rule_name).description or None
+        except RuleNotFoundError:
+            description = None
+        described.append(entry.model_copy(update={"description": description}))
+    detail.rules = described
+    return detail
+
+
 # -- Endpoints -----------------------------------------------
 
 
@@ -806,8 +834,11 @@ def create_hunt(
     outcome = registry.save(body.name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", body.name, "created", review_audit_detail(outcome))
-    return _flag_missing_rules(
-        HuntDetailResponse.from_stored_config(body.name, config), _rules_dir(settings, rules)
+    return _attach_rule_descriptions(
+        _flag_missing_rules(
+            HuntDetailResponse.from_stored_config(body.name, config), _rules_dir(settings, rules)
+        ),
+        rules,
     )
 
 
@@ -825,14 +856,19 @@ def get_hunt(
 ) -> HuntDetailResponse:
     """Get full hunt configuration by file name, with the runner's stop on it if any.
 
-    A hunt naming a rule with no stored rule file carries ``missing_rules`` and an ``error``.
+    Each rule item carries the stored rule's description. A hunt naming a rule with
+    no stored rule file carries ``missing_rules`` and an ``error``, and that item's
+    description is absent.
     """
     try:
         config = registry.get(name)
     except HuntConfigNotFoundError:
         raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
-    detail = _flag_missing_rules(
-        HuntDetailResponse.from_stored_config(name, config), _rules_dir(settings, rules)
+    detail = _attach_rule_descriptions(
+        _flag_missing_rules(
+            HuntDetailResponse.from_stored_config(name, config), _rules_dir(settings, rules)
+        ),
+        rules,
     )
     run = _run_status_for([name], int(time.time())).get(name)
     if run is not None:
@@ -884,8 +920,11 @@ def update_hunt(
     _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
-    return _flag_missing_rules(
-        HuntDetailResponse.from_stored_config(name, config), _rules_dir(settings, rules)
+    return _attach_rule_descriptions(
+        _flag_missing_rules(
+            HuntDetailResponse.from_stored_config(name, config), _rules_dir(settings, rules)
+        ),
+        rules,
     )
 
 
