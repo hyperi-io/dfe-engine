@@ -46,7 +46,6 @@ from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.clickhouse.quoting import plain_source_name
 from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.customers import CUSTOMER_TENANT_IDS, hunt_customers
@@ -55,8 +54,8 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
-from dfe_engine.hunts.hunt_target_check import resolve_target
-from dfe_engine.hunts.rule_compiler import detection_clause
+from dfe_engine.hunts.hunt_target_check import DETECTION_TABLE
+from dfe_engine.hunts.rule_compiler import RuleTables, detection_clause, rule_tables
 from dfe_engine.hunts.rule_creation_service import service_from_settings
 from dfe_engine.hunts.rule_names import RuleNameError, missing_rules, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter
@@ -68,7 +67,7 @@ from dfe_engine.hunts.run_status import (
 )
 from dfe_engine.hunts.schedule import next_due, read_schedule
 from dfe_engine.hunts.spec_loader import interval_seconds_for
-from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError, rule_source
+from dfe_engine.hunts.validator import HuntValidator, UnknownRuleError
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
 from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
 from dfe_engine.yaml_utils import YAMLError, yaml_load
@@ -172,17 +171,18 @@ def _validate_hunt_config(
         raise ProblemError(422, str(exc), code="validation_error") from exc
 
 
-def _stored_rule_errors(
-    config: dict[str, Any], settings: Any, rules: Any, service: Any
-) -> list[dict[str, Any]]:
-    """Every error the runner would meet running each stored rule the hunt names.
+def _runnable_rules(
+    config: dict[str, Any], settings: Any, rules: Any
+) -> list[tuple[str, str, RuleTables]]:
+    """Each stored rule the hunt names, with its WHERE and its tables as the runner resolves them.
 
-    A rule with no file yet, or one the validator already refused, is left to it.
+    A rule with no file yet, one the validator already refused, or one the runner resolves
+    to no source or target is left out, since the runner skips it and logs why.
     """
     data_database = settings.clickhouse.effective_data_database
     rewriter = RuleRewriter()
     directory = _rules_dir(settings, rules)
-    problems: list[dict[str, Any]] = []
+    runnable: list[tuple[str, str, RuleTables]] = []
     for entry in config.get("rules", []):
         name = str(entry["rule_name"])
         try:
@@ -192,38 +192,50 @@ def _stored_rule_errors(
             continue
         if not isinstance(payload, dict):
             continue
-        where, source_db, source_table = detection_clause(payload, rewriter)
-        source = rule_source(source_db, source_table) or str(
-            config.get("global_source_table_name") or ""
-        )
+        where, rule_db, rule_table = detection_clause(payload, rewriter)
         try:
-            database, table = plain_source_name(source) if source.strip() else ("", "")
+            tables = rule_tables(
+                entry,
+                rule_db,
+                rule_table,
+                hunt_source=str(config.get("global_source_table_name") or ""),
+                hunt_target=str(config.get("global_target_table_name") or ""),
+                default_target=f"{data_database}.{DETECTION_TABLE}",
+                default_database=data_database,
+            )
         except ValueError:
             continue
-        for error in service.check_stored(database or data_database, table, where):
-            entry_error = error.model_dump(exclude_none=True)
-            entry_error["message"] = f"rule '{name}': {error.message}"
-            problems.append(entry_error)
-    return problems
+        runnable.append((name, where, tables))
+    return runnable
 
 
 def _check_hunt_will_run(config: dict[str, Any], settings: Any, rules: Any) -> None:
     """Refuse a hunt the runner could not run.
 
-    Each stored rule passes the query check a save runs, and the results table is held to
-    the columns the runner's INSERT names. Nothing is checked against ClickHouse where none
-    is configured or reachable.
+    Each stored rule passes the query check a save runs against the table the runner reads
+    for it, and each results table a rule writes to is held to the columns the runner's
+    INSERT names. Nothing is checked against ClickHouse where none is configured or reachable.
 
     Raises:
         ProblemError: 422 ``invalid_target`` for a table the INSERT does not fit, and 422
             ``invalid_sql`` for a rule ClickHouse cannot run.
     """
-    database, table = resolve_target(config, settings.clickhouse.effective_data_database)
     service = service_from_settings(settings)
-    reason = service.target_error(database, table)
-    if reason is not None:
-        raise ProblemError(422, f"Hunt not saved: {reason}", code=ErrorCode.INVALID_TARGET)
-    problems = _stored_rule_errors(config, settings, rules, service)
+    runnable = _runnable_rules(config, settings, rules)
+    targets = dict.fromkeys((tables.target_db, tables.target_table) for _, _, tables in runnable)
+    reasons = [
+        reason for database, table in targets if (reason := service.target_error(database, table))
+    ]
+    if reasons:
+        raise ProblemError(
+            422, "Hunt not saved: " + "; ".join(reasons), code=ErrorCode.INVALID_TARGET
+        )
+    problems: list[dict[str, Any]] = []
+    for name, where, tables in runnable:
+        for error in service.check_stored(tables.source_db, tables.source_table, where):
+            entry_error = error.model_dump(exclude_none=True)
+            entry_error["message"] = f"rule '{name}': {error.message}"
+            problems.append(entry_error)
     if problems:
         raise ProblemError(
             422,

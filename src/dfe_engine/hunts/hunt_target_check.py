@@ -7,41 +7,19 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Where a hunt writes its detections, and whether that table takes what the runner inserts.
 
-A hunt writes to ``<data database>.detection`` unless it names a results table. A table
-missing a column the runner's INSERT names fails at the first run, not at the save, so the
-save reads the live columns from ``system.columns`` and refuses the gap.
+A hunt writes to ``<data database>.detection`` unless it or a rule entry names a results
+table. A table missing a column the runner's INSERT names fails at the first run, not at the
+save, so the save reads the live columns from ``system.columns`` and refuses the gap.
 """
 
 from typing import Any
 
-from dfe_engine.clickhouse.quoting import plain_table_name
 from dfe_engine.schema.applier import live_columns
 
 from .hunt_output import HuntResultSchema
 
 DETECTION_TABLE = "detection"
 """The core table detections land in when a hunt names no other."""
-
-
-def resolve_target(config: dict[str, Any], data_database: str) -> tuple[str, str]:
-    """The database and table a hunt writes to.
-
-    Args:
-        config: The hunt's stored configuration.
-        data_database: The data database, which an unqualified target and the default
-            both land in.
-
-    Returns:
-        ``(database, table)``.
-
-    Raises:
-        ValueError: The configured target is not a plain ``table`` or ``database.table``.
-    """
-    target = str(config.get("global_target_table_name") or "").strip()
-    if not target:
-        return data_database, DETECTION_TABLE
-    database, table = plain_table_name(target)
-    return database or data_database, table
 
 
 def missing_columns(client: Any, database: str, table: str) -> list[str] | None:

@@ -17,7 +17,9 @@ from types import SimpleNamespace
 
 import pytest
 from common.hunt_files import store_rule_file
+from scalo.api import ProblemError
 
+from dfe_engine.api.v1.hunts import _check_hunt_will_run
 from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 
@@ -44,11 +46,16 @@ class _ClickHouse:
     def __init__(self) -> None:
         self.tables: dict[tuple[str, str], list[str]] = {("dfe", "detection"): _INSERT_COLUMNS}
         self.plan_error: Exception | None = None
+        self.plan_refused_table: str | None = None
         self.unreadable = False
 
     def command(self, cmd: str, *_args, **_kwargs) -> str:
-        """Answer EXPLAIN PLAN, refusing it when ``plan_error`` is set."""
-        if cmd.startswith("EXPLAIN PLAN") and self.plan_error is not None:
+        """Answer EXPLAIN PLAN, refusing it when ``plan_error`` is set.
+
+        With ``plan_refused_table`` set, only a plan of that table is refused.
+        """
+        refused = self.plan_refused_table is None or self.plan_refused_table in cmd
+        if cmd.startswith("EXPLAIN PLAN") and self.plan_error is not None and refused:
             raise self.plan_error
         return ""
 
@@ -207,3 +214,75 @@ class TestEachRuleHasItsQueryChecked:
 
         messages = [error["message"] for error in resp.json()["sql_errors"]]
         assert [m.split(":")[0] for m in messages] == ["rule 'certutil'", "rule 'second'"]
+
+
+def _plant_rule(api_settings, name: str, source: str | None) -> None:
+    """Store a rule file as the deploy repo holds one, reading *source* when it names one."""
+    rules_dir = Path(api_settings.hunts.rules_dir)
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    lines = [f"display_name: {name}", "where_clause: severity = 'high'"]
+    if source is not None:
+        database, table = source.split(".")
+        lines += [f"source_db: {database}", f"source_table: {table}"]
+    (rules_dir / f"{name}.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
+def _yaml_hunt(entry: dict, **changes) -> dict:
+    """A stored hunt config as a YAML hunt holds it, with one per-rule entry."""
+    return {**_hunt(**changes), "rules": [entry]}
+
+
+class TestEachRuleIsCheckedWhereTheRunnerReadsAndWrites:
+    """The save checks each rule's own source and target, as the runner resolves them."""
+
+    def test_a_per_rule_source_is_read_in_place_of_a_broken_global_one(
+        self, client, clickhouse, api_settings
+    ):
+        _plant_rule(api_settings, "unsourced", None)
+        clickhouse.plan_error = _UNKNOWN_COLUMN
+        clickhouse.plan_refused_table = "broken"
+        config = _yaml_hunt(
+            {"rule_name": "unsourced", "source_table_name": "dfe.main"},
+            global_source_table_name="dfe.broken",
+        )
+
+        _check_hunt_will_run(config, api_settings, None)
+
+    def test_a_per_rule_target_is_checked_in_place_of_a_missing_default(
+        self, client, clickhouse, api_settings
+    ):
+        _plant_rule(api_settings, "targeted", "dfe.main")
+        clickhouse.tables = {("dfe", "alerts"): _INSERT_COLUMNS}
+
+        _check_hunt_will_run(
+            _yaml_hunt({"rule_name": "targeted", "target_table_name": "alerts"}),
+            api_settings,
+            None,
+        )
+
+    def test_a_broken_per_rule_target_is_refused(self, client, clickhouse, api_settings):
+        _plant_rule(api_settings, "targeted", "dfe.main")
+
+        with pytest.raises(ProblemError) as refused:
+            _check_hunt_will_run(
+                _yaml_hunt({"rule_name": "targeted", "target_table_name": "missing"}),
+                api_settings,
+                None,
+            )
+
+        assert refused.value.status == 422
+        assert "dfe.missing does not exist" in str(refused.value)
+
+    def test_an_unqualified_target_is_checked_beside_the_rule_source(
+        self, client, admin_headers, clickhouse, api_settings
+    ):
+        _plant_rule(api_settings, "elsewhere", "other.events")
+        clickhouse.tables = {("other", "alerts"): _INSERT_COLUMNS}
+
+        resp = client.post(
+            HUNTS,
+            json=_hunt(rules=["elsewhere"], global_target_table_name="alerts"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
