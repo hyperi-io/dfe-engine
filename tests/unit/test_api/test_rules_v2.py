@@ -1,9 +1,13 @@
 """The v2 rule contract: a description, and either a CEL filter or a WHERE fragment."""
 
+from types import SimpleNamespace
+from typing import cast
+
 import pytest
 from pydantic import ValidationError
 from scalo.api import ProblemError
 
+from dfe_engine.api.deps import AuthContext
 from dfe_engine.api.v1.rulesV2 import (
     RuleV2CreateRequest,
     RuleV2FromHyperdxRequest,
@@ -19,6 +23,7 @@ from dfe_engine.api.v1.rulesV2 import (
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.settings import DFESettings
 from dfe_engine.yaml_utils import yaml_load
 
 
@@ -30,19 +35,31 @@ class _Settings:
     hunts = _Hunts()
 
 
+def _settings() -> DFESettings:
+    """A stand-in carrying only the hunt fields these paths read."""
+    return cast(DFESettings, _Settings())
+
+
+def _nobody() -> AuthContext:
+    """These paths never read the caller."""
+    return cast(AuthContext, None)
+
+
 def test_validate_fills_the_source_placeholder_with_the_landing_table():
     sql = "SELECT * FROM {{source}} WHERE severity = 'high'"
-    deployment = type("Settings", (), {})()
-    deployment.clickhouse = type("ClickHouse", (), {"effective_data_database": "tenant"})()
+    deployment = cast(
+        DFESettings,
+        SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="tenant")),
+    )
     assert (
         _with_source_table(sql, deployment)
         == "SELECT * FROM `tenant`.`main` WHERE severity = 'high'"
     )
     assert "{{source}}" in _with_source_table(
-        "SELECT * FROM dfe.main WHERE msg = '{{source}}'", _Settings()
+        "SELECT * FROM dfe.main WHERE msg = '{{source}}'", _settings()
     )
 
-    result = validate_rule_sql(SqlValidationRequest(sql=sql), user=None, settings=_Settings())
+    result = validate_rule_sql(SqlValidationRequest(sql=sql), user=_nobody(), settings=_settings())
 
     assert result.valid is True
     assert result.errors == []
@@ -65,9 +82,9 @@ def test_a_source_placeholder_is_not_planned_against_the_landing_table(monkeypat
     monkeypatch.setattr(RuleCreationService, "_query_client", lambda _self: _ClickHouse())
     sql = "SELECT * FROM {{source}} WHERE test = 'test'"
 
-    checked = validate_rule_sql(SqlValidationRequest(sql=sql), user=None, settings=_Settings())
+    checked = validate_rule_sql(SqlValidationRequest(sql=sql), user=_nobody(), settings=_settings())
     rule, errors = _rule_from_write(
-        _Settings(),
+        _settings(),
         RuleV2CreateRequest(name="placeholder", user_sql=sql),
         rule_id="placeholder",
         display_name="Placeholder",
@@ -80,8 +97,8 @@ def test_a_source_placeholder_is_not_planned_against_the_landing_table(monkeypat
 
     named = validate_rule_sql(
         SqlValidationRequest(sql="SELECT * FROM dfe.main WHERE test = 'test'"),
-        user=None,
-        settings=_Settings(),
+        user=_nobody(),
+        settings=_settings(),
     )
     assert named.valid is False
     assert any("cannot plan" in error.message for error in named.errors)
@@ -99,7 +116,7 @@ def test_create_accepts_a_where_fragment_and_an_optional_description():
     assert body.cel_filter is None
 
     rule, errors = _rule_from_write(
-        _Settings(),
+        _settings(),
         body,
         rule_id="certutil",
         display_name="Certutil",
@@ -119,7 +136,7 @@ def test_create_accepts_a_where_fragment_and_an_optional_description():
 def test_create_accepts_a_cel_filter_without_sql():
     body = RuleV2CreateRequest(name="high_value", cel_filter='severity == "critical"')
     rule, errors = _rule_from_write(
-        _Settings(),
+        _settings(),
         body,
         rule_id="high_value",
         display_name="High Value",
@@ -160,17 +177,17 @@ def test_create_refuses_a_full_query_and_the_removed_fields():
             where_clause="SELECT * FROM dfe.main WHERE severity = 'high'",
         )
     with pytest.raises(ValidationError):
-        RuleV2CreateRequest(name="sourced", where_clause="severity = 'high'", source="windows")
+        RuleV2CreateRequest(name="sourced", where_clause="severity = 'high'", source="windows")  # ty: ignore[unknown-argument]  # the removed field is the point of the test
     with pytest.raises(ValidationError):
-        RuleV2CreateRequest(name="hunted", where_clause="severity = 'high'", hunt_name="windows")
+        RuleV2CreateRequest(name="hunted", where_clause="severity = 'high'", hunt_name="windows")  # ty: ignore[unknown-argument]  # the removed field is the point of the test
 
 
 def test_create_accepts_the_source_placeholder_validate_accepts():
     sql = "SELECT *\nFROM {{source}} WHERE severity = 'high'"
     body = RuleV2CreateRequest(name="high", user_sql=sql)
-    checked = validate_rule_sql(SqlValidationRequest(sql=sql), user=None, settings=_Settings())
+    checked = validate_rule_sql(SqlValidationRequest(sql=sql), user=_nobody(), settings=_settings())
     rule, errors = _rule_from_write(
-        _Settings(), body, rule_id="high", display_name="High", description=None
+        _settings(), body, rule_id="high", display_name="High", description=None
     )
 
     assert checked.valid is True
@@ -188,7 +205,7 @@ def test_user_sql_keeps_the_where_and_drops_the_table():
     )
     assert body.source_type == "raw"
     rule, errors = _rule_from_write(
-        _Settings(), body, rule_id="high", display_name="High", description=None
+        _settings(), body, rule_id="high", display_name="High", description=None
     )
     assert errors == []
     assert rule.where_clause == "severity = 'high'"
@@ -211,7 +228,7 @@ def test_hyperdx_user_sql_is_sanitized_to_the_where():
     )
     body = RuleV2CreateRequest(name="search", source_type="hyperdx", user_sql=rendered)
     rule, errors = _rule_from_write(
-        _Settings(), body, rule_id="search", display_name="Search", description="From Search"
+        _settings(), body, rule_id="search", display_name="Search", description="From Search"
     )
     assert errors == []
     assert "login_failure" in rule.where_clause
@@ -257,7 +274,7 @@ def test_match_compiles_like_a_source_match():
         },
     )
     rule, errors = _rule_from_write(
-        _Settings(),
+        _settings(),
         body,
         rule_id="certutil",
         display_name="Certutil",
@@ -280,7 +297,7 @@ def test_match_compiles_like_a_source_match():
 def test_a_tautology_is_refused_before_save():
     body = RuleV2CreateRequest(name="all", where_clause="1 = 1")
     rule, errors = _rule_from_write(
-        _Settings(), body, rule_id="all", display_name="All", description=None
+        _settings(), body, rule_id="all", display_name="All", description=None
     )
     assert errors == []
     with pytest.raises(ProblemError, match="matches every event"):
