@@ -27,7 +27,7 @@ The engine emits four receiver blocks, plus an `auth` block per bearer listener,
 ```yaml
 routing:
   default_source: main            # _source when no rule matches
-  default_org_id: default         # _org_id an unbound sender's records take
+  default_org_id: unassigned      # _org_id an unbound sender's records take
   topic_suffix: _land             # Topic derives as {_source}{topic_suffix}
   source_to_topic: {}             # Per-source topic overrides (rarely needed)
   source_org_id: disallow         # ingest.source_org_id: whether a sender's _org_id is kept
@@ -117,7 +117,7 @@ with no lookup at all:
 # The compiled loader block (dfe-loader RoutingConfig):
 routing:
   default_db: dfe                 # Database (or per-org via org_routes)
-  default_org_id: default         # Tenant for a record with no _org_id
+  default_org_id: unassigned      # Tenant for a record with no _org_id
   source_to_table: {}             # ACTIVE sources whose table name differs
 ```
 
