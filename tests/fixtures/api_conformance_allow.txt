@@ -87,6 +87,7 @@ dry-run POST /api/v1/rules-v2
 dry-run POST /api/v1/rules-v2/from-hyperdx
 dry-run POST /api/v1/rules-v2/preview
 dry-run POST /api/v1/rules-v2/validate
+dry-run POST /api/v1/rules-v2/{name}/run
 dry-run POST /api/v1/rules/from-hyperdx
 dry-run POST /api/v1/rules/import
 dry-run POST /api/v1/rules/preview
@@ -340,6 +341,7 @@ hierarchy POST /api/v1/rules-v2
 hierarchy POST /api/v1/rules-v2/from-hyperdx
 hierarchy POST /api/v1/rules-v2/preview
 hierarchy POST /api/v1/rules-v2/validate
+hierarchy POST /api/v1/rules-v2/{name}/run
 hierarchy POST /api/v1/rules/from-hyperdx
 hierarchy POST /api/v1/rules/import
 hierarchy POST /api/v1/rules/preview

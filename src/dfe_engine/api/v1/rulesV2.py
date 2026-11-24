@@ -6,6 +6,7 @@ POST   /api/v1/rules-v2              -> Create a rule
 GET    /api/v1/rules-v2/{name}    -> Rule detail
 PUT    /api/v1/rules-v2/{name}    -> Update rule
 DELETE /api/v1/rules-v2/{name}    -> Delete rule
+POST   /api/v1/rules-v2/{name}/run   -> Run one stored rule against a source, writing nothing
 POST   /api/v1/rules-v2/validate     -> Validate SQL without creating
 POST   /api/v1/rules-v2/preview      -> Compile a condition and check it as a save would, saving nothing
 
@@ -18,6 +19,8 @@ WHERE that detection compiles to.
 
 import functools
 import re
+import time
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 import sqlglot
@@ -35,7 +38,9 @@ from dfe_engine.api.deps import (
     HuntConfigReg,
     OptionalHuntConfigReg,
     RuleReg,
+    SchemaReg,
     Settings,
+    SourceReg,
     held_tenant_ids,
     require_action,
 )
@@ -267,6 +272,67 @@ class RulePreviewResponse(BaseModel):
         description="Why a save would be refused for matching every event, when it would",
     )
     cost_estimate: CostEstimate | None = None
+
+
+class RuleV2RunRequest(BaseModel):
+    """A source to run one stored rule against, and the window to count."""
+
+    model_config = {"extra": "forbid"}
+
+    source: str = Field(
+        min_length=1,
+        description="Source label whose rows the rule reads",
+    )
+    cost_window_minutes: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Lookback window in minutes the volume estimate and the run both use. "
+            "Absent or 0 uses the deployment's preview window."
+        ),
+    )
+
+
+class RuleV2RunResponse(BaseModel):
+    """One on-demand run of a stored rule. Nothing is written."""
+
+    source: str = Field(description="Source label the run read")
+    source_db: str = Field(description="Database the run read")
+    source_table: str = Field(description="Table the run read")
+    cost_window_minutes: int = Field(
+        description="Lookback window, in minutes, the estimate and the run both used"
+    )
+    cost_estimate: CostEstimate = Field(
+        description="Alert-volume estimate over that window on the source's rows"
+    )
+    sql_errors: list[SqlValidationError] = Field(
+        default_factory=list,
+        description=(
+            "Why the rule was not run, or the ClickHouse error when the SELECT failed. "
+            "Empty when the run finished"
+        ),
+    )
+    columns: list[str] = Field(
+        default_factory=list,
+        description="Column names in each result row. Empty when the run did not finish",
+    )
+    results: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Matching rows in the window, each a column name to value. At most the "
+            "deployment's detections-per-run cap. Empty when nothing matched or the run failed"
+        ),
+    )
+    execution_time_ms: float = Field(
+        description="How long the SELECT of matching rows took, in milliseconds. Zero when it was not run"
+    )
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the SELECT stopped at the detections-per-run cap, so more rows "
+            "matched than were returned"
+        ),
+    )
 
 
 class RuleV2Response(BaseModel):
@@ -635,6 +701,42 @@ def preview_rule(
         sql_errors=_save_blockers(result),
         matches_everything=result.matches_everything,
         cost_estimate=result.cost_estimate,
+    )
+
+
+@router.post(
+    "/{name}/run",
+    response_model=RuleV2RunResponse,
+    dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
+)
+def run_rule(
+    name: str,
+    body: RuleV2RunRequest,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+    sources: SourceReg,
+    schemas: SchemaReg,
+    request: Request,
+) -> RuleV2RunResponse:
+    """Run one stored rule against a source, writing nothing.
+
+    The source is read the way a sample of it is read: its own table when that
+    version is deployed, otherwise the landing table filtered to the source's
+    match. The volume estimate and the SELECT of matching rows share the
+    lookback window, and both are held to the orgs the caller may read. A
+    detection the hunt runner would refuse, or a SELECT ClickHouse rejects,
+    comes back with 200 and the reason in ``sql_errors``.
+    """
+    return _run_stored_rule(
+        name=name,
+        source_name=body.source,
+        cost_window_minutes=body.cost_window_minutes,
+        tenant_ids=held_tenant_ids(request, user, scopes_dict["rule_validate"]),
+        settings=settings,
+        registry=registry,
+        sources=sources,
+        schemas=schemas,
     )
 
 
@@ -1046,6 +1148,200 @@ def _where_errors(settings: Settings, where: str) -> list[SqlValidationError]:
             )
         )
     return errors
+
+
+def _cost_window(service, minutes: int | None) -> int:
+    """The lookback the volume estimate and the on-demand run both count over."""
+    window = service._hunts.detection_guard.preview_window_minutes
+    if minutes is not None and minutes > 0:
+        return minutes
+    return window
+
+
+def _unmeasured_cost(window: int, reason: str) -> CostEstimate:
+    """An estimate that was not counted, carrying why."""
+    return CostEstimate(window_minutes=window, warnings=[reason])
+
+
+def _json_cell(value: Any) -> Any:
+    """One ClickHouse value as JSON: dates as text, nested values walked."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, bytes | bytearray):
+        return bytes(value).decode("utf-8", "replace")
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, list | tuple):
+        return [_json_cell(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_cell(item) for key, item in value.items()}
+    return str(value)
+
+
+def _match_sql(match_rule, source_name: str) -> str:
+    """The landing-table filter for a source match, empty when the source owns its table.
+
+    Raises:
+        ProblemError: 422 when the match is a group or a negation no one-field filter holds.
+    """
+    from dfe_engine.api.v1.schemas import _match_query_kwargs
+    from dfe_engine.clickhouse.quoting import quote_literal
+    from dfe_engine.services.schema.json_promotion_service import match_condition
+
+    match = _match_query_kwargs(match_rule, source_name)
+    sql, params = match_condition(
+        match["match_field"],
+        match["match_value"],
+        match_operator=match["match_operator"],
+    )
+    value = params.get("match_value")
+    if value is not None:
+        sql = sql.replace("{match_value:String}", quote_literal(str(value)))
+    return sql
+
+
+def _source_read(source_name, sources, schemas, settings, client):
+    """The database, table, and match filter a source's rows are read through.
+
+    Raises:
+        ProblemError: 404 when the source is not registered, 422 when its match
+            cannot be expressed as a filter on the landing table.
+    """
+    from dfe_engine.api.v1.schemas import _discovery_target
+    from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
+    from dfe_engine.source.registry import SourceNotFoundError
+
+    try:
+        source = sources.get_source(source_name)
+    except SourceNotFoundError:
+        raise ProblemError(404, f"Source '{source_name}' not found", code="not_found") from None
+    clickhouse = getattr(settings, "clickhouse", None)
+    database = getattr(clickhouse, "effective_data_database", None) or "dfe"
+    version_id = source.runtime_version_id()
+    version = source.version(version_id)
+    table, match_rule, _columns = _discovery_target(
+        source, version, schemas, version_id=version_id, ch=client, db=database
+    )
+    try:
+        extra = _match_sql(match_rule, source.source)
+    except JsonPromotionError as exc:
+        raise ProblemError(
+            422, f"Source '{source_name}' cannot be filtered: {exc}", code="match_not_sampleable"
+        ) from exc
+    return database, table, extra
+
+
+def _run_stored_rule(
+    *,
+    name: str,
+    source_name: str,
+    cost_window_minutes: int | None,
+    tenant_ids: list[str] | None,
+    settings: Settings,
+    registry,
+    sources,
+    schemas,
+) -> RuleV2RunResponse:
+    """Estimate and run one stored rule against a source. Writes nothing."""
+    from clickhouse_connect.driver.exceptions import ClickHouseError
+    from scalo.resilience import ServiceUnavailable
+
+    from dfe_engine.clickhouse.quoting import quote_identifier
+    from dfe_engine.hunts.hunt_output import matching_rows, tenant_condition
+    from dfe_engine.hunts.rule_guard import preview_settings
+
+    try:
+        rule = registry.get(name)
+    except RuleNotFoundError:
+        raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
+
+    service = _rule_service(settings)
+    client = service._query_client()
+    database, table, match_sql = _source_read(source_name, sources, schemas, settings, client)
+    window = _cost_window(service, cost_window_minutes)
+
+    def answer(
+        *,
+        estimate: CostEstimate,
+        errors: list[SqlValidationError],
+        columns: list[str] | None = None,
+        rows: list[dict[str, Any]] | None = None,
+        elapsed: float = 0.0,
+        truncated: bool = False,
+    ) -> RuleV2RunResponse:
+        return RuleV2RunResponse(
+            source=source_name,
+            source_db=database,
+            source_table=table,
+            cost_window_minutes=estimate.window_minutes,
+            cost_estimate=estimate,
+            sql_errors=errors,
+            columns=columns or [],
+            results=rows or [],
+            execution_time_ms=elapsed,
+            truncated=truncated,
+        )
+
+    errors = _where_errors(settings, rule.where_clause)
+    if errors:
+        return answer(estimate=_unmeasured_cost(window, "the detection was not run"), errors=errors)
+
+    where = rule.where_clause
+    if match_sql:
+        where = f"({rule.where_clause}) AND ({match_sql})"
+    measured = rule.model_copy(
+        update={"source_db": database, "source_table": table, "where_clause": where}
+    )
+    if tenant_ids is not None and not tenant_ids:
+        return answer(
+            estimate=service._preview_volume(measured, window, tenant_ids),
+            errors=[SqlValidationError(message="the run may read no org's rows")],
+        )
+    estimate = service._preview_volume(measured, window, tenant_ids)
+    if client is None:
+        return answer(
+            estimate=estimate,
+            errors=[
+                SqlValidationError(
+                    message="ClickHouse is not configured, so the rule was not run",
+                )
+            ],
+        )
+
+    fence = tenant_condition(tenant_ids) if tenant_ids is not None else ""
+    time_column = quote_identifier(service._hunts.checkpoint_timestamp_field)
+    window_sql = f"{time_column} >= now() - INTERVAL {int(window)} MINUTE"
+    limit = int(service._hunts.max_detections_per_run)
+    inner = matching_rows(database, table, ("*",), where, window_sql, tenant_condition=fence)
+    sql = f"SELECT * FROM {inner} LIMIT {limit}"  # noqa: S608 - quoted names, integer limit, the condition is the rule
+    started = time.perf_counter()
+    try:
+        result = client.query(sql, settings=preview_settings(service._hunts.detection_guard))
+    except ServiceUnavailable:
+        return answer(
+            estimate=estimate,
+            errors=[SqlValidationError(message="ClickHouse could not be reached")],
+            elapsed=(time.perf_counter() - started) * 1000,
+        )
+    except ClickHouseError as exc:
+        return answer(
+            estimate=estimate,
+            errors=[SqlValidationError(message=str(exc))],
+            elapsed=(time.perf_counter() - started) * 1000,
+        )
+    columns = [str(column) for column in getattr(result, "column_names", ()) or ()]
+    rows = [
+        {column: _json_cell(value) for column, value in zip(columns, row, strict=True)}
+        for row in result.result_rows
+    ]
+    return answer(
+        estimate=estimate,
+        errors=[],
+        columns=columns,
+        rows=rows,
+        elapsed=(time.perf_counter() - started) * 1000,
+        truncated=len(rows) >= limit,
+    )
 
 
 def _refuse_detection(rule: Rule, sql_errors: list[SqlValidationError]) -> None:

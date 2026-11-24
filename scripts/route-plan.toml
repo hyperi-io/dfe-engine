@@ -217,6 +217,7 @@ routes = [
   { old = "POST /api/v1/rules-v2/from-hyperdx", status = "decide", note = "detection-rules" },
   { old = "POST /api/v1/rules-v2/preview", status = "decide", note = "detection-rules" },
   { old = "POST /api/v1/rules-v2/validate", status = "decide", note = "detection-rules" },
+  { old = "POST /api/v1/rules-v2/{name}/run", status = "decide", note = "detection-rules" },
   { old = "DELETE /api/v1/rules-v2/{name}", status = "decide", note = "detection-rules" },
   { old = "GET /api/v1/rules-v2/{name}", status = "decide", note = "detection-rules" },
   { old = "PUT /api/v1/rules-v2/{name}", status = "decide", note = "detection-rules" },
