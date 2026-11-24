@@ -25,7 +25,7 @@ from collections.abc import Collection
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.logger import logger
 
@@ -337,7 +337,14 @@ class HuntRuleEntry(BaseModel):
 
     rule_name: str
     target_table_name: str | None = None
-    source: str | None = None
+    source: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("source_table_name", "source"),
+        description=(
+            "The table the rule reads in place of the hunt's, stored as source_table_name, "
+            "the key the runner reads"
+        ),
+    )
     initial_checkpoint_lookback_minutes: int | None = None
 
 

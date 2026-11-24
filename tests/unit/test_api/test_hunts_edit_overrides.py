@@ -20,6 +20,7 @@ from common.hunt_files import store_rule_file
 
 from dfe_engine.api.deps import get_hunt_config_registry
 from dfe_engine.hunts.hunt_output import HuntResultSchema
+from dfe_engine.hunts.rule_compiler import rule_tables
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 
 HUNTS = "/api/v1/hunts"
@@ -128,3 +129,47 @@ def test_the_save_checks_the_kept_override_target(
     if status == 422:
         assert resp.json()["code"] == "invalid_target"
         assert "dfe.windows_detections" in resp.json()["detail"]
+
+
+def _entry(detail: dict, rule: str) -> dict:
+    (entry,) = [entry for entry in detail["rules"] if entry["rule_name"] == rule]
+    return entry
+
+
+@pytest.mark.usefixtures("hunt_with_overrides")
+class TestTheSourceOverrideIsOneValue:
+    """The stored ``source_table_name`` is what GET shows as ``source`` and what the runner reads."""
+
+    def test_get_shows_the_stored_source(self, client, admin_headers):
+        detail = client.get(f"{HUNTS}/windows_hunt", headers=admin_headers).json()
+
+        assert _entry(detail, "certutil")["source"] == "dfe.winaudit"
+        assert _entry(detail, "certutil")["target_table_name"] == "dfe.windows_detections"
+
+    def test_an_edit_that_leaves_it_alone_shows_it_after(self, client, admin_headers):
+        resp = client.put(
+            f"{HUNTS}/windows_hunt",
+            json={**_HUNT, "cron": "*/10 * * * *", "rules": ["certutil"]},
+            headers=admin_headers,
+        )
+
+        assert _entry(resp.json(), "certutil")["source"] == "dfe.winaudit"
+        stored = get_hunt_config_registry().get("windows_hunt")
+        assert stored["rules"][0]["source_table_name"] == "dfe.winaudit"
+
+    def test_the_runner_reads_the_value_get_shows(self, client, admin_headers):
+        detail = client.get(f"{HUNTS}/windows_hunt", headers=admin_headers).json()
+        stored = get_hunt_config_registry().get("windows_hunt")
+
+        tables = rule_tables(
+            stored["rules"][0],
+            "",
+            "",
+            hunt_source=stored["global_source_table_name"],
+            hunt_target=stored["global_target_table_name"],
+            default_target="dfe.detection",
+            default_database="dfe",
+        )
+
+        shown = _entry(detail, "certutil")["source"]
+        assert f"{tables.source_db}.{tables.source_table}" == shown

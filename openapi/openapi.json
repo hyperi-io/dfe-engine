@@ -43794,7 +43794,8 @@
                 "type": "null"
               }
             ],
-            "title": "Source"
+            "title": "Source",
+            "description": "The table the rule reads in place of the hunt's, stored as source_table_name, the key the runner reads"
           },
           "initial_checkpoint_lookback_minutes": {
             "anyOf": [
