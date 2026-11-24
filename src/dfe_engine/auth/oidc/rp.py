@@ -328,13 +328,28 @@ async def fill_from_userinfo_endpoint(
         fetched = await client.userinfo(token=token)
         return merge_userinfo_claims(id_token_claims=claims, userinfo_claims=dict(fetched))
     except Exception as exc:
+        failure = describe_http_error(exc)
         logger.warning(
-            "OIDC RP: userinfo claims not used",
+            f"OIDC RP: userinfo claims not used ({_failure_summary(failure)})",
             issuer=issuer,
             operation="userinfo",
-            **describe_http_error(exc),
+            **failure,
         )
         return claims
+
+
+def _failure_summary(failure: dict[str, object]) -> str:
+    """The failure's class and its status or socket reason, for a log line read as plain text.
+
+    Built from :func:`describe_http_error`'s fields, never the exception text, which can
+    carry the request URL.
+    """
+    parts = [str(failure["error_type"])]
+    if "status" in failure:
+        parts.append(f"HTTP {failure['status']}")
+    elif "transport_failure" in failure:
+        parts.append(str(failure["transport_failure"]))
+    return ", ".join(parts)
 
 
 class OidcRelyingParty:
