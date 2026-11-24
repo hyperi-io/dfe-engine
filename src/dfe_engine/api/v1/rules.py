@@ -37,6 +37,7 @@ from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.clickhouse.statements import CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE
 from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
@@ -300,7 +301,15 @@ class RuleImportRequest(BaseModel):
 
     model_config = {"extra": "forbid"}
 
-    sql: str = Field(min_length=1, description="One ClickHouse SELECT of a single table")
+    sql: str = Field(
+        min_length=1,
+        max_length=CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE,
+        description=(
+            "One ClickHouse SELECT of a single table, at most "
+            f"{CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE} characters, ClickHouse's default "
+            "max_query_size"
+        ),
+    )
 
 
 class DroppedPartResponse(BaseModel):

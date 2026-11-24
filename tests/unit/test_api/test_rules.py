@@ -3,6 +3,7 @@
 import pytest
 
 from dfe_engine.api.deps import get_rule_registry
+from dfe_engine.clickhouse.statements import CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE
 from dfe_engine.hunts.rule_model import Rule
 
 pytestmark = pytest.mark.usefixtures("rule_sources")
@@ -126,10 +127,24 @@ class TestRulesImport:
         assert resp.json()["code"] == "import_refused"
         assert fragment in resp.json()["detail"]
 
-    def test_a_blank_body_is_a_validation_error(self, client, admin_headers):
-        resp = self._import(client, admin_headers, "")
+    @pytest.mark.parametrize(
+        ("sql", "fragment"),
+        [
+            pytest.param("", "at least 1", id="blank"),
+            pytest.param(
+                "SELECT * FROM events WHERE a = 1" + " " * CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE,
+                f"at most {CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE}",
+                id="over max_query_size",
+            ),
+        ],
+    )
+    def test_a_blank_or_oversized_body_is_a_validation_error(
+        self, client, admin_headers, sql, fragment
+    ):
+        resp = self._import(client, admin_headers, sql)
         assert resp.status_code == 422
         assert resp.json()["code"] == "validation_error"
+        assert fragment in resp.text
 
     def test_it_needs_a_login(self, client):
         resp = client.post("/api/v1/rules/import", json={"sql": "SELECT * FROM events WHERE a = 1"})

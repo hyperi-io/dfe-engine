@@ -2,6 +2,8 @@
 
 import pytest
 
+from dfe_engine.clickhouse.statements import CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE
+from dfe_engine.hunts import rule_import
 from dfe_engine.hunts.rule_import import (
     ImportRefusedError,
     find_placeholders,
@@ -194,6 +196,32 @@ class TestRefusedShapes:
     def test_refused_with_a_reason(self, sql, reason):
         with pytest.raises(ImportRefusedError, match=reason):
             _read(sql)
+
+
+_LONG = CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE
+_PATTERN_RUNS = {
+    "template from": rule_import._TEMPLATE_FROM.search,
+    "double brace time": rule_import._DOUBLE_BRACE_TIME.search,
+    "bracketed time conjunct": rule_import._BRACKETED_TIME_CONJUNCT.search,
+    "no filter": rule_import._NO_FILTER.fullmatch,
+}
+_HOSTILE_TEXT = {
+    "whitespace": " \t\n" * (_LONG // 3),
+    "split whitespace": ("x" + " " * 64) * (_LONG // 65),
+    "unclosed brace": "{{" + " " * _LONG,
+    "repeated brace": "{{ " * (_LONG // 3),
+    "repeated conjunct": "( {timestamp_condition} ) AND" * (_LONG // 30),
+    "unclosed paren": "(" * (_LONG // 2) + " " * (_LONG // 2),
+}
+
+
+class TestPatternsOnHostileText:
+    """Near-miss text up to the request cap matches no pattern."""
+
+    @pytest.mark.parametrize("text", _HOSTILE_TEXT.values(), ids=_HOSTILE_TEXT.keys())
+    @pytest.mark.parametrize("run", _PATTERN_RUNS.values(), ids=_PATTERN_RUNS.keys())
+    def test_does_not_match(self, run, text):
+        assert run(text) is None
 
 
 class TestPlaceholders:
