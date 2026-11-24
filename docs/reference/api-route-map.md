@@ -352,6 +352,7 @@ Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sou
 | `DELETE /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
 | `PUT /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/{name}/run` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/import` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |

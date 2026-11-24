@@ -17,13 +17,16 @@ from dfe_engine.api.v1.rulesV2 import (
     _refuse_detection,
     _rule_from_write,
     _rule_to_response,
+    _run_stored_rule,
     _with_source_table,
     validate_rule_sql,
 )
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
-from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
 from dfe_engine.settings import DFESettings
+from dfe_engine.source.models import Source, SourceMatch, SourceTransform
+from dfe_engine.source.registry import SourceNotFoundError
 from dfe_engine.yaml_utils import yaml_load
 
 
@@ -366,3 +369,140 @@ def test_description_round_trips_and_the_list_has_no_source_or_hunt(tmp_path):
     assert "source" not in RuleV2Summary.model_fields
     assert "hunt_name" not in RuleV2Summary.model_fields
     assert "source_db" not in RuleV2Response.model_fields
+
+
+class _ClickHouse:
+    """Counts the preview, then returns one matching row for the run."""
+
+    def __init__(self, *, fail: BaseException | None = None):
+        self.fail = fail
+        self.ran: list[tuple[str, dict]] = []
+
+    def query(self, sql, **kwargs):
+        self.ran.append((sql, kwargs))
+        if "dfe_total" in sql:
+            return SimpleNamespace(result_rows=[(10, 2)])
+        if self.fail is not None:
+            raise self.fail
+        return SimpleNamespace(column_names=["severity"], result_rows=[("high",)])
+
+    def command(self, _sql, **_kwargs):
+        return None
+
+
+class _Rules:
+    def __init__(self, where: str = "severity = 'high'"):
+        self.rule = Rule(rule_id="high", name="High", where_clause=where)
+
+    def get(self, name: str):
+        if name != "high":
+            raise RuleNotFoundError(name)
+        return self.rule
+
+
+class _Sources:
+    def get_source(self, name: str):
+        if name != "filebeat":
+            raise SourceNotFoundError(name)
+        return Source(  # ty: ignore[pydantic-discarded-extra-argument]
+            source=name,
+            match=SourceMatch(field="f", value="v"),
+            transform=SourceTransform(engine="vector"),
+        )
+
+
+def _run(**overrides):
+    client = overrides.pop("client", _ClickHouse())
+    return _run_stored_rule(
+        name=overrides.pop("name", "high"),
+        source_name=overrides.pop("source_name", "filebeat"),
+        cost_window_minutes=overrides.pop("cost_window_minutes", 15),
+        tenant_ids=overrides.pop("tenant_ids", None),
+        settings=_settings(),
+        registry=overrides.pop("registry", _Rules()),
+        sources=overrides.pop("sources", _Sources()),
+        schemas=None,
+        **overrides,
+    ), client
+
+
+def test_an_on_demand_run_returns_the_estimate_the_rows_and_the_time(monkeypatch):
+    """The estimate and the SELECT share the window, the source's table, and its match."""
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result, _client = _run(client=client)
+
+    assert result.source == "filebeat"
+    assert result.source_db == "dfe"
+    assert result.source_table == "main"
+    assert result.cost_window_minutes == 15
+    assert result.cost_estimate.estimated_rows == 2
+    assert result.cost_estimate.rows_in_window == 10
+    assert result.cost_estimate.window_minutes == 15
+    assert result.sql_errors == []
+    assert result.columns == ["severity"]
+    assert result.results == [{"severity": "high"}]
+    assert result.execution_time_ms >= 0
+    assert result.truncated is False
+    preview, execution = client.ran
+    for sql, _kwargs in (preview, execution):
+        assert "INTERVAL 15 MINUTE" in sql
+        assert "`dfe`.`main`" in sql
+        assert "severity = 'high'" in sql
+        assert "'v'" in sql
+    assert execution[1]["settings"]["readonly"] == 1
+    assert "LIMIT 1000" in execution[0]
+
+
+def test_an_on_demand_run_is_held_to_the_callers_orgs(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result, _client = _run(client=client, tenant_ids=["acme"])
+
+    assert result.sql_errors == []
+    assert all("'acme'" in sql for sql, _kwargs in client.ran)
+
+
+def test_an_on_demand_run_surfaces_a_clickhouse_error_and_keeps_the_estimate(monkeypatch):
+    from clickhouse_connect.driver.exceptions import ClickHouseError
+
+    client = _ClickHouse(fail=ClickHouseError("Unknown table expression"))
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result, _client = _run(client=client)
+
+    assert result.cost_estimate.estimated_rows == 2
+    assert result.results == []
+    assert result.columns == []
+    assert result.execution_time_ms >= 0
+    assert any("Unknown table" in error.message for error in result.sql_errors)
+
+
+def test_an_on_demand_run_does_not_query_a_rule_the_runner_would_refuse(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result, _client = _run(client=client, registry=_Rules(where=""))
+
+    assert result.results == []
+    assert result.execution_time_ms == 0
+    assert result.sql_errors
+    assert client.ran == []
+
+
+def test_an_on_demand_run_reports_a_missing_source():
+    with pytest.raises(ProblemError) as raised:
+        _run_stored_rule(
+            name="high",
+            source_name="missing",
+            cost_window_minutes=None,
+            tenant_ids=None,
+            settings=_settings(),
+            registry=_Rules(),
+            sources=_Sources(),
+            schemas=None,
+        )
+
+    assert raised.value.status == 404
