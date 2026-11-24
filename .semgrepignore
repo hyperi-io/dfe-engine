@@ -1,3 +1,26 @@
+# This file replaces semgrep's built-in ignore list, so that list is restated
+# here (semgrep 1.183.0's defaults).
+.git
+.svn
+_darcs
+build/
+vendor/
+dist/
+*.min.js
+.env/
+.tox/
+node_modules/
+.npm/
+.yarn/
+.venv/
+_opam/
+_build/
+_cargo/
+test/
+tests/
+testsuite/
+*_test.go
+
 :include .gitignore
 
 # A Jinja template, not YAML: semgrep's YAML parser fails on its {% %} tags.
