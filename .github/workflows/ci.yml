@@ -56,4 +56,5 @@ jobs:
       test-tier: ${{ inputs.test-tier || 'core' }}
       # The producer-contract pin checks read GitHub. Anonymous calls from shared runners hit the rate limit.
       test-github-token: true
+    # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit -- the callee is hyperi-io/hyperi-ci, our own workflow, and needs the repo secrets
     secrets: inherit
