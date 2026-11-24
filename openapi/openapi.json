@@ -51018,9 +51018,10 @@
         "properties": {
           "sql": {
             "type": "string",
+            "maxLength": 262144,
             "minLength": 1,
             "title": "Sql",
-            "description": "One ClickHouse SELECT of a single table"
+            "description": "One ClickHouse SELECT of a single table, at most 262144 characters, ClickHouse's default max_query_size"
           }
         },
         "additionalProperties": false,
