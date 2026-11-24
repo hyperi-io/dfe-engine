@@ -17051,7 +17051,7 @@
           "hunts"
         ],
         "summary": "Get Hunt",
-        "description": "Get full hunt configuration by file name, with the runner's stop on it if any.\n\nA hunt naming a rule with no stored rule file carries ``missing_rules`` and an ``error``.",
+        "description": "Get full hunt configuration by file name, with the runner's stop on it if any.\n\nEach rule item carries the stored rule's description. A hunt naming a rule with\nno stored rule file carries ``missing_rules`` and an ``error``, and that item's\ndescription is absent.",
         "operationId": "hunts.get",
         "parameters": [
           {
@@ -43980,6 +43980,18 @@
             "type": "string",
             "title": "Rule Name"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "What the stored rule detects. Absent when the rule file is missing or the rule has no description"
+          },
           "target_table_name": {
             "anyOf": [
               {
@@ -44020,7 +44032,7 @@
           "rule_name"
         ],
         "title": "HuntRuleEntry",
-        "description": "Per-rule hunt configuration as stored in YAML."
+        "description": "One rule a hunt runs, as the hunt YAML names it.\n\n``description`` is read from the stored rule when the detail is built. It is\nnot written back onto the hunt."
       },
       "HuntRunQueued": {
         "properties": {

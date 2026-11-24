@@ -68,6 +68,26 @@ def test_a_hunt_naming_a_stored_rule_finds_its_yaml(
     assert _missing_warnings(audit_events) == []
 
 
+def test_hunt_detail_rules_include_the_stored_description(client, admin_headers):
+    created = client.post(
+        "/api/v1/rules-v2",
+        json={
+            "name": "certutil",
+            "display_name": "Certutil Abuse",
+            "description": "Looks for certutil",
+            "where_clause": "severity = 'high'",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+    assert _create_hunt(client, admin_headers, "certutil").status_code == 201
+
+    detail = client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).json()
+
+    assert detail["rules"][0]["rule_name"] == "certutil"
+    assert detail["rules"][0]["description"] == "Looks for certutil"
+
+
 def test_a_hunt_naming_a_missing_rule_is_refused_by_name(client, admin_headers, api_settings):
     resp = _create_hunt(client, admin_headers, "absent")
 
@@ -106,6 +126,7 @@ def test_a_hunt_shows_an_error_once_its_rule_is_deleted(client, admin_headers, a
     (Path(api_settings.hunts.rules_dir) / "certutil.yaml").unlink()
 
     detail = client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).json()
+    assert detail["rules"][0]["description"] is None
     [listed] = client.get("/api/v1/hunts", headers=admin_headers).json()["items"]
     for shown in (detail, listed):
         assert shown["missing_rules"] == ["certutil"]
