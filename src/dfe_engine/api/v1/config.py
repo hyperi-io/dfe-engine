@@ -7,6 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """GET /api/v1/config/client - runtime config the UI fetches on startup.
 
+GET /api/v1/config/features - the deployment's feature flags, the same object
+``DFE_ENGINE_FEATURE_FLAGS`` loaded.
+
 Fixes the Next.js build-time NEXT_PUBLIC_* trap: instead of baking the API/HyperDX
 URLs into the image, the UI reads them at runtime here -> one image, every
 environment, gitops-driven. Any authenticated caller may read it. An anonymous
@@ -89,3 +92,16 @@ async def client_config(user: CurrentUser, request: Request) -> ClientConfig:
         auth_mode=auth_mode,
         features=features,
     )
+
+
+@router.get("/features", response_model=dict[str, bool], openapi_extra=CLI_HIDDEN)
+async def feature_flags(user: CurrentUser, request: Request) -> dict[str, bool]:
+    """The deployment's feature flags, for the web UI.
+
+    Each key is true or false. A flag the deployment did not set is absent, and
+    code treats an absent flag as off. The value is the one ``feature_enabled``
+    returns, so the UI and a code check agree. Authenticated but ungated: every
+    console pane may read it.
+    """
+    settings = request.app.state.settings
+    return {name: settings.feature_enabled(name) for name in settings.feature_flags}
