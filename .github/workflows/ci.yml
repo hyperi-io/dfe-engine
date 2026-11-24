@@ -56,4 +56,14 @@ jobs:
       test-tier: ${{ inputs.test-tier || 'core' }}
       # The producer-contract pin checks read GitHub. Anonymous calls from shared runners hit the rate limit.
       test-github-token: true
-    secrets: inherit
+    # Least privilege: pass only the secrets python-ci.yml declares and this repo can supply, never `inherit`.
+    secrets:
+      ALERT_BRIDGE_TOKEN: ${{ secrets.ALERT_BRIDGE_TOKEN }}
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      CONTAINER_MGT_APP_PRIVATE_KEY: ${{ secrets.CONTAINER_MGT_APP_PRIVATE_KEY }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      CI_TOOLS_APP_PRIVATE_KEY: ${{ secrets.CI_TOOLS_APP_PRIVATE_KEY }}

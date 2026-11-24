@@ -675,6 +675,7 @@ class RuleCreationService:
         elif request.source:
             # A CEL filter alone: the rule reads its source's table, and the filter is the WHERE.
             target = self._quoted_target(*self._source_table(request.source))
+            # nosemgrep: python.django.security.injection.tainted-sql-string.tainted-sql-string -- both names pass quote_identifier, and the source must be a registered table label
             sql = f"SELECT * FROM {target}"  # noqa: S608 - quoted names
         else:
             return request
