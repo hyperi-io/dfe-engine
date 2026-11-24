@@ -16953,7 +16953,7 @@
           "hunts"
         ],
         "summary": "Update Hunt",
-        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nThe rule and results-table checks of the create apply.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
+        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA rule that stays in the hunt keeps its stored entry, per-rule source and target\nincluded. A rule the edit adds is stored by name. The rule and results-table checks\nof the create apply to the kept entries.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
         "operationId": "hunts.apply",
         "parameters": [
           {

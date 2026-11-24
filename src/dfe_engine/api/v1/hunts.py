@@ -92,6 +92,16 @@ def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
     return [{"rule_name": name} for name in rule_names]
 
 
+def _rules_keeping_entries(rule_names: list[str], stored: dict[str, Any]) -> list[dict[str, Any]]:
+    """*rule_names* as stored rules, each keeping its stored entry and its per-rule overrides.
+
+    The API takes rules by name only, so an edit would otherwise drop a ``source_table_name``
+    or ``target_table_name`` a hunt written straight to the deploy repo gives a rule.
+    """
+    held = {entry["rule_name"]: entry for entry in _rules_from_stored(stored.get("rules"))}
+    return [held.get(name, {"rule_name": name}) for name in rule_names]
+
+
 def _held_rules(stored: dict[str, Any]) -> set[str]:
     """The rule names a stored hunt already names."""
     return {entry["rule_name"] for entry in _rules_from_stored(stored.get("rules"))}
@@ -841,7 +851,9 @@ def update_hunt(
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration, resolving its customers afresh.
 
-    The rule and results-table checks of the create apply.
+    A rule that stays in the hunt keeps its stored entry, per-rule source and target
+    included. A rule the edit adds is stored by name. The rule and results-table checks
+    of the create apply to the kept entries.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
@@ -855,6 +867,7 @@ def update_hunt(
 
     _refuse_new_rule_names(body.rules, stored)
     config = body.to_config_dict(hunt_name=name)
+    config["rules"] = _rules_keeping_entries(body.rules, stored)
     if body.enabled is None and "enabled" in stored:
         config["enabled"] = stored["enabled"]
     _validate_hunt_config(config, settings, rules, _held_rules(stored))
