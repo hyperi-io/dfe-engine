@@ -204,9 +204,7 @@ add_version_in(
     type="addition",
     summary="Added geo_country column",
 )
-fork = fork_document(
-    document, source_version="1.1.0", summary="Forked", origin="meta/syslog"
-)
+fork = fork_document(document, source_version="1.1.0", summary="Forked", origin="meta/syslog")
 ```
 
 ### The applier (`src/dfe_engine/schema/applier.py`)

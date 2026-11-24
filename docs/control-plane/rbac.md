@@ -996,7 +996,9 @@ class AuthContext(BaseModel):
     request_id: str | None = None
     client_ip: str | None = None
     user_agent: str | None = None
-    session_marker: str | None = None  # The account record a local login checked, carried by the token it mints
+    session_marker: str | None = (
+        None  # The account record a local login checked, carried by the token it mints
+    )
 ```
 
 Permissions are resolved at authorisation time from roles -- never stored on

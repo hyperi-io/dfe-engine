@@ -392,6 +392,7 @@ class RuleCreationService:
         rule_id: str,
         *,
         tenant_ids: list[str] | None = None,
+        plan: bool = True,
     ) -> RuleCreateResult:
         """Full pipeline: sanitize -> validate -> Rule.from_create -> guards -> AI stub.
 
@@ -407,6 +408,8 @@ class RuleCreationService:
             tenant_ids: The orgs the preview counts, by the tenant ids their rows
                 carry. None counts every org, and an empty list leaves the rule
                 unmeasured.
+            plan: Whether ClickHouse resolves the condition against the FROM table.
+                Off when that table is a stand-in for a source the hunt names later.
 
         Returns:
             RuleCreateResult with rule, validation errors, the match-everything
@@ -443,7 +446,7 @@ class RuleCreationService:
         if refusal is not None:
             sql_errors = [refusal]
         elif request.user_sql:
-            sql_errors = self._validate_sql_syntax(clean_sql or "")
+            sql_errors = self._validate_sql_syntax(clean_sql or "", plan=plan)
 
         # Phase 3: Create Rule via existing pipeline. SQL the sanitiser emptied keeps
         # the caller's text so the result can carry the errors rather than raise.
@@ -531,9 +534,13 @@ class RuleCreationService:
             ai_context=ai_context,
         )
 
-    def validate_sql(self, sql: str) -> list[SqlValidationError]:
-        """Standalone SQL validation without rule creation."""
-        return self._validate_sql_syntax(strip_time_placeholder(sql))
+    def validate_sql(self, sql: str, *, plan: bool = True) -> list[SqlValidationError]:
+        """Standalone SQL validation without rule creation.
+
+        ``plan`` is off when the FROM table is a stand-in, so a column the landing
+        table lacks is not a reason to refuse the SQL.
+        """
+        return self._validate_sql_syntax(strip_time_placeholder(sql), plan=plan)
 
     def condition_sql(self, source: str | None, condition: RuleCondition) -> str:
         """The rule SQL a condition on ``source`` compiles to.
@@ -636,7 +643,7 @@ class RuleCreationService:
 
     # -- Internal methods ----------------------------------
 
-    def _validate_sql_syntax(self, sql: str) -> list[SqlValidationError]:
+    def _validate_sql_syntax(self, sql: str, *, plan: bool = True) -> list[SqlValidationError]:
         """Structural SQL validation with helpful error messages.
 
         Checks:
@@ -753,7 +760,7 @@ class RuleCreationService:
             )
             if escape is not None:
                 errors.append(SqlValidationError(message=escape, suggestion=_ESCAPE_FIX))
-            if not errors:
+            if not errors and plan:
                 plan_error = self._plan_error(
                     parsed.source_db or "", parsed.source_table or "", parsed.where_clause
                 )
