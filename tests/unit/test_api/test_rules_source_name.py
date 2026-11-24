@@ -16,6 +16,9 @@ whether the rule is written as SQL or as a ``where_clause`` on that source's tab
 
 import pytest
 
+from dfe_engine.api.deps import get_rule_registry
+from dfe_engine.hunts.rule_model import Rule
+
 pytestmark = pytest.mark.usefixtures("rule_sources")
 
 REFUSED_SQL = {
@@ -158,6 +161,45 @@ def test_update_refuses_that_source_and_keeps_the_stored_one(
         "dfe",
         "events",
     )
+
+
+_LEGACY_SQL = "SELECT * FROM dfe.stranger WHERE severity = 'high'"
+
+
+@pytest.mark.parametrize(
+    ("source", "status", "stored_source"),
+    [
+        pytest.param("stale-label", 200, "stale-label", id="the stored unregistered source"),
+        pytest.param(None, 200, "stale-label", id="no source"),
+        pytest.param("never-registered", 422, "stale-label", id="another unregistered source"),
+        pytest.param("events", 200, "events", id="a registered source"),
+    ],
+)
+def test_an_edit_checks_only_a_source_it_sets_or_changes(
+    client, admin_headers, source, status, stored_source
+):
+    """A rule saved before sources were registered stays editable under the source it holds."""
+    get_rule_registry().save(
+        Rule(
+            rule_id="legacy",
+            name="Legacy",
+            original_sql=_LEGACY_SQL,
+            where_clause="severity = 'high'",
+            source_db="dfe",
+            source_table="stranger",
+            source="stale-label",
+        )
+    )
+    body = {"severity": "high", "user_sql": _LEGACY_SQL}
+    if source is not None:
+        body["source"] = source
+
+    resp = client.put("/api/v1/rules/legacy", json=body, headers=admin_headers)
+
+    assert resp.status_code == status, resp.text
+    if status == 422:
+        assert "not a registered source" in resp.text
+    assert get_rule_registry().get("legacy").source == stored_source
 
 
 def test_sql_naming_an_unregistered_source_label_is_refused(client, admin_headers):

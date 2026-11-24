@@ -700,7 +700,7 @@ def update_rule(
     The replacement is written as SQL, a ``where_clause`` or a ``condition``, as on
     create, and a rule replaced with SQL or a WHERE no longer carries a condition. With
     no ``source`` in the body the stored one stands, read as the registered source its
-    table names when it names none.
+    table names when it names none. Only a source the body sets or changes must be registered.
 
     A replacement the hunt runner could not compile is refused with 422 and the
     stored rule is left as it was. A production+team write is routed to a review
@@ -714,7 +714,9 @@ def update_rule(
 
     from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
-    service = _rule_service(settings, sources)
+    # Only a source the request sets or changes must be registered, so a stored rule stays editable.
+    changes_source = body.source is not None and body.source != existing.source
+    service = _rule_service(settings, sources if changes_source else None)
     effective_display = body.display_name if body.display_name is not None else existing.name
     effective_source = (
         body.source

@@ -13495,7 +13495,7 @@
           "Rules"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as SQL, a ``where_clause`` or a ``condition``, as on\ncreate, and a rule replaced with SQL or a WHERE no longer carries a condition. With\nno ``source`` in the body the stored one stands, read as the registered source its\ntable names when it names none.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as SQL, a ``where_clause`` or a ``condition``, as on\ncreate, and a rule replaced with SQL or a WHERE no longer carries a condition. With\nno ``source`` in the body the stored one stands, read as the registered source its\ntable names when it names none. Only a source the body sets or changes must be registered.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
         "operationId": "rules.apply",
         "parameters": [
           {
