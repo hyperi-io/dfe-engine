@@ -27,8 +27,8 @@ def _sample_create_payload(**overrides):
         "name": "test_rule",
         "display_name": "Test Rule",
         "severity": "high",
-        "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
-        "source": "windows-audit",
+        "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+        "source": "main",
     }
     payload.update(overrides)
     return payload
@@ -36,7 +36,7 @@ def _sample_create_payload(**overrides):
 
 def _where_payload(**overrides):
     """A create body written as a ``where_clause`` on a registered source, with no SQL."""
-    payload = _sample_create_payload(where_clause="severity = 'high'")
+    payload = _sample_create_payload(where_clause="severity = 'high'", source="windows-audit")
     del payload["user_sql"]
     payload.update(overrides)
     return payload
@@ -285,7 +285,7 @@ class TestRulesUpdateAndDelete:
             f"/api/v1/rules/{rule_name}",
             json={
                 "severity": "high",
-                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "user_sql": "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'",
                 "source": "windows-audit",
                 "source_type": "",
             },
@@ -376,7 +376,7 @@ class TestRulesCreate:
             json={
                 "name": "my_rule",
                 "severity": "high",
-                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "user_sql": "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'",
                 "source": "windows-audit",
             },
             headers=admin_headers,

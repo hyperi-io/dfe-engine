@@ -655,15 +655,18 @@ class RuleCreationService:
     def _with_rule_sql(self, request: RuleCreateRequest) -> RuleCreateRequest:
         """The request with ``user_sql`` set to the SELECT its source and detection compile to.
 
-        A ``user_sql`` request is left as written, though a source it names must be
-        registered. A request with no SQL of its own reads the table of its source.
+        A ``user_sql`` request is left as written. Where sources are checked, a source it
+        names must be registered and its FROM must read that source's table. A request
+        with no SQL of its own reads the table of its source.
 
         Raises:
             RuleConditionError: The source is missing, unregistered or not a table label,
-                or the detection does not compile to a plain row filter.
+                the SQL reads another table than its source, or the detection does not
+                compile to a plain row filter.
         """
         if request.user_sql:
-            self._refuse_unregistered(request.source)
+            if request.source and self._is_source is not None:
+                self._refuse_another_table(request.user_sql, request.source)
             return request
         if request.condition is not None:
             sql = self.condition_sql(request.source, request.condition)
@@ -676,6 +679,21 @@ class RuleCreationService:
         else:
             return request
         return request.model_copy(update={"user_sql": sql})
+
+    def _refuse_another_table(self, user_sql: str, source: str) -> None:
+        """Refuse SQL whose FROM is not the registered table of the source it names.
+
+        SQL that does not parse, or names no ``<db>.<table>``, is left to the SQL check.
+        """
+        database, table = self._source_table(source)
+        parsed = self._rewriter.parse_user_sql(strip_time_placeholder(user_sql))
+        if not (parsed.source_db and parsed.source_table):
+            return
+        if (parsed.source_db, parsed.source_table) != (database, table):
+            raise RuleConditionError(
+                f"the SQL reads {parsed.source_db}.{parsed.source_table}, but source "
+                f"{source!r} is {database}.{table}"
+            )
 
     def _refuse_unregistered(self, source: str | None) -> None:
         if source and self._is_source is not None and not self._is_source(source):

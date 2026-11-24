@@ -205,8 +205,9 @@ class TestUpdateWithACondition:
     def test_a_condition_reads_the_source_the_rule_already_has(
         self, client, admin_headers, clickhouse
     ):
-        sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
-        client.post(RULES, json=_rule("by_sql", user_sql=sql), headers=admin_headers)
+        sql = "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'"
+        created = client.post(RULES, json=_rule("by_sql", user_sql=sql), headers=admin_headers)
+        assert created.status_code == 201, created.text
         body = {"name": "by_sql", "condition": {"field": "host", "value": "alpha"}}
 
         resp = client.put(f"{RULES}/by_sql", json=body, headers=admin_headers)

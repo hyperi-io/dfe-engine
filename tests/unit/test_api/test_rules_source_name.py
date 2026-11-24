@@ -166,17 +166,42 @@ def test_update_refuses_that_source_and_keeps_the_stored_one(
 _LEGACY_SQL = "SELECT * FROM dfe.stranger WHERE severity = 'high'"
 
 
+_EVENTS_SQL = "SELECT * FROM dfe.events WHERE severity = 'high'"
+
+
 @pytest.mark.parametrize(
-    ("source", "status", "stored_source"),
+    ("source", "sql", "status", "stored_source", "fragment"),
     [
-        pytest.param("stale-label", 200, "stale-label", id="the stored unregistered source"),
-        pytest.param(None, 200, "stale-label", id="no source"),
-        pytest.param("never-registered", 422, "stale-label", id="another unregistered source"),
-        pytest.param("events", 200, "events", id="a registered source"),
+        pytest.param(
+            "stale-label",
+            _LEGACY_SQL,
+            200,
+            "stale-label",
+            None,
+            id="the stored unregistered source",
+        ),
+        pytest.param(None, _LEGACY_SQL, 200, "stale-label", None, id="no source"),
+        pytest.param(
+            "never-registered",
+            _LEGACY_SQL,
+            422,
+            "stale-label",
+            "not a registered source",
+            id="another unregistered source",
+        ),
+        pytest.param("events", _EVENTS_SQL, 200, "events", None, id="a registered source"),
+        pytest.param(
+            "events",
+            _LEGACY_SQL,
+            422,
+            "stale-label",
+            "the SQL reads dfe.stranger",
+            id="a registered source the SQL does not read",
+        ),
     ],
 )
 def test_an_edit_checks_only_a_source_it_sets_or_changes(
-    client, admin_headers, source, status, stored_source
+    client, admin_headers, source, sql, status, stored_source, fragment
 ):
     """A rule saved before sources were registered stays editable under the source it holds."""
     get_rule_registry().save(
@@ -190,27 +215,55 @@ def test_an_edit_checks_only_a_source_it_sets_or_changes(
             source="stale-label",
         )
     )
-    body = {"severity": "high", "user_sql": _LEGACY_SQL}
+    body = {"severity": "high", "user_sql": sql}
     if source is not None:
         body["source"] = source
 
     resp = client.put("/api/v1/rules/legacy", json=body, headers=admin_headers)
 
     assert resp.status_code == status, resp.text
-    if status == 422:
-        assert "not a registered source" in resp.text
+    if fragment is not None:
+        assert fragment in resp.text
     assert get_rule_registry().get("legacy").source == stored_source
 
 
-def test_sql_naming_an_unregistered_source_label_is_refused(client, admin_headers):
-    resp = client.post(
-        "/api/v1/rules",
-        json={**_payload("unregistered", _KEPT_SQL), "source": "never-registered"},
-        headers=admin_headers,
-    )
+@pytest.mark.parametrize(
+    ("sql", "source", "fragment"),
+    [
+        pytest.param(_KEPT_SQL, "never-registered", "not a registered source", id="unregistered"),
+        pytest.param(
+            "SELECT * FROM dfe.events WHERE severity = 'high'", "events", None, id="FROM matches"
+        ),
+        pytest.param(
+            "SELECT * FROM dfe.`cisco-ios` WHERE severity = 'high'",
+            "cisco-ios",
+            None,
+            id="FROM matches a hyphenated label",
+        ),
+        pytest.param(_KEPT_SQL, "events", "dfe.main", id="FROM reads another table"),
+        pytest.param(
+            "SELECT * FROM other.events WHERE severity = 'high'",
+            "events",
+            "other.events",
+            id="FROM reads another database",
+        ),
+        pytest.param(_KEPT_SQL, None, None, id="no source"),
+    ],
+)
+def test_sql_on_a_named_source_must_read_that_source(client, admin_headers, sql, source, fragment):
+    body = _payload("bound", sql)
+    if source is not None:
+        body["source"] = source
 
-    _assert_refused_with(resp, "not a registered source")
-    assert client.get("/api/v1/rules/unregistered", headers=admin_headers).status_code == 404
+    resp = client.post("/api/v1/rules", json=body, headers=admin_headers)
+
+    if fragment is None:
+        assert resp.status_code == 201, resp.text
+        return
+    _assert_refused_with(resp, fragment)
+    if fragment != "not a registered source":
+        assert f"dfe.{source}" in resp.text
+    assert client.get("/api/v1/rules/bound", headers=admin_headers).status_code == 404
 
 
 def test_a_where_on_a_hyphenated_label_reads_that_table(client, admin_headers):
