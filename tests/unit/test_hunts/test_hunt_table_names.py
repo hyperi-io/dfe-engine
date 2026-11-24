@@ -127,13 +127,13 @@ def test_a_hunt_source_that_is_not_text_is_refused(tmp_path: Path):
             tmp_path,
             _hunt(
                 global_source_table_name=["dfe", "main"],
-                rules=[{"rule_name": "certutil", "source": "windows-audit"}],
+                rules=[{"rule_name": "certutil", "source_table_name": "dfe.windows-audit"}],
             ),
         )
 
 
 def test_a_blank_hunt_source_still_defers_to_the_rules_own_source(tmp_path: Path):
-    rules = [{"rule_name": "certutil", "source": "windows-audit"}]
+    rules = [{"rule_name": "certutil", "source_table_name": "dfe.windows-audit"}]
 
     _validate(tmp_path, _hunt(global_source_table_name="", rules=rules))
 
