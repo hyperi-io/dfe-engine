@@ -21,6 +21,8 @@ from dfe_engine.api.deps import get_hunt_config_registry, get_rule_registry
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
 
+pytestmark = pytest.mark.usefixtures("rule_sources")
+
 RULES = "/api/v1/rules"
 HUNTS = "/api/v1/hunts"
 ORGS = "/api/v1/orgs"
@@ -46,16 +48,19 @@ class _ClickHouse:
     def __init__(self) -> None:
         self.previews: list[str] = []
         self.columns_readable = True
+        self.json_paths = ["user.name", "attempts"]
 
     def command(self, *_args, **_kwargs) -> None:
         """Answer the parse and plan checks."""
 
     def query(self, sql: str, **_kwargs) -> SimpleNamespace:
-        """Answer the column read, and record and count a preview."""
+        """Answer the column and JSON path reads, and record and count a preview."""
         if "system.columns" in sql:
             if not self.columns_readable:
                 raise ConnectionError("clickhouse is down")
             return SimpleNamespace(result_rows=_COLUMNS)
+        if "distinctJSONPaths" in sql:
+            return SimpleNamespace(result_rows=[(self.json_paths,)])
         self.previews.append(sql)
         return SimpleNamespace(result_rows=[(100, 2)])
 
@@ -127,13 +132,36 @@ class TestCreateWithACondition:
         assert resp.status_code == 201, resp.text
         assert resp.json()["rule"]["where_clause"] == "(`host` IN ('a', 'b'))"
 
-    def test_a_rule_written_as_sql_has_no_condition(self, client, admin_headers):
-        sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
-
-        resp = client.post(RULES, json=_rule(user_sql=sql), headers=admin_headers)
+    def test_a_rule_written_as_a_where_has_no_condition(self, client, admin_headers):
+        resp = client.post(
+            RULES, json=_rule(where_clause="severity = 'high'"), headers=admin_headers
+        )
 
         assert resp.status_code == 201, resp.text
         assert resp.json()["rule"]["condition"] is None
+
+    def test_a_path_the_recent_rows_never_carried_is_a_warning_not_a_refusal(
+        self, client, admin_headers, clickhouse
+    ):
+        clickhouse.json_paths = ["attempts"]
+
+        resp = client.post(RULES, json=_rule(condition=_CONDITION), headers=admin_headers)
+
+        assert resp.status_code == 201, resp.text
+        warnings = resp.json()["rule"]["warnings"]
+        assert any("_json.user.name did not appear" in warning for warning in warnings), warnings
+
+    def test_a_path_the_recent_rows_carry_is_not_warned(self, client, admin_headers, clickhouse):
+        resp = client.post(RULES, json=_rule(condition=_CONDITION), headers=admin_headers)
+
+        assert not any("did not appear" in w for w in resp.json()["rule"]["warnings"])
+
+    def test_no_recent_rows_leaves_the_paths_unchecked(self, client, admin_headers, clickhouse):
+        clickhouse.json_paths = []
+
+        resp = client.post(RULES, json=_rule(condition=_CONDITION), headers=admin_headers)
+
+        assert not any("did not appear" in w for w in resp.json()["rule"]["warnings"])
 
 
 class TestUpdateWithACondition:
@@ -149,6 +177,20 @@ class TestUpdateWithACondition:
         assert resp.json()["rule"]["condition"]["field"] == "host"
         assert resp.json()["rule"]["where_clause"] == "(`host` = 'alpha')"
 
+    def test_a_where_replaces_a_condition_and_drops_it(self, client, admin_headers, clickhouse):
+        _created(client, admin_headers)
+
+        resp = client.put(
+            f"{RULES}/bob_attempts",
+            json=_rule(where_clause="severity = 'high'"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert (
+            client.get(f"{RULES}/bob_attempts", headers=admin_headers).json()["condition"] is None
+        )
+
     def test_sql_replaces_a_condition_and_drops_it(self, client, admin_headers, clickhouse):
         _created(client, admin_headers)
         sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
@@ -163,8 +205,9 @@ class TestUpdateWithACondition:
     def test_a_condition_reads_the_source_the_rule_already_has(
         self, client, admin_headers, clickhouse
     ):
-        sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
-        client.post(RULES, json=_rule("by_sql", user_sql=sql), headers=admin_headers)
+        sql = "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'"
+        created = client.post(RULES, json=_rule("by_sql", user_sql=sql), headers=admin_headers)
+        assert created.status_code == 201, created.text
         body = {"name": "by_sql", "condition": {"field": "host", "value": "alpha"}}
 
         resp = client.put(f"{RULES}/by_sql", json=body, headers=admin_headers)
@@ -172,18 +215,50 @@ class TestUpdateWithACondition:
         assert resp.status_code == 200, resp.text
         assert resp.json()["rule"]["source_table"] == "windows-audit"
 
+    def test_a_condition_on_a_stored_table_no_source_carries_is_refused(
+        self, client, admin_headers, clickhouse
+    ):
+        get_rule_registry().save(
+            Rule(rule_id="bare", name="bare", where_clause="x = 1", source_table="unregistered")
+        )
+
+        resp = client.put(
+            f"{RULES}/bare",
+            json={"name": "bare", "condition": {"field": "host", "value": "a"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert "name the source" in resp.text
+
+    def test_a_condition_on_a_stored_table_a_source_carries_reads_that_source(
+        self, client, admin_headers, clickhouse
+    ):
+        get_rule_registry().save(
+            Rule(rule_id="bare", name="bare", where_clause="x = 1", source_table="events")
+        )
+
+        resp = client.put(
+            f"{RULES}/bare",
+            json={"name": "bare", "condition": {"field": "host", "value": "a"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rule"]["source"] == "events"
+
 
 class TestARefusedWriteSavesNothing:
     @pytest.mark.parametrize(
         ("fields", "code", "mentions"),
         [
             (
-                {"user_sql": "SELECT 1 FROM dfe.main WHERE x = 1"},
+                {"where_clause": "x = 1"},
                 "validation_error",
-                "one of the two",
+                "one of the three",
             ),
-            ({"condition": None}, "validation_error", "one of the two"),
-            ({"source": None}, "validation_error", "name the source"),
+            ({"condition": None}, "validation_error", "one of the three"),
+            ({"source": None}, "validation_error", "source"),
             ({"source": "dfe.windows-audit"}, "invalid_sql", "a label, not a <db>.<table>"),
             ({"source": "a b"}, "invalid_sql", "is not a table label"),
             (
@@ -254,7 +329,7 @@ class TestARefusedWriteSavesNothing:
                 "invalid_sql",
                 "bytes of SQL",
             ),
-            ({"source_type": "hyperdx"}, "validation_error", "source_type is 'raw'"),
+            ({"source_type": "hyperdx"}, "validation_error", "source_type"),
             (
                 {"condition": {"field": "a", "value": "{window}"}},
                 "validation_error",
@@ -262,7 +337,7 @@ class TestARefusedWriteSavesNothing:
             ),
         ],
         ids=[
-            "sql and condition",
+            "where and condition",
             "neither",
             "no source",
             "source with a database",
@@ -314,22 +389,6 @@ class TestARefusedWriteSavesNothing:
             client.get(f"{RULES}/bob_attempts", headers=admin_headers).json()["condition"]
             == (before["condition"])
         )
-
-    def test_a_condition_with_no_source_anywhere_is_refused_on_update(
-        self, client, admin_headers, clickhouse
-    ):
-        get_rule_registry().save(
-            Rule(rule_id="bare", name="bare", where_clause="x = 1", source_table="main")
-        )
-
-        resp = client.put(
-            f"{RULES}/bare",
-            json={"name": "bare", "condition": {"field": "host", "value": "a"}},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 422, resp.text
-        assert "name the source" in resp.text
 
 
 class TestPreview:

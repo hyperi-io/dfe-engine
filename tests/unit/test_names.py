@@ -96,7 +96,10 @@ def test_a_rule_and_a_hunt_are_created_under_exactly_the_detection_names(name, a
 
     assert _accepted(lambda: validate_rule_name(name)) is accepted
     assert _accepted(lambda: validate_hunt_name(name)) is accepted
-    assert _accepted(lambda: RuleCreateRequest(name=name, user_sql="SELECT 1")) is accepted
+    assert (
+        _accepted(lambda: RuleCreateRequest(name=name, source="main", where_clause="a = 1"))
+        is accepted
+    )
     assert _accepted(lambda: HuntCreateRequest.model_validate({"name": name, **hunt})) is accepted
 
 

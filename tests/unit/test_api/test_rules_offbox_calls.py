@@ -16,33 +16,31 @@ range (RFC 5737) and nothing here opens a socket.
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("rule_sources")
+
 # One refused call per family, written as a rule author would.
-OFFBOX_SQL = {
-    "url": "SELECT * FROM dfe.main WHERE url('http://203.0.113.9/leak', 'LineAsString') = 1",
-    "s3": "SELECT * FROM dfe.main WHERE s3('https://203.0.113.9/bucket/key', 'CSV') = 1",
-    "file": "SELECT * FROM dfe.main WHERE file('hostname') LIKE '%a%'",
-    "remote": "SELECT * FROM dfe.main WHERE remote('203.0.113.9', system.users) = 1",
-    "dictionary": "SELECT * FROM dfe.main WHERE dictGet('t', 'name', toUInt64(1)) = 'acme'",
-    "ai": "SELECT * FROM dfe.main WHERE aiFilter(toString(_json), 'is it bad') = 1",
-    "globalIn": "SELECT * FROM dfe.main WHERE globalIn(_source, dfe.main)",
-    "in": "SELECT * FROM dfe.main WHERE in(_source, dfe.main)",
-    "in beside a real condition": (
-        "SELECT * FROM dfe.main WHERE severity = 'high' AND in(_source, dfe.main)"
-    ),
-    "beside a real condition": (
-        "SELECT * FROM dfe.main WHERE severity = 'high' AND url('http://203.0.113.9/') = 1"
-    ),
+OFFBOX_WHERE = {
+    "url": "url('http://203.0.113.9/leak', 'LineAsString') = 1",
+    "s3": "s3('https://203.0.113.9/bucket/key', 'CSV') = 1",
+    "file": "file('hostname') LIKE '%a%'",
+    "remote": "remote('203.0.113.9', system.users) = 1",
+    "dictionary": "dictGet('t', 'name', toUInt64(1)) = 'acme'",
+    "ai": "aiFilter(toString(_json), 'is it bad') = 1",
+    "globalIn": "globalIn(_source, dfe.main)",
+    "in": "in(_source, dfe.main)",
+    "in beside a real condition": ("severity = 'high' AND in(_source, dfe.main)"),
+    "beside a real condition": ("severity = 'high' AND url('http://203.0.113.9/') = 1"),
 }
 
-_KEPT_SQL = "SELECT * FROM dfe.main WHERE severity = 'high'"
+_KEPT_WHERE = "severity = 'high'"
 
 
-def _payload(name: str, user_sql: str) -> dict:
+def _payload(name: str, where_clause: str) -> dict:
     return {
         "name": name,
         "display_name": "Off-box",
         "severity": "high",
-        "user_sql": user_sql,
+        "where_clause": where_clause,
         "source": "windows-audit",
     }
 
@@ -55,24 +53,28 @@ def _assert_refused(resp) -> None:
     assert any("may not call" in message for message in messages), messages
 
 
-@pytest.mark.parametrize("user_sql", OFFBOX_SQL.values(), ids=list(OFFBOX_SQL))
-def test_create_refuses_a_call_outside_the_row_and_writes_nothing(client, admin_headers, user_sql):
-    resp = client.post("/api/v1/rules", json=_payload("offbox", user_sql), headers=admin_headers)
+@pytest.mark.parametrize("where_clause", OFFBOX_WHERE.values(), ids=list(OFFBOX_WHERE))
+def test_create_refuses_a_call_outside_the_row_and_writes_nothing(
+    client, admin_headers, where_clause
+):
+    resp = client.post(
+        "/api/v1/rules", json=_payload("offbox", where_clause), headers=admin_headers
+    )
 
     _assert_refused(resp)
     assert client.get("/api/v1/rules/offbox", headers=admin_headers).status_code == 404
 
 
-@pytest.mark.parametrize("user_sql", OFFBOX_SQL.values(), ids=list(OFFBOX_SQL))
-def test_update_refuses_it_and_keeps_the_stored_condition(client, admin_headers, user_sql):
+@pytest.mark.parametrize("where_clause", OFFBOX_WHERE.values(), ids=list(OFFBOX_WHERE))
+def test_update_refuses_it_and_keeps_the_stored_condition(client, admin_headers, where_clause):
     created = client.post(
-        "/api/v1/rules", json=_payload("kept_offbox", _KEPT_SQL), headers=admin_headers
+        "/api/v1/rules", json=_payload("kept_offbox", _KEPT_WHERE), headers=admin_headers
     )
     assert created.status_code == 201, created.text
 
     resp = client.put(
         "/api/v1/rules/kept_offbox",
-        json=_payload("kept_offbox", user_sql),
+        json=_payload("kept_offbox", where_clause),
         headers=admin_headers,
     )
 
@@ -84,7 +86,7 @@ def test_update_refuses_it_and_keeps_the_stored_condition(client, admin_headers,
 def test_validate_reports_the_call_without_creating_anything(client, admin_headers):
     resp = client.post(
         "/api/v1/rules/validate",
-        json={"sql": OFFBOX_SQL["url"]},
+        json={"sql": f"SELECT * FROM dfe.main WHERE {OFFBOX_WHERE['url']}"},
         headers=admin_headers,
     )
 
@@ -96,7 +98,7 @@ def test_validate_reports_the_call_without_creating_anything(client, admin_heade
 
 def test_a_rule_over_its_own_rows_is_still_accepted(client, admin_headers):
     resp = client.post(
-        "/api/v1/rules", json=_payload("permitted", _KEPT_SQL), headers=admin_headers
+        "/api/v1/rules", json=_payload("permitted", _KEPT_WHERE), headers=admin_headers
     )
 
     assert resp.status_code == 201, resp.text
@@ -119,7 +121,7 @@ def test_a_rule_reading_another_table_is_refused_and_never_written(
     """The hunt runner's user reads every org, so another table answers past the hunt's orgs."""
     resp = client.post(
         "/api/v1/rules",
-        json=_payload("lookup", f"SELECT * FROM dfe.main WHERE {condition}"),
+        json=_payload("lookup", f"{condition}"),
         headers=admin_headers,
     )
 
@@ -139,7 +141,7 @@ def test_a_rule_reading_another_table_is_refused_and_never_written(
 def test_a_rule_using_the_in_operator_is_accepted(client, admin_headers, name, condition):
     resp = client.post(
         "/api/v1/rules",
-        json=_payload(name, f"SELECT * FROM dfe.main WHERE {condition}"),
+        json=_payload(name, f"{condition}"),
         headers=admin_headers,
     )
 

@@ -98,9 +98,7 @@ def _accepted(check) -> bool:
     ],
 )
 def test_a_hunt_reference_and_rule_create_accept_the_same_names(name):
-    creatable = _accepted(
-        lambda: RuleCreateRequest(name=name, user_sql="SELECT 1 FROM dfe.main WHERE a = 1")
-    )
+    creatable = _accepted(lambda: RuleCreateRequest(name=name, source="main", where_clause="a = 1"))
     referencable = _accepted(lambda: validate_rule_name(name))
 
     assert referencable == creatable
@@ -109,7 +107,8 @@ def test_a_hunt_reference_and_rule_create_accept_the_same_names(name):
 _RULE = {
     "display_name": "Certutil Abuse",
     "severity": "high",
-    "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+    "source": "main",
+    "where_clause": "severity = 'high'",
 }
 
 _LIMIT = 128
@@ -181,7 +180,10 @@ def test_a_hunt_already_naming_a_dotted_rule_is_edited_but_takes_no_new_one(clie
 def test_a_rule_made_from_a_long_saved_search_name_is_one_a_hunt_can_reference(
     client, admin_headers
 ):
-    body = {"raw_sql": _RULE["user_sql"], "saved_search_name": "S" * 200}
+    body = {
+        "raw_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+        "saved_search_name": "S" * 200,
+    }
 
     first = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
     second = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)

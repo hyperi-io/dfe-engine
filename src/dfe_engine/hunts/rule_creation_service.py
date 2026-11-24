@@ -23,8 +23,8 @@ Usage::
         RuleCreateRequest(
             name="Certutil Abuse",
             severity="high",
-            source_type="hyperdx",
-            user_sql="SELECT count() FROM default.logs WHERE ...",
+            source="windows-audit",
+            where_clause="process_name = 'certutil.exe'",
         ),
         rule_id="win_cert_01",
     )
@@ -35,6 +35,7 @@ Usage::
 
 import re
 import time
+from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
 import sqlglot
@@ -49,7 +50,13 @@ from ..clickhouse.errors import ErrorCategory, parse_code, wrap_ch_error
 from ..clickhouse.quoting import plain_source_name, quote_identifier
 from ..schema.applier import SchemaApplyError, live_columns
 from ..settings import DetectionGuardSettings, HuntsSettings
-from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
+from .hdx_sanitizer import (
+    REFUSED_CLAUSES,
+    HdxSanitizeError,
+    HdxSanitizer,
+    split_time_window,
+)
+from .hunt_target_check import missing_columns
 from .rule_condition import (
     MAX_CONDITION_SQL_BYTES,
     ORDERINGS,
@@ -69,8 +76,16 @@ from .rule_guard import (
     unmeasured_warning,
     volume_verdict,
 )
+from .rule_import import find_placeholders
+from .rule_import import sanitize_summary as summarise_sanitized
+from .rule_json_paths import (
+    referenced_json_paths,
+    seen_paths_sql,
+    unseen_paths,
+    unseen_warning,
+)
 from .rule_model import Rule, RuleCreate
-from .rule_rewriter import RuleRewriter, strip_time_placeholder
+from .rule_rewriter import TIMESTAMP_COLUMNS, RuleRewriter, strip_time_placeholder
 from .validator import rule_source
 
 # -- Request / Response models ------------------------------
@@ -79,10 +94,11 @@ from .validator import rule_source
 class RuleCreateRequest(BaseModel):
     """Input for the rule creation pipeline.
 
-    At least one of ``user_sql``, ``condition`` or ``cel_filter`` must be provided,
-    and ``user_sql`` and ``condition`` are two ways to write the same thing, so not
-    both. A ``condition`` reads the table of ``source``. ``source_type`` controls
-    whether HyperDX sanitization is applied.
+    The detection is written as ``user_sql``, a ``where_clause``, a structured
+    ``condition`` or a ``cel_filter``. The first three are ways to write the same thing,
+    so one of them. A ``where_clause`` or ``condition`` reads the table of ``source``,
+    which must be registered, and compiles to the ``user_sql`` the pipeline checks.
+    ``source_type`` controls whether HyperDX sanitization is applied to ``user_sql``.
     """
 
     name: str = Field(..., description="Human-readable rule name")
@@ -92,6 +108,9 @@ class RuleCreateRequest(BaseModel):
         description="SQL origin: 'raw' for clean SQL, 'hyperdx' for HyperDX-generated",
     )
     user_sql: str | None = Field(default=None, description="User-supplied SQL SELECT")
+    where_clause: str | None = Field(
+        default=None, description="The rule's row filter, read from the table of ``source``"
+    )
     condition: RuleCondition | None = Field(
         default=None, description="Structured condition, compiled to the rule's SQL"
     )
@@ -104,6 +123,13 @@ class RuleCreateRequest(BaseModel):
         default=True,
         description="Return the measured alert-volume preview in the result's cost_estimate",
     )
+    measure_volume: bool = Field(
+        default=True,
+        description=(
+            "Run the alert-volume preview at all. A check an author triggers as they type "
+            "turns it off, since the preview counts a window of the source's rows"
+        ),
+    )
     cost_window_minutes: int | None = Field(
         default=None,
         description=(
@@ -114,14 +140,26 @@ class RuleCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_sql_or_cel(self) -> RuleCreateRequest:
-        if not self.user_sql and not self.cel_filter and self.condition is None:
-            raise ValueError(
-                "At least one of 'user_sql', 'condition' or 'cel_filter' must be provided."
+        written = [
+            name
+            for name, given in (
+                ("user_sql", bool(self.user_sql)),
+                ("where_clause", self.where_clause is not None),
+                ("condition", self.condition is not None),
             )
-        if self.user_sql and self.condition is not None:
-            raise ValueError("Give 'user_sql' or 'condition', not both.")
-        if self.condition is not None and self.source_type != "raw":
-            raise ValueError("A condition is compiled by the engine, so its source_type is 'raw'.")
+            if given
+        ]
+        if not written and not self.cel_filter:
+            raise ValueError(
+                "At least one of 'user_sql', 'where_clause', 'condition' or 'cel_filter' "
+                "must be provided."
+            )
+        if len(written) > 1:
+            raise ValueError(f"Give one of {', '.join(repr(name) for name in written)}, not both.")
+        if self.source_type != "raw" and (self.where_clause is not None or self.condition):
+            raise ValueError(
+                "The engine compiles a where_clause or condition, so its source_type is 'raw'."
+            )
         return self
 
 
@@ -196,6 +234,13 @@ class RuleCreateResult(BaseModel):
         description=(
             "What the alert-volume preview said about the rule just now. A point-in-time "
             "reading, so it is answered once and never stored with the rule"
+        ),
+    )
+    json_path_warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The _json paths the rule reads that the source's recent rows did not carry. "
+            "A warning, never a refusal, since the data may simply not have arrived yet"
         ),
     )
     ai_context: AIAnalysisStub | None = None
@@ -352,7 +397,7 @@ def _failure_reason(
 
 
 class RuleCreationService:
-    """Orchestrates rule creation from raw or HyperDX SQL.
+    """Orchestrates rule creation from a source and its detection, or from raw or HyperDX SQL.
 
     Args:
         rewriter: Custom RuleRewriter instance (optional).
@@ -365,6 +410,8 @@ class RuleCreationService:
             column the runner windows on. Defaults when omitted.
         ch_client: ClickHouse client for the parse check and the volume preview,
             in place of the pooled one.
+        is_source: Whether a label names a registered source. A rule naming one
+            that does not is refused. Omitted, no label is checked.
     """
 
     def __init__(
@@ -376,6 +423,7 @@ class RuleCreationService:
         ch_config: dict[str, Any] | None = None,
         hunts: HuntsSettings | None = None,
         ch_client: ChQueryClient | None = None,
+        is_source: Callable[[str], bool] | None = None,
     ) -> None:
         self._rewriter = rewriter or RuleRewriter()
         self._hdx_sanitizer = hdx_sanitizer or HdxSanitizer()
@@ -383,6 +431,7 @@ class RuleCreationService:
         self._ch_config = ch_config
         self._hunts = hunts or HuntsSettings()
         self._ch_client = ch_client
+        self._is_source = is_source
 
     # -- Public API ----------------------------------------
 
@@ -415,12 +464,10 @@ class RuleCreationService:
             RuleCreateResult with rule, validation errors, the match-everything
             verdict, cost estimate, and AI context.
         """
-        if request.condition is not None:
-            try:
-                compiled = self.condition_sql(request.source, request.condition)
-            except RuleConditionError as exc:
-                return self._refused_condition(request, rule_id, str(exc))
-            request = request.model_copy(update={"user_sql": compiled})
+        try:
+            request = self._with_rule_sql(request)
+        except RuleConditionError as exc:
+            return self._refused_condition(request, rule_id, str(exc))
         sanitize_summary: dict[str, Any] = {}
         clean_sql = request.user_sql
         refusal: SqlValidationError | None = None
@@ -433,7 +480,7 @@ class RuleCreationService:
                 refusal = SqlValidationError(message=str(exc))
             else:
                 clean_sql = hdx_result.clean_sql
-                sanitize_summary = self._build_sanitize_summary(hdx_result)
+                sanitize_summary = summarise_sanitized(hdx_result)
                 logger.debug(
                     f"HdxSanitizer stripped {len(hdx_result.stripped_time_bounds)} "
                     f"time bounds, had_time_bucket={hdx_result.had_time_bucket}"
@@ -481,18 +528,7 @@ class RuleCreationService:
         # The stored WHERE is what the preview and the hunt runner execute, which a
         # transpiled CEL filter reaches without passing through the SQL check above.
         if not sql_errors:
-            offbox = refuse_offbox_calls(rule.where_clause)
-            escape = (
-                None
-                if offbox is not None
-                else refuse_condition_escape(
-                    rule.where_clause, lookup_databases=self._hunts.lookup_databases
-                )
-            )
-            if offbox is not None:
-                sql_errors = [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
-            elif escape is not None:
-                sql_errors = [SqlValidationError(message=escape, suggestion=_ESCAPE_FIX)]
+            sql_errors = self.condition_errors(rule.where_clause)
 
         # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
@@ -505,13 +541,18 @@ class RuleCreationService:
         cost_estimate: CostEstimate | None = None
         volume_warnings: list[str] = []
         measurable = not refused and matches_everything is None
-        if measurable and rule.source_db and rule.source_table:
+        if measurable and request.measure_volume and rule.source_db and rule.source_table:
             if guard.enabled or request.estimate_cost:
                 cost_estimate = self._preview_volume(rule, request.cost_window_minutes, tenant_ids)
             if guard.enabled and cost_estimate is not None:
                 volume_warnings = list(cost_estimate.warnings)
             if not request.estimate_cost:
                 cost_estimate = None
+        json_path_warnings = (
+            self._json_path_warnings(rule, tenant_ids)
+            if measurable and rule.source_db and rule.source_table
+            else []
+        )
 
         # Phase 6: AI analysis stub
         ai_context = AIAnalysisStub(
@@ -531,6 +572,7 @@ class RuleCreationService:
             matches_everything=matches_everything,
             cost_estimate=cost_estimate,
             volume_warnings=volume_warnings,
+            json_path_warnings=json_path_warnings,
             ai_context=ai_context,
         )
 
@@ -541,6 +583,191 @@ class RuleCreationService:
         table lacks is not a reason to refuse the SQL.
         """
         return self._validate_sql_syntax(strip_time_placeholder(sql), plan=plan)
+
+    def condition_errors(self, where: str) -> list[SqlValidationError]:
+        """What a stored WHERE may not call or read, which the preview and the runner execute.
+
+        Args:
+            where: The rule's detection WHERE.
+
+        Returns:
+            The refusal, or an empty list when the condition calls nothing outside the
+            row and reads no other table.
+        """
+        offbox = refuse_offbox_calls(where)
+        if offbox is not None:
+            return [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
+        escape = refuse_condition_escape(where, lookup_databases=self._hunts.lookup_databases)
+        if escape is not None:
+            return [SqlValidationError(message=escape, suggestion=_ESCAPE_FIX)]
+        return []
+
+    def check_stored(
+        self, source_db: str, source_table: str, where_clause: str
+    ) -> list[SqlValidationError]:
+        """The query check a stored rule passes when a hunt names it.
+
+        Runs the refusals a save runs on the stored WHERE, then ClickHouse's plan of
+        it against the source table. An unreachable ClickHouse leaves the plan unchecked.
+
+        Args:
+            source_db: The rule's stored database.
+            source_table: The rule's stored table.
+            where_clause: The rule's stored detection WHERE.
+
+        Returns:
+            Every reason the hunt runner could not run the rule, empty when none.
+        """
+        if not where_clause.strip():
+            return [SqlValidationError(message="Rule has empty detection logic (WHERE clause).")]
+        errors = self.condition_errors(where_clause)
+        if errors or not source_db or not source_table:
+            return errors
+        plan_error = self._plan_error(source_db, source_table, where_clause)
+        return [plan_error] if plan_error is not None else []
+
+    def target_error(self, database: str, table: str) -> str | None:
+        """Why a hunt's results table cannot take what the runner inserts, or None.
+
+        Reads the table's columns from ``system.columns`` and compares them with the
+        INSERT's. An unreachable ClickHouse leaves the table unchecked.
+
+        Args:
+            database: The target's database.
+            table: The target's table.
+        """
+        client = self._query_client()
+        if client is None:
+            return None
+        try:
+            missing = missing_columns(client, database, table)
+        except SchemaApplyError as exc:
+            logger.warning(f"columns of {database}.{table} unavailable, target not checked: {exc}")
+            return None
+        if missing is None:
+            return (
+                f"{database}.{table} does not exist, so the runner has nowhere to write detections"
+            )
+        if missing:
+            return f"{database}.{table} lacks the columns the runner writes: {', '.join(missing)}"
+        return None
+
+    def _with_rule_sql(self, request: RuleCreateRequest) -> RuleCreateRequest:
+        """The request with ``user_sql`` set to the SELECT its source and detection compile to.
+
+        A ``user_sql`` request is left as written. Where sources are checked, a source it
+        names must be registered and its FROM must read that source's table. A request
+        with no SQL of its own reads the table of its source.
+
+        Raises:
+            RuleConditionError: The source is missing, unregistered or not a table label,
+                the SQL reads another table than its source, or the detection does not
+                compile to a plain row filter.
+        """
+        if request.user_sql:
+            if request.source and self._is_source is not None:
+                self._refuse_another_table(request.user_sql, request.source)
+            return request
+        if request.condition is not None:
+            sql = self.condition_sql(request.source, request.condition)
+        elif request.where_clause is not None:
+            sql = self.where_sql(request.source, request.where_clause)
+        elif request.source:
+            # A CEL filter alone: the rule reads its source's table, and the filter is the WHERE.
+            target = self._quoted_target(*self._source_table(request.source))
+            sql = f"SELECT * FROM {target}"  # noqa: S608 - quoted names
+        else:
+            return request
+        return request.model_copy(update={"user_sql": sql})
+
+    def _refuse_another_table(self, user_sql: str, source: str) -> None:
+        """Refuse SQL whose FROM is not the registered table of the source it names.
+
+        SQL that does not parse, or names no ``<db>.<table>``, is left to the SQL check.
+        """
+        database, table = self._source_table(source)
+        parsed = self._rewriter.parse_user_sql(strip_time_placeholder(user_sql))
+        if not (parsed.source_db and parsed.source_table):
+            return
+        if (parsed.source_db, parsed.source_table) != (database, table):
+            raise RuleConditionError(
+                f"the SQL reads {parsed.source_db}.{parsed.source_table}, but source "
+                f"{source!r} is {database}.{table}"
+            )
+
+    def _refuse_unregistered(self, source: str | None) -> None:
+        if source and self._is_source is not None and not self._is_source(source):
+            raise RuleConditionError(
+                f"source {source!r} is not a registered source, so no table backs the rule"
+            )
+
+    def _source_table(self, source: str | None) -> tuple[str, str]:
+        """The data database and table a rule on ``source`` reads, once the source is registered.
+
+        Raises:
+            RuleConditionError: No source or data database, a source that is not a table
+                label, or one that is not registered.
+        """
+        if not source:
+            raise RuleConditionError("a rule reads a source's table, so name the source")
+        if not self._data_database:
+            raise RuleConditionError("no data database is configured to read the source from")
+        try:
+            database, table = plain_source_name(source)
+        except ValueError as exc:
+            raise RuleConditionError(f"source {source!r} is not a table label: {exc}") from None
+        if database:
+            raise RuleConditionError(f"source {source!r} is a label, not a <db>.<table> name")
+        self._refuse_unregistered(source)
+        return self._data_database, table
+
+    @staticmethod
+    def _quoted_target(database: str, table: str) -> str:
+        return f"{quote_identifier(database)}.{quote_identifier(table)}"
+
+    def where_sql(self, source: str | None, where_clause: str) -> str:
+        """The rule SQL a WHERE clause on ``source`` compiles to.
+
+        Args:
+            source: The source's label, which is also its table's name.
+            where_clause: The row filter, written as the part after WHERE.
+
+        Returns:
+            ``SELECT * FROM <db>.<table> WHERE <where_clause>``, the names quoted.
+
+        Raises:
+            RuleConditionError: The source does not resolve, the WHERE is empty, carries a
+                ``{...}`` placeholder or a time bound the hunt window replaces, or holds
+                more than a row filter.
+        """
+        where = where_clause.strip()
+        if not where:
+            raise RuleConditionError(
+                "the WHERE clause is empty, and a rule needs one to select rows"
+            )
+        placeholders = find_placeholders(where)
+        if placeholders:
+            raise RuleConditionError(
+                f"the WHERE clause has {', '.join(placeholders)}. The time window comes from "
+                "the hunt schedule, and the runner fills in no placeholder"
+            )
+        target = self._quoted_target(*self._source_table(source))
+        sql = f"SELECT * FROM {target} WHERE {where}"  # noqa: S608 - quoted names, and the WHERE is the rule and read back below
+        # What is stored must be what the runner runs, so a bound or clause the read drops is refused.
+        try:
+            split = split_time_window(sql, TIMESTAMP_COLUMNS)
+        except HdxSanitizeError as exc:
+            raise RuleConditionError(f"the WHERE clause could not be read: {exc}") from None
+        if split.removed:
+            raise RuleConditionError(
+                "the hunt window bounds time for every rule, so the WHERE cannot compare a "
+                f"time column with lt, lte, gt or gte: {', '.join(split.removed)}"
+            )
+        if split.after_filter.strip() or split.ignored_clauses:
+            raise RuleConditionError(
+                "the WHERE clause holds more than a row filter, such as another clause or statement"
+            )
+        return sql
 
     def condition_sql(self, source: str | None, condition: RuleCondition) -> str:
         """The rule SQL a condition on ``source`` compiles to.
@@ -558,21 +785,12 @@ class RuleCreationService:
 
         Raises:
             RuleConditionError: No source or data database to read, a source that
-                is not a table label, or a field that does not fit the table.
+                is not a registered table label, or a field that does not fit the table.
         """
-        if not source:
-            raise RuleConditionError("a condition reads a source's table, so name the source")
-        if not self._data_database:
-            raise RuleConditionError("no data database is configured to read the source from")
-        try:
-            database, table = plain_source_name(source)
-        except ValueError as exc:
-            raise RuleConditionError(f"source {source!r} is not a table label: {exc}") from None
-        if database:
-            raise RuleConditionError(f"source {source!r} is a label, not a <db>.<table> name")
-        columns = self._table_columns(self._data_database, table)
+        database, table = self._source_table(source)
+        columns = self._table_columns(database, table)
         where = compile_condition(condition, columns)
-        target = f"{quote_identifier(self._data_database)}.{quote_identifier(table)}"
+        target = self._quoted_target(database, table)
         # A negated time bound survives the rule read below, so each ordering test is read on its own.
         bounds = [
             bound
@@ -848,6 +1066,42 @@ class RuleCreationService:
 
         return ClickHouseManager.get_instance().get_clickhouse_client()
 
+    def _json_path_warnings(self, rule: Rule, tenant_ids: list[str] | None) -> list[str]:
+        """Warn for each ``_json`` path the rule reads that recent rows of its source never carried.
+
+        The read is bounded in rows, time and orgs, runs read-only, and breaks off rather than
+        fails, since a partial read still names the paths it saw. An unreachable ClickHouse,
+        an empty window or a read held to no org leaves the paths unchecked.
+        """
+        referenced = referenced_json_paths(rule.where_clause)
+        client = self._query_client()
+        if not referenced or client is None or (tenant_ids is not None and not tenant_ids):
+            return []
+        guard = self._hunts.detection_guard
+        window = guard.preview_window_minutes
+        sql = seen_paths_sql(
+            rule.source_db or "",
+            rule.source_table or "",
+            self._hunts.checkpoint_timestamp_field,
+            window,
+            tenant_ids=tenant_ids,
+        )
+        settings = {
+            **preview_settings(guard),
+            "read_overflow_mode": "break",
+            "timeout_overflow_mode": "break",
+        }
+        try:
+            rows = client.query(sql, settings=settings).result_rows
+        except (ServiceUnavailable, ClickHouseError) as exc:
+            logger.warning(f"JSON paths of {source_label(rule)} unavailable: {exc}")
+            return []
+        seen = list(rows[0][0]) if rows and rows[0][0] else []
+        if not seen:
+            return []
+        missing = unseen_paths(referenced, seen)
+        return [unseen_warning(missing, source_label(rule), window)] if missing else []
+
     def _preview_volume(
         self, rule: Rule, window_minutes: int | None, tenant_ids: list[str] | None
     ) -> CostEstimate:
@@ -917,26 +1171,21 @@ class RuleCreationService:
             warnings=warnings,
         )
 
-    @staticmethod
-    def _build_sanitize_summary(hdx_result: HdxSanitizeResult) -> dict[str, Any]:
-        """Convert HdxSanitizeResult to a summary dict for API response."""
-        summary: dict[str, Any] = {}
 
-        if hdx_result.stripped_time_bounds:
-            summary["stripped_time_bounds"] = hdx_result.stripped_time_bounds
-        if hdx_result.stripped_settings:
-            summary["stripped_settings"] = hdx_result.stripped_settings
-        if hdx_result.stripped_limit:
-            summary["stripped_limit"] = hdx_result.stripped_limit
-        if hdx_result.stripped_time_bucket_select:
-            summary["stripped_time_bucket_select"] = hdx_result.stripped_time_bucket_select
-        if hdx_result.stripped_time_bucket_refs:
-            summary["stripped_time_bucket_refs"] = hdx_result.stripped_time_bucket_refs
-        if hdx_result.had_time_bucket:
-            summary["had_time_bucket"] = True
-        if hdx_result.stripped_clauses:
-            summary["stripped_clauses"] = hdx_result.stripped_clauses
-        if hdx_result.warnings:
-            summary["warnings"] = hdx_result.warnings
+def service_from_settings(
+    settings: Any, *, is_source: Callable[[str], bool] | None = None
+) -> RuleCreationService:
+    """The creation service every rule and hunt check runs through, on the engine's own ClickHouse.
 
-        return summary
+    Args:
+        settings: The engine settings.
+        is_source: Whether a label names a registered source.
+    """
+    from ..settings import get_clickhouse_config
+
+    return RuleCreationService(
+        ch_config=get_clickhouse_config(settings),
+        hunts=settings.hunts,
+        data_database=settings.clickhouse.effective_data_database,
+        is_source=is_source,
+    )

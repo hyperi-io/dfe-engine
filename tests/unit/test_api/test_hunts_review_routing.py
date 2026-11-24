@@ -102,7 +102,8 @@ def _rule_payload(name: str = "certutil") -> dict:
         "name": name,
         "display_name": "Certutil Abuse",
         "severity": "high",
-        "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+        "source": "main",
+        "where_clause": "severity = 'high'",
     }
 
 
