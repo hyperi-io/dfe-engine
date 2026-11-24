@@ -21,7 +21,7 @@ from scalo.logger.filters import is_credential_name
 
 from dfe_engine.appmgmt import catalogue, contract
 from dfe_engine.gitcrud import GitCrud
-from dfe_engine.gitcrud.engine import set_path
+from dfe_engine.gitcrud.engine import get_path, set_path
 from dfe_engine.gitops.repo import GitopsRepo
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
@@ -470,10 +470,10 @@ class TestProvenance:
     def test_a_listener_address_names_the_contract_port_it_binds(self):
         # The Service and the probes use the contract's port, so a moved
         # address takes the listener off it.
-        assert contract.chart_supplier("dfe-receiver", "config.server.bind_address") == (
+        assert contract.chart_supplier("dfe-receiver", "config.server.bind_address", {}) == (
             "contract port http"
         )
-        assert "contract port http" not in contract.chart_env_names("dfe-receiver")
+        assert "contract port http" not in contract.chart_env_names("dfe-receiver", {})
 
     @pytest.mark.parametrize("service", APPS)
     def test_every_path_the_deployment_owns_is_one_the_app_declares(self, service):
@@ -594,39 +594,46 @@ class TestProvenance:
 
     def test_no_chart_means_nothing_is_the_deployment_s(self):
         # On Compose the deployment's base config sits under the overlay.
-        assert contract.chart_supplier("dfe-loader", "config.kafka.brokers") is not None
+        assert contract.chart_supplier("dfe-loader", "config.kafka.brokers", {}) is not None
         path = "config.kafka.brokers"
-        assert contract.chart_supplier("dfe-loader", path, chart_deployed=False) is None
-        assert contract.chart_env_names("dfe-loader", chart_deployed=False) == {}
+        assert contract.chart_supplier("dfe-loader", path, {}, chart_deployed=False) is None
+        assert contract.chart_env_names("dfe-loader", {}, chart_deployed=False) == {}
         view = contract.resolve_config(_contract("dfe-loader"), {}, chart_deployed=False)
         assert [f.path for f in view.fields if f.provenance == contract.Provenance.CHART] == []
 
     def test_what_supplies_a_chart_path_is_named(self):
         # A refused write has to say what to change instead of the overlay.
-        assert contract.chart_supplier("dfe-receiver", "config.kafka.brokers") == (
+        assert contract.chart_supplier("dfe-receiver", "config.kafka.brokers", {}) == (
             "DFE_RECEIVER_KAFKA_BROKERS"
         )
-        assert contract.chart_supplier("dfe-loader", "config.batch_processing.format") is None
+        assert contract.chart_supplier("dfe-loader", "config.batch_processing.format", {}) is None
 
     def test_the_archiver_topic_filter_is_the_overlay_s(self):
         # Nothing in the deployment sets KAFKA_TOPIC_INCLUDE, and it is an idle_when path.
-        assert contract.chart_supplier("dfe-archiver", "config.kafka.topic_include") is None
+        assert contract.chart_supplier("dfe-archiver", "config.kafka.topic_include", {}) is None
 
     def test_an_app_the_manifest_does_not_list_owns_nothing(self):
-        assert contract.chart_supplier("dfe-no-such-app", "config.kafka.brokers") is None
-        assert contract.chart_env_names("dfe-no-such-app") == {}
+        assert contract.chart_supplier("dfe-no-such-app", "config.kafka.brokers", {}) is None
+        assert contract.chart_env_names("dfe-no-such-app", {}) == {}
+
+    def test_a_caller_with_no_overlay_says_so(self):
+        # A missing overlay is not an empty one: the gated paths turn on its values.
+        with pytest.raises(TypeError):
+            contract.chart_supplier("dfe-receiver", "config.kafka.brokers")  # ty: ignore[missing-argument]
+        with pytest.raises(TypeError):
+            contract.chart_env_names("dfe-loader")  # ty: ignore[missing-argument]
 
     def test_the_env_names_a_chart_sets_are_available_as_data(self):
         # What an extraEnv key is compared against, so the name is a key rather
         # than something to read out of the supplier string.
-        names = contract.chart_env_names("dfe-loader")
+        names = contract.chart_env_names("dfe-loader", {})
         assert names["DFE_LOADER_KAFKA_BROKERS"] == "config.kafka.brokers"
         assert "DFE_LOADER_HOUSE_KEY" not in names
 
     def test_a_values_path_is_not_an_env_name(self):
         # The transforms take three paths from configOverrides, which names no
         # variable an operator could shadow.
-        names = contract.chart_env_names("dfe-transform-vrl")
+        names = contract.chart_env_names("dfe-transform-vrl", {})
         assert "configOverrides.source.transport" not in names
         assert names[_env("dfe-transform-vrl", "SOURCE_BROKERS")] == "config.source.brokers"
 
@@ -1018,7 +1025,7 @@ class TestHeldAcknowledgements:
     def test_no_chart_supplies_it(self, service, block):
         # A chart-derived path is refused on write. This one is the operator's.
         path = f"config.{block}.acknowledgements.enabled"
-        assert contract.chart_supplier(service, path) is None
+        assert contract.chart_supplier(service, path, {}) is None
 
 
 class TestRedactingTheOverlay:
@@ -1579,6 +1586,130 @@ class TestTheMappingBesideACredentialDecides:
         moved = {**shown, "kafka": {**shown["kafka"], "brokers": ["evil.example:9092"]}}
         with pytest.raises(contract.CredentialReentryError, match=r"kafka changed brokers"):
             contract.restore_masked(moved, stored, shown=shown)
+
+
+REST = "config.sources.rest"
+PRIMARY = f"{REST}.primary"
+INLINE = f"{REST}.inline"
+KAFKA = "config.kafka"
+ALLOW = "allow"
+REENTRY = contract.CredentialReentryError.code
+
+
+class TestWhatCanMoveAStoredCredential:
+    """A write that can change where a stored credential is sent restores no mask.
+
+    dfe-fetcher sends a REST source's token to a URL built from the instance's
+    ``vars`` and its ``profile``, so a change inside either moves the token as
+    surely as a changed scalar beside it does.
+    """
+
+    DOC: dict[str, Any] = {
+        "config": {
+            "sources": {
+                "rest": {
+                    "primary": {
+                        "profile": "okta",
+                        "topic": "okta-logs",
+                        "interval_secs": 60,
+                        "vars": {"base_url": "https://a.example", "page_size": 100},
+                        "auth": {"mode": "bearer", "token": "tok-4701"},
+                    },
+                    "inline": {
+                        "profile": {"base_url": "{{ vars.base_url }}/api", "allow_hosts": []},
+                        "vars": {"base_url": "https://b.example"},
+                        "auth": {"mode": "bearer", "token": "tok-4702"},
+                    },
+                }
+            },
+            "kafka": {
+                "brokers": ["kafka-1:9092"],
+                "producer": {"retries": 3},
+                "sasl": {"username": "dfe", "password": "kafka-pw-4703"},
+            },
+        }
+    }
+
+    @staticmethod
+    def _leaf_writes(doc: dict, holder: str, changes: dict[str, Any]) -> None:
+        """Each change written at its own path, clears made first as a request makes them."""
+        cleared = [f"{holder}.{key}" for key, value in changes.items() if value is contract.MISSING]
+        rest = json.loads(json.dumps(doc))
+        for path in cleared:
+            contract.require_clear_keeps_credentials(rest, path)
+            parent, _, leaf = path.rpartition(".")
+            del get_path(rest, parent)[leaf]
+        for key, value in changes.items():
+            if value is not contract.MISSING:
+                contract.restore_masked_at(rest, f"{holder}.{key}", value)
+
+    @staticmethod
+    def _section_write(doc: dict, holder: str, changes: dict[str, Any]) -> None:
+        """The holder written whole, as read, with every change made in it."""
+        written = _read(holder, get_path(doc, holder))
+        for key, value in changes.items():
+            parent, _, leaf = key.rpartition(".")
+            inside = get_path(written, parent) if parent else written
+            if value is contract.MISSING:
+                del inside[leaf]
+            else:
+                inside[leaf] = value
+        contract.restore_masked_at(doc, holder, written)
+
+    @pytest.mark.parametrize("form", ["leaf", "section"])
+    @pytest.mark.parametrize(
+        ("holder", "changes", "verdict"),
+        [
+            pytest.param(
+                PRIMARY, {"vars.base_url": "https://evil.example"}, REENTRY, id="vars-url-moved"
+            ),
+            pytest.param(PRIMARY, {"vars.host": "evil.example"}, REENTRY, id="vars-host-added"),
+            pytest.param(
+                PRIMARY, {"vars.base_url": contract.MISSING}, REENTRY, id="vars-url-dropped"
+            ),
+            pytest.param(PRIMARY, {"vars.page_size": 500}, ALLOW, id="vars-number-changed"),
+            pytest.param(
+                INLINE,
+                {"profile.base_url": "https://evil.example/api"},
+                REENTRY,
+                id="inline-profile-moved",
+            ),
+            pytest.param(
+                INLINE,
+                {"profile.allow_hosts": ["https://evil.example"]},
+                REENTRY,
+                id="inline-profile-host-allowed",
+            ),
+            pytest.param(PRIMARY, {"profile": "other-api"}, REENTRY, id="named-profile-swapped"),
+            pytest.param(
+                PRIMARY,
+                {"profile": {"base_url": "https://evil.example"}},
+                REENTRY,
+                id="named-profile-made-inline",
+            ),
+            pytest.param(PRIMARY, {"topic": "elsewhere"}, REENTRY, id="topic-changed"),
+            pytest.param(PRIMARY, {"interval_secs": 600}, REENTRY, id="interval-changed"),
+            pytest.param(KAFKA, {"producer.retries": 9}, ALLOW, id="kafka-producer-retries"),
+            pytest.param(
+                KAFKA, {"brokers": ["evil.example:9092"]}, REENTRY, id="kafka-brokers-moved"
+            ),
+            pytest.param(
+                PRIMARY,
+                {"auth.token": contract.MISSING, "vars.base_url": "https://evil.example"},
+                ALLOW,
+                id="token-cleared-with-the-url",
+            ),
+            pytest.param(PRIMARY, {"vars.base_url": "https://a.example"}, ALLOW, id="as-stored"),
+        ],
+    )
+    def test_the_verdict(self, form, holder, changes, verdict):
+        write = self._leaf_writes if form == "leaf" else self._section_write
+        if verdict == ALLOW:
+            write(self.DOC, holder, changes)
+            return
+        with pytest.raises(contract.CredentialReentryError) as refused:
+            write(self.DOC, holder, changes)
+        assert refused.value.code == verdict
 
 
 class TestAValueReadAsOneMask:

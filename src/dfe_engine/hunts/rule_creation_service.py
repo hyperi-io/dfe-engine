@@ -1,12 +1,13 @@
-"""Rule Creation Service -- the rule creation pipeline.
+"""Rule Creation Service -- HyperDX-aware rule creation pipeline.
 
 Orchestrates the full rule creation workflow:
-1. SQL syntax validation with helpful error messages
-2. Rule creation via Rule.from_create()
-3. The match-everything check, which the API refuses on
-4. The alert-volume preview: a count over a lookback window on the rule's
+1. HyperDX SQL sanitization (if source_type="hyperdx")
+2. SQL syntax validation with helpful error messages
+3. Rule creation via Rule.from_create()
+4. The match-everything check, which the API refuses on
+5. The alert-volume preview: a count over a lookback window on the rule's
    source table, banded into warnings on the rule
-5. AI analysis stub for async TS runner consumption
+6. AI analysis stub for async TS runner consumption
 
 dfe-engine is a library -- no HTTP endpoints here. The control-plane
 wraps this service in API routes.
@@ -29,12 +30,13 @@ Usage::
     )
     # result.rule -- Rule instance
     # result.sql_errors -- validation issues
+    # result.sanitize_summary -- what was stripped
 """
 
 import re
 import time
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import sqlglot
 from clickhouse_connect.driver.exceptions import ClickHouseError
@@ -51,6 +53,7 @@ from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import (
     REFUSED_CLAUSES,
     HdxSanitizeError,
+    HdxSanitizer,
     split_time_window,
 )
 from .hunt_target_check import missing_columns
@@ -74,6 +77,7 @@ from .rule_guard import (
     volume_verdict,
 )
 from .rule_import import find_placeholders
+from .rule_import import sanitize_summary as summarise_sanitized
 from .rule_json_paths import (
     referenced_json_paths,
     seen_paths_sql,
@@ -90,15 +94,19 @@ from .validator import rule_source
 class RuleCreateRequest(BaseModel):
     """Input for the rule creation pipeline.
 
-    A rule is a registered ``source`` and the detection written as a ``where_clause``,
-    a structured ``condition`` or a ``cel_filter``. A ``where_clause`` and a
-    ``condition`` are two ways to write the same thing, so not both, and either reads
-    the table of ``source``. ``user_sql`` is the full SELECT the pipeline checks, which
-    the first two compile to. A library caller may give it in their place.
+    The detection is written as ``user_sql``, a ``where_clause``, a structured
+    ``condition`` or a ``cel_filter``. The first three are ways to write the same thing,
+    so one of them. A ``where_clause`` or ``condition`` reads the table of ``source``,
+    which must be registered, and compiles to the ``user_sql`` the pipeline checks.
+    ``source_type`` controls whether HyperDX sanitization is applied to ``user_sql``.
     """
 
     name: str = Field(..., description="Human-readable rule name")
     severity: str = Field(default="medium", description="Detection severity")
+    source_type: Literal["raw", "hyperdx"] = Field(
+        default="raw",
+        description="SQL origin: 'raw' for clean SQL, 'hyperdx' for HyperDX-generated",
+    )
     user_sql: str | None = Field(default=None, description="User-supplied SQL SELECT")
     where_clause: str | None = Field(
         default=None, description="The rule's row filter, read from the table of ``source``"
@@ -148,6 +156,10 @@ class RuleCreateRequest(BaseModel):
             )
         if len(written) > 1:
             raise ValueError(f"Give one of {', '.join(repr(name) for name in written)}, not both.")
+        if self.source_type != "raw" and (self.where_clause is not None or self.condition):
+            raise ValueError(
+                "The engine compiles a where_clause or condition, so its source_type is 'raw'."
+            )
         return self
 
 
@@ -211,6 +223,7 @@ class RuleCreateResult(BaseModel):
     """Complete result of the rule creation pipeline."""
 
     rule: Rule
+    sanitize_summary: dict[str, Any] = Field(default_factory=dict)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
     matches_everything: str | None = Field(
         default=None, description="Why the rule matches every event, when it does"
@@ -384,10 +397,11 @@ def _failure_reason(
 
 
 class RuleCreationService:
-    """Orchestrates rule creation from a source and its detection.
+    """Orchestrates rule creation from a source and its detection, or from raw or HyperDX SQL.
 
     Args:
         rewriter: Custom RuleRewriter instance (optional).
+        hdx_sanitizer: Custom HdxSanitizer instance (optional).
         data_database: The database a source's table is read from when a rule
             is written as a condition.
         ch_config: ClickHouse config. With it, the parse check and the volume
@@ -404,6 +418,7 @@ class RuleCreationService:
         self,
         *,
         rewriter: RuleRewriter | None = None,
+        hdx_sanitizer: HdxSanitizer | None = None,
         data_database: str | None = None,
         ch_config: dict[str, Any] | None = None,
         hunts: HuntsSettings | None = None,
@@ -411,6 +426,7 @@ class RuleCreationService:
         is_source: Callable[[str], bool] | None = None,
     ) -> None:
         self._rewriter = rewriter or RuleRewriter()
+        self._hdx_sanitizer = hdx_sanitizer or HdxSanitizer()
         self._data_database = data_database
         self._ch_config = ch_config
         self._hunts = hunts or HuntsSettings()
@@ -425,8 +441,9 @@ class RuleCreationService:
         rule_id: str,
         *,
         tenant_ids: list[str] | None = None,
+        plan: bool = True,
     ) -> RuleCreateResult:
-        """Full pipeline: validate -> Rule.from_create -> guards -> AI stub.
+        """Full pipeline: sanitize -> validate -> Rule.from_create -> guards -> AI stub.
 
         The volume preview runs only on a rule that would be saved. With the
         detection guard enabled its warnings come back as ``volume_warnings``,
@@ -440,6 +457,8 @@ class RuleCreationService:
             tenant_ids: The orgs the preview counts, by the tenant ids their rows
                 carry. None counts every org, and an empty list leaves the rule
                 unmeasured.
+            plan: Whether ClickHouse resolves the condition against the FROM table.
+                Off when that table is a stand-in for a source the hunt names later.
 
         Returns:
             RuleCreateResult with rule, validation errors, the match-everything
@@ -449,13 +468,35 @@ class RuleCreationService:
             request = self._with_rule_sql(request)
         except RuleConditionError as exc:
             return self._refused_condition(request, rule_id, str(exc))
-        # Phase 1: SQL syntax validation, after the time placeholder the window replaces.
-        clean_sql = strip_time_placeholder(request.user_sql) if request.user_sql else None
-        sql_errors: list[SqlValidationError] = []
-        if request.user_sql:
-            sql_errors = self._validate_sql_syntax(clean_sql or "")
+        sanitize_summary: dict[str, Any] = {}
+        clean_sql = request.user_sql
+        refusal: SqlValidationError | None = None
 
-        # Phase 2: Create Rule via existing pipeline.
+        # Phase 1: HyperDX sanitization (if source_type="hyperdx")
+        if request.source_type == "hyperdx" and request.user_sql:
+            try:
+                hdx_result = self._hdx_sanitizer.sanitize(request.user_sql)
+            except HdxSanitizeError as exc:
+                refusal = SqlValidationError(message=str(exc))
+            else:
+                clean_sql = hdx_result.clean_sql
+                sanitize_summary = summarise_sanitized(hdx_result)
+                logger.debug(
+                    f"HdxSanitizer stripped {len(hdx_result.stripped_time_bounds)} "
+                    f"time bounds, had_time_bucket={hdx_result.had_time_bucket}"
+                )
+
+        # Phase 2: SQL syntax validation, after the time placeholder the window replaces.
+        if clean_sql:
+            clean_sql = strip_time_placeholder(clean_sql)
+        sql_errors: list[SqlValidationError] = []
+        if refusal is not None:
+            sql_errors = [refusal]
+        elif request.user_sql:
+            sql_errors = self._validate_sql_syntax(clean_sql or "", plan=plan)
+
+        # Phase 3: Create Rule via existing pipeline. SQL the sanitiser emptied keeps
+        # the caller's text so the result can carry the errors rather than raise.
         rule_create = RuleCreate(
             name=request.name,
             severity=request.severity,
@@ -489,13 +530,13 @@ class RuleCreationService:
         if not sql_errors:
             sql_errors = self.condition_errors(rule.where_clause)
 
-        # Phase 3: a rule the API will refuse is neither judged nor measured further.
+        # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
         matches_everything = (
             None if refused else match_everything(rule.where_clause, source_label(rule))
         )
 
-        # Phase 4: alert-volume preview
+        # Phase 5: alert-volume preview
         guard = self._hunts.detection_guard
         cost_estimate: CostEstimate | None = None
         volume_warnings: list[str] = []
@@ -513,7 +554,7 @@ class RuleCreationService:
             else []
         )
 
-        # Phase 5: AI analysis stub
+        # Phase 6: AI analysis stub
         ai_context = AIAnalysisStub(
             rule_id=rule_id,
             original_sql=request.user_sql or "",
@@ -526,6 +567,7 @@ class RuleCreationService:
 
         return RuleCreateResult(
             rule=rule,
+            sanitize_summary=sanitize_summary,
             sql_errors=sql_errors,
             matches_everything=matches_everything,
             cost_estimate=cost_estimate,
@@ -534,9 +576,13 @@ class RuleCreationService:
             ai_context=ai_context,
         )
 
-    def validate_sql(self, sql: str) -> list[SqlValidationError]:
-        """Standalone SQL validation without rule creation."""
-        return self._validate_sql_syntax(strip_time_placeholder(sql))
+    def validate_sql(self, sql: str, *, plan: bool = True) -> list[SqlValidationError]:
+        """Standalone SQL validation without rule creation.
+
+        ``plan`` is off when the FROM table is a stand-in, so a column the landing
+        table lacks is not a reason to refuse the SQL.
+        """
+        return self._validate_sql_syntax(strip_time_placeholder(sql), plan=plan)
 
     def condition_errors(self, where: str) -> list[SqlValidationError]:
         """What a stored WHERE may not call or read, which the preview and the runner execute.
@@ -797,7 +843,7 @@ class RuleCreationService:
 
     # -- Internal methods ----------------------------------
 
-    def _validate_sql_syntax(self, sql: str) -> list[SqlValidationError]:
+    def _validate_sql_syntax(self, sql: str, *, plan: bool = True) -> list[SqlValidationError]:
         """Structural SQL validation with helpful error messages.
 
         Checks:
@@ -914,7 +960,7 @@ class RuleCreationService:
             )
             if escape is not None:
                 errors.append(SqlValidationError(message=escape, suggestion=_ESCAPE_FIX))
-            if not errors:
+            if not errors and plan:
                 plan_error = self._plan_error(
                     parsed.source_db or "", parsed.source_table or "", parsed.where_clause
                 )

@@ -18,6 +18,7 @@ import pytest
 
 from dfe_engine.auth.models import Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.roles import RoleConfig, RoleDefinition
+from dfe_engine.governance.ch import bindings as bindings_module
 from dfe_engine.governance.ch.bindings import derive_group_bindings
 
 
@@ -227,3 +228,58 @@ class TestFailsClosed:
     def test_org_scoped_group_whose_org_was_deleted_is_skipped(self):
         bindings = derive_group_bindings([_group("orphan", scope="org:gone")], [_org("acme")])
         assert bindings == []
+
+
+class TestReportingAStandingProblemOnce:
+    """The reconcile trigger derives after every org or group write and on each retry."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_record(self, monkeypatch):
+        monkeypatch.setattr(bindings_module, "_reported", {}, raising=False)
+
+    @staticmethod
+    def _logged(events: list[dict], group: str) -> list[str]:
+        return [e["event"] for e in events if e.get("group") == group]
+
+    @pytest.mark.parametrize(
+        ("group", "orgs"),
+        [
+            pytest.param(_group("ghost", org_ids=["nope"]), [_org("acme")], id="unregistered-org"),
+            pytest.param(
+                _group("multi", org_ids=["acme", "beta"]),
+                [_org("acme"), _org("beta")],
+                id="several-orgs",
+            ),
+            pytest.param(
+                _group("ops", org_ids=["acme"], roles=["admin"]),
+                [_org("acme")],
+                id="platform-role-beside-org-markers",
+            ),
+        ],
+    )
+    def test_the_same_problem_is_logged_on_the_first_run_only(self, audit_events, group, orgs):
+        for _ in range(3):
+            derive_group_bindings([group], orgs)
+
+        assert len(self._logged(audit_events, group.name)) == 1
+
+    def test_a_changed_problem_is_logged_again(self, audit_events):
+        derive_group_bindings([_group("g", org_ids=["nope"])], [_org("acme")])
+        derive_group_bindings([_group("g", org_ids=["other"])], [_org("acme")])
+
+        assert len(self._logged(audit_events, "g")) == 2
+
+    def test_a_problem_that_returns_after_a_fix_is_logged_again(self, audit_events):
+        broken = _group("g", org_ids=["nope"])
+        fixed = _group("g", org_ids=["acme"])
+        derive_group_bindings([broken], [_org("acme")])
+        derive_group_bindings([fixed], [_org("acme")])
+        derive_group_bindings([broken], [_org("acme")])
+
+        assert len(self._logged(audit_events, "g")) == 2
+
+    def test_one_groups_problem_does_not_silence_another(self, audit_events):
+        groups = [_group("a", org_ids=["nope"]), _group("b", org_ids=["nope"])]
+        derive_group_bindings(groups, [_org("acme")])
+
+        assert len(self._logged(audit_events, "a")) == len(self._logged(audit_events, "b")) == 1

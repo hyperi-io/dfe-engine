@@ -31,13 +31,12 @@ from dfe_engine.orgs.tenant_scope import org_condition
 from dfe_engine.schema.applier import table_exists
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
 from dfe_engine.source.expression import ExpressionBuilder, ExpressionValidator
-from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.models import PROMOTED_FIELD_TYPE, SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
 
 # Standard JSON column name across all schema profiles (timeseries, minimal,
 # passthrough). Single source of truth -- import this rather than hard-coding.
 JSON_COLUMN = "_json"
-PROMOTED_FIELD_TYPE = "promoted"
 
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NON_IDENT_RE = re.compile(r"[^0-9a-zA-Z]+")

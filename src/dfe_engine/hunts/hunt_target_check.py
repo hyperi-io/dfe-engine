@@ -44,11 +44,6 @@ def resolve_target(config: dict[str, Any], data_database: str) -> tuple[str, str
     return database or data_database, table
 
 
-def is_default_target(database: str, table: str, data_database: str) -> bool:
-    """Whether the target is the core detection table of the data database."""
-    return (database, table) == (data_database, DETECTION_TABLE)
-
-
 def missing_columns(client: Any, database: str, table: str) -> list[str] | None:
     """The columns the runner's INSERT names that the table does not have.
 

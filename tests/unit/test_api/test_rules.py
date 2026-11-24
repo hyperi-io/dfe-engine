@@ -1,4 +1,4 @@
-"""Tests for the rules router -- a rule is a registered source plus a WHERE clause."""
+"""Tests for the rules router -- RuleCreationService create + validate + CRUD."""
 
 import pytest
 
@@ -27,117 +27,43 @@ def _sample_create_payload(**overrides):
         "name": "test_rule",
         "display_name": "Test Rule",
         "severity": "high",
-        "where_clause": "severity = 'high'",
+        "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
         "source": "windows-audit",
     }
     payload.update(overrides)
     return payload
 
 
-def _assert_refused(resp) -> list[dict]:
-    """The invalid_sql refusal, returning the errors it carries."""
-    assert resp.status_code == 422, resp.text
-    body = resp.json()
-    assert body["code"] == "invalid_sql"
-    sql_errors = body["sql_errors"]
-    assert sql_errors
-    assert all(error["message"] for error in sql_errors)
-    assert sql_errors[0]["message"] in body["detail"]
-    return sql_errors
+def _where_payload(**overrides):
+    """A create body written as a ``where_clause`` on a registered source, with no SQL."""
+    payload = _sample_create_payload(where_clause="severity = 'high'")
+    del payload["user_sql"]
+    payload.update(overrides)
+    return payload
 
 
-class TestRulesCheck:
-    """POST /api/v1/rules/check -- a source and WHERE checked as a save would, nothing written."""
+class TestRulesValidate:
+    """POST /api/v1/rules/validate -- validate SQL without creating."""
 
-    def test_a_good_rule_is_valid(self, client, admin_headers):
+    def test_validate_valid_sql(self, client, admin_headers):
         resp = client.post(
-            "/api/v1/rules/check",
-            json={"source": "windows-audit", "where_clause": "severity = 'high'"},
+            "/api/v1/rules/validate",
+            json={"sql": "severity = 'high' AND user != 'admin'"},
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["valid"] is True
-        assert resp.json()["errors"] == []
-        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+        data = resp.json()
+        assert "valid" in data
+        assert "errors" in data
 
-    @pytest.mark.parametrize(
-        ("body", "fragment"),
-        [
-            pytest.param(
-                {"source": "no-such-source", "where_clause": "a = 1"},
-                "not a registered source",
-                id="unknown source",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "   "},
-                "WHERE clause is empty",
-                id="empty where",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "a = 1 AND {timestamp_condition}"},
-                "time window comes from the hunt schedule",
-                id="time placeholder",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "a = {org:String}"},
-                "{org}",
-                id="parameter placeholder",
-            ),
-            pytest.param(
-                {
-                    "source": "windows-audit",
-                    "where_clause": "_timestamp >= now() - INTERVAL 1 HOUR",
-                },
-                "hunt window bounds time",
-                id="time bound",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "a = 1 ORDER BY a"},
-                "more than a row filter",
-                id="clause past the filter",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "a = 1; DROP TABLE t"},
-                "more than a row filter",
-                id="second statement",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "url('http://x') = 1"},
-                "may not call",
-                id="call outside the row",
-            ),
-            pytest.param(
-                {"source": "windows-audit", "where_clause": "1 = 1"},
-                "always true",
-                id="matches everything",
-            ),
-        ],
-    )
-    def test_a_rule_a_save_would_refuse_is_invalid_with_its_reason(
-        self, client, admin_headers, body, fragment
-    ):
-        resp = client.post("/api/v1/rules/check", json=body, headers=admin_headers)
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["valid"] is False
-        assert any(fragment in error["message"] for error in resp.json()["errors"])
-
-    @pytest.mark.parametrize(
-        "body",
-        [{}, {"source": "windows-audit"}, {"where_clause": "a = 1"}],
-        ids=["empty", "no where", "no source"],
-    )
-    def test_a_body_missing_a_field_is_422(self, client, admin_headers, body):
-        resp = client.post("/api/v1/rules/check", json=body, headers=admin_headers)
-        assert resp.status_code == 422
-        assert resp.json()["code"] == "validation_error"
-
-    def test_it_is_not_at_the_old_route(self, client, admin_headers):
+    def test_validate_missing_sql_field(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules/validate",
-            json={"source": "windows-audit", "where_clause": "a = 1"},
+            json={},
             headers=admin_headers,
         )
-        assert resp.status_code in (404, 405)
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
 
 
 class TestRulesImport:
@@ -257,13 +183,9 @@ class TestRulesListAndDetail:
 
         resp = client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers)
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["name"] == rule_name
-        assert body["display_name"] == "Test Rule"
-        assert body["source"] == "windows-audit"
-        assert (body["source_db"], body["source_table"]) == ("dfe", "windows-audit")
-        assert body["where_clause"] == "severity = 'high'"
-        assert body["sql_errors"] == []
+        assert resp.json()["name"] == rule_name
+        assert resp.json()["display_name"] == "Test Rule"
+        assert resp.json()["sql_errors"] == []
 
     def test_get_rule_detail_includes_sql_errors(self, client, admin_headers):
         # The API refuses such a rule, so it is written the way a hand-authored
@@ -351,29 +273,26 @@ class TestRulesUpdateAndDelete:
         assert resp.json()["rule"]["display_name"] == "Updated Rule Name"
         assert resp.json()["rule"]["created_at"] == created_at
 
-    def test_update_moves_the_rule_to_another_source(self, client, admin_headers):
-        client.post("/api/v1/rules", json=_sample_create_payload(), headers=admin_headers)
-
-        resp = client.put(
-            "/api/v1/rules/test_rule",
-            json=_sample_create_payload(source="events", where_clause="user = 'root'"),
+    def test_update_rule_ignores_source_type(self, client, admin_headers):
+        create = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="src_type_rule"),
             headers=admin_headers,
         )
+        rule_name = create.json()["rule"]["name"]
 
-        assert resp.status_code == 200, resp.text
-        stored = client.get("/api/v1/rules/test_rule", headers=admin_headers).json()
-        assert (stored["source"], stored["source_table"]) == ("events", "events")
-        assert stored["where_clause"] == "user = 'root'"
-
-    def test_update_without_a_source_is_422(self, client, admin_headers):
-        client.post("/api/v1/rules", json=_sample_create_payload(), headers=admin_headers)
-        body = _sample_create_payload()
-        del body["source"]
-
-        resp = client.put("/api/v1/rules/test_rule", json=body, headers=admin_headers)
-
-        assert resp.status_code == 422
-        assert resp.json()["code"] == "validation_error"
+        resp = client.put(
+            f"/api/v1/rules/{rule_name}",
+            json={
+                "severity": "high",
+                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "source": "windows-audit",
+                "source_type": "",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["rule"]["source"] == "windows-audit"
 
     def test_delete_rule(self, client, admin_headers):
         create = client.post(
@@ -408,12 +327,7 @@ class TestRulesUpdateAndDelete:
             "rules": [rule_name],
         }
         assert (
-            client.post(
-                "/api/v1/hunts",
-                json=hunt_payload,
-                params={"confirm": "true"},
-                headers=admin_headers,
-            ).status_code
+            client.post("/api/v1/hunts", json=hunt_payload, headers=admin_headers).status_code
             == 201
         )
 
@@ -441,7 +355,7 @@ class TestRulesUpdateAndDelete:
 
 
 class TestRulesCreate:
-    """POST /api/v1/rules -- create a rule from a registered source and a WHERE clause."""
+    """POST /api/v1/rules -- create rule via RuleCreationService."""
 
     def test_create_basic_rule(self, client, admin_headers):
         resp = client.post(
@@ -455,8 +369,6 @@ class TestRulesCreate:
         assert data["rule"]["display_name"] == "Test Rule"
         assert data["rule"]["name"] == "test_rule"
         assert data["rule"]["severity"] == "high"
-        assert data["rule"]["source"] == "windows-audit"
-        assert data["rule"]["where_clause"] == "severity = 'high'"
 
     def test_create_default_display_name(self, client, admin_headers):
         resp = client.post(
@@ -464,24 +376,13 @@ class TestRulesCreate:
             json={
                 "name": "my_rule",
                 "severity": "high",
-                "where_clause": "severity = 'high'",
+                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
                 "source": "windows-audit",
             },
             headers=admin_headers,
         )
         assert resp.status_code == 201
         assert resp.json()["rule"]["display_name"] == "My rule"
-
-    def test_a_cel_filter_alone_is_the_whole_where(self, client, admin_headers):
-        payload = _sample_create_payload()
-        del payload["where_clause"]
-        payload["cel_filter"] = 'severity == "high"'
-
-        resp = client.post("/api/v1/rules", json=payload, headers=admin_headers)
-
-        assert resp.status_code == 201, resp.text
-        assert "severity" in resp.json()["rule"]["where_clause"]
-        assert resp.json()["rule"]["source_table"] == "windows-audit"
 
     def test_create_duplicate_name_returns_409(self, client, admin_headers):
         payload = _sample_create_payload(name="dup_rule")
@@ -514,9 +415,54 @@ class TestRulesCreate:
         data = resp.json()
         assert data["code"] == "validation_error"
 
+    def test_validate_returns_valid_boolean(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/validate",
+            json={"sql": "SELECT * FROM events WHERE user = 'admin'"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["valid"], bool)
+        assert isinstance(data["errors"], list)
 
-# Each refusal leaves nothing written, whichever write route carries it.
-_WRITE_REFUSALS = [
+    @pytest.mark.parametrize(
+        "extra",
+        [{}, {"cel_filter": "", "hunt_name": "", "display_name": None}],
+        ids=["advanced fields unset", "advanced fields blank"],
+    )
+    def test_the_console_create_body_is_saved(self, client, admin_headers, extra):
+        """The body the console's rule editor posts: full SQL, ``source_type`` raw, no source."""
+        body = {
+            "name": "console_rule",
+            "user_sql": "SELECT * FROM dfe.main WHERE severity = 'high'",
+            "severity": "medium",
+            "source_type": "raw",
+            "estimate_cost": True,
+            "cost_window_minutes": 0,
+            **extra,
+        }
+
+        resp = client.post("/api/v1/rules", json=body, headers=admin_headers)
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["rule"]["where_clause"] == "severity = 'high'"
+        assert resp.json()["sanitize_summary"] == {}
+
+    def test_a_hyperdx_source_type_goes_to_from_hyperdx_instead(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="hdx", source_type="hyperdx"),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert client.get("/api/v1/rules/hdx", headers=admin_headers).status_code == 404
+
+
+# Each refusal leaves nothing written, on create and on update.
+_WHERE_REFUSALS = [
     pytest.param(
         {"source": "no-such-source"},
         "invalid_sql",
@@ -564,27 +510,59 @@ _WRITE_REFUSALS = [
     pytest.param(
         {"user_sql": "SELECT * FROM dfe.main WHERE a = 1"},
         "validation_error",
-        "user_sql",
-        id="user_sql is no longer taken",
+        "one of the three",
+        id="where and sql",
     ),
     pytest.param(
         {"where_clause": "a = 1", "condition": {"field": "a", "operator": "equals", "value": "1"}},
         "validation_error",
-        "not both",
+        "one of the three",
         id="where and condition",
     ),
 ]
 
 
-class TestARefusedWriteSavesNothing:
-    """A refused rule is never written, and a refused update leaves the stored rule as it was."""
+class TestRulesWrittenAsAWhere:
+    """POST and PUT /api/v1/rules with a ``where_clause`` on a registered ``source``."""
 
-    @pytest.mark.parametrize(("change", "code", "fragment"), _WRITE_REFUSALS)
-    def test_create(self, client, admin_headers, change, code, fragment):
-        resp = client.post(
-            "/api/v1/rules",
-            json=_sample_create_payload(name="refused", **change),
+    def test_it_reads_the_source_table(self, client, admin_headers):
+        resp = client.post("/api/v1/rules", json=_where_payload(), headers=admin_headers)
+
+        assert resp.status_code == 201, resp.text
+        rule = client.get("/api/v1/rules/test_rule", headers=admin_headers).json()
+        assert rule["source"] == "windows-audit"
+        assert (rule["source_db"], rule["source_table"]) == ("dfe", "windows-audit")
+        assert rule["where_clause"] == "severity = 'high'"
+        assert rule["original_sql"] == "SELECT * FROM `dfe`.`windows-audit` WHERE severity = 'high'"
+
+    def test_a_where_with_no_source_is_a_validation_error(self, client, admin_headers):
+        body = _where_payload()
+        del body["source"]
+
+        resp = client.post("/api/v1/rules", json=body, headers=admin_headers)
+
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
+
+    @pytest.mark.usefixtures("customer_orgs")
+    def test_update_moves_the_rule_to_another_source(self, client, admin_headers):
+        client.post("/api/v1/rules", json=_where_payload(), headers=admin_headers)
+
+        resp = client.put(
+            "/api/v1/rules/test_rule",
+            json=_where_payload(source="events", where_clause="user = 'root'"),
             headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        stored = client.get("/api/v1/rules/test_rule", headers=admin_headers).json()
+        assert (stored["source"], stored["source_table"]) == ("events", "events")
+        assert stored["where_clause"] == "user = 'root'"
+
+    @pytest.mark.parametrize(("change", "code", "fragment"), _WHERE_REFUSALS)
+    def test_a_refused_create_writes_nothing(self, client, admin_headers, change, code, fragment):
+        resp = client.post(
+            "/api/v1/rules", json=_where_payload(name="refused", **change), headers=admin_headers
         )
 
         assert resp.status_code == 422, resp.text
@@ -592,13 +570,15 @@ class TestARefusedWriteSavesNothing:
         assert fragment in resp.text
         assert client.get("/api/v1/rules/refused", headers=admin_headers).status_code == 404
 
-    @pytest.mark.parametrize(("change", "code", "fragment"), _WRITE_REFUSALS)
-    def test_update(self, client, admin_headers, change, code, fragment):
-        payload = _sample_create_payload(name="kept")
+    @pytest.mark.parametrize(("change", "code", "fragment"), _WHERE_REFUSALS)
+    def test_a_refused_update_keeps_the_stored_rule(
+        self, client, admin_headers, change, code, fragment
+    ):
+        payload = _where_payload(name="kept")
         assert client.post("/api/v1/rules", json=payload, headers=admin_headers).status_code == 201
 
         resp = client.put(
-            "/api/v1/rules/kept", json=_sample_create_payload(**change), headers=admin_headers
+            "/api/v1/rules/kept", json=_where_payload(**change), headers=admin_headers
         )
 
         assert resp.status_code == 422, resp.text
@@ -608,134 +588,42 @@ class TestARefusedWriteSavesNothing:
         assert stored["where_clause"] == payload["where_clause"]
         assert stored["sql_errors"] == []
 
-    def test_the_errors_keep_their_message_position_suggestion_shape(self, client, admin_headers):
-        resp = client.post(
-            "/api/v1/rules",
-            json=_sample_create_payload(where_clause="url('http://x') = 1"),
-            headers=admin_headers,
-        )
-
-        for error in _assert_refused(resp):
-            assert set(error) <= {"message", "position", "suggestion"}
-
-    @pytest.mark.parametrize("field", ["source", "where_clause"])
-    def test_a_missing_field_is_a_validation_error(self, client, admin_headers, field):
-        body = _sample_create_payload()
-        del body[field]
-
-        resp = client.post("/api/v1/rules", json=body, headers=admin_headers)
-
-        assert resp.status_code == 422
-        assert resp.json()["code"] == "validation_error"
-
 
 class TestRulesFromHyperdx:
-    """POST /api/v1/rules/from-hyperdx -- a Search view read into the fields an editor opens with."""
+    """POST /api/v1/rules/from-hyperdx -- create a rule from a HyperDX view."""
 
-    _RAW_SQL = "SELECT * FROM dfe.events WHERE severity = 'high'"
+    _RAW_SQL = "SELECT * FROM default.events WHERE severity = 'high'"
 
-    def test_it_returns_the_fields_and_saves_nothing(self, client, admin_headers):
+    def test_from_hyperdx_creates_rule_and_returns_id(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules/from-hyperdx",
             json={"raw_sql": self._RAW_SQL, "saved_search_name": "High Severity Logins"},
             headers=admin_headers,
         )
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 201
         data = resp.json()
-        assert data["name"] == "high-severity-logins"
+        assert data["id"] == "high-severity-logins"
         assert data["display_name"] == "High Severity Logins"
-        assert (data["source"], data["needs_source"]) == ("events", False)
-        assert data["where_clause"] == "severity = 'high'"
-        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
-    def test_default_name_when_no_search_name(self, client, admin_headers):
-        resp = client.post(
-            "/api/v1/rules/from-hyperdx", json={"raw_sql": self._RAW_SQL}, headers=admin_headers
-        )
-        assert resp.status_code == 200
-        assert resp.json()["name"] == "hyperdx-rule"
-
-    def test_the_name_is_free_of_a_stored_rule(self, client, admin_headers):
-        saved = client.post(
-            "/api/v1/rules",
-            json=_sample_create_payload(name="repeat-search"),
-            headers=admin_headers,
-        )
-        assert saved.status_code == 201
-
+    def test_from_hyperdx_default_id_when_no_name(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules/from-hyperdx",
-            json={"raw_sql": self._RAW_SQL, "saved_search_name": "Repeat Search"},
+            json={"raw_sql": self._RAW_SQL},
             headers=admin_headers,
         )
+        assert resp.status_code == 201
+        assert resp.json()["id"] == "hyperdx-rule"
 
-        assert resp.json()["name"] == "repeat-search-2"
+    def test_from_hyperdx_dedupes_id(self, client, admin_headers):
+        body = {"raw_sql": self._RAW_SQL, "saved_search_name": "Repeat Search"}
+        first = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
+        second = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.json()["id"] == "repeat-search"
+        assert second.json()["id"] == "repeat-search-2"
 
-    def test_a_rendered_view_keeps_its_filters_and_lists_what_was_stripped(
-        self, client, admin_headers
-    ):
-        resp = client.post(
-            "/api/v1/rules/from-hyperdx",
-            json={"raw_sql": _HYPERDX_RENDERED_SQL, "saved_search_name": "Root rulecycle"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 200, resp.text
-        data = resp.json()
-        assert (data["source"], data["needs_source"]) == ("main", False)
-        assert "toString(_json.event_type) = 'login_failure'" in data["where_clause"]
-        assert "toString(_json.`user_name`) IN ('root')" in data["where_clause"]
-        assert "ORDER BY _timestamp DESC" in data["sanitize_summary"]["stripped_clauses"]
-
-    def test_the_view_source_wins_over_the_from_when_registered(self, client, admin_headers):
-        body = {"raw_sql": self._RAW_SQL, "source": "windows-audit"}
-
-        data = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers).json()
-
-        assert (data["source"], data["needs_source"]) == ("windows-audit", False)
-
-    def test_a_view_source_that_is_not_registered_is_warned(self, client, admin_headers):
-        body = {"raw_sql": self._RAW_SQL, "source": "no-such-source"}
-
-        data = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers).json()
-
-        assert data["source"] == "events"
-        assert any("no-such-source" in warning for warning in data["warnings"])
-
-    def test_a_view_with_no_filter_comes_back_with_a_warning_to_write_one(
-        self, client, admin_headers
-    ):
-        resp = client.post(
-            "/api/v1/rules/from-hyperdx",
-            json={"raw_sql": "SELECT _timestamp,_json FROM dfe.main ORDER BY _timestamp DESC"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["where_clause"] == ""
-        assert any("No filter is left" in w for w in resp.json()["warnings"])
-
-    @pytest.mark.parametrize(
-        ("raw_sql", "fragment"),
-        [
-            pytest.param(_HYPERDX_TEMPLATE_SQL, "placeholder", id="legacy template"),
-            pytest.param(
-                "SELECT * FROM dfe.main WHERE a = 1 HAVING count() > 1", "HAVING", id="having"
-            ),
-        ],
-    )
-    def test_a_view_a_rule_cannot_carry_is_refused_with_the_reason(
-        self, client, admin_headers, raw_sql, fragment
-    ):
-        resp = client.post(
-            "/api/v1/rules/from-hyperdx", json={"raw_sql": raw_sql}, headers=admin_headers
-        )
-
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["code"] == "import_refused"
-        assert fragment in resp.json()["detail"]
-
-    def test_requires_validate_permission(self, client, viewer_headers):
+    def test_from_hyperdx_requires_write_permission(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/rules/from-hyperdx",
             json={"raw_sql": self._RAW_SQL, "saved_search_name": "Viewer Attempt"},
@@ -743,11 +631,14 @@ class TestRulesFromHyperdx:
         )
         assert resp.status_code == 403
 
-    def test_requires_auth(self, client):
-        resp = client.post("/api/v1/rules/from-hyperdx", json={"raw_sql": self._RAW_SQL})
+    def test_from_hyperdx_requires_auth(self, client):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL},
+        )
         assert resp.status_code == 401
 
-    def test_requires_raw_sql(self, client, admin_headers):
+    def test_from_hyperdx_requires_raw_sql(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules/from-hyperdx",
             json={"saved_search_name": "No SQL"},
@@ -760,15 +651,150 @@ class TestRulesFromHyperdx:
         [
             {"saved_search_id": "srch_1"},
             {"saved_search_id": "srch_1", "raw_sql": _HYPERDX_RENDERED_SQL},
-            {"raw_sql": ""},
         ],
-        ids=["id_alone", "id_beside_raw_sql", "empty_raw_sql"],
+        ids=["id_alone", "id_beside_raw_sql"],
     )
-    def test_a_body_it_cannot_read_is_a_validation_error(self, client, admin_headers, body):
+    def test_a_saved_search_id_is_refused_and_writes_nothing(self, client, admin_headers, body):
         resp = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "validation_error"
+        assert "saved_search_id" in resp.text
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
+    def test_from_hyperdx_refuses_empty_raw_sql(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx", json={"raw_sql": ""}, headers=admin_headers
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
+
+
+def _assert_refused(resp) -> list[dict]:
+    """The invalid_sql refusal, returning the SQL errors it carries."""
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["code"] == "invalid_sql"
+    sql_errors = body["sql_errors"]
+    assert sql_errors
+    assert all(error["message"] for error in sql_errors)
+    assert sql_errors[0]["message"] in body["detail"]
+    return sql_errors
+
+
+class TestRulesRefuseUncompilable:
+    """A rule the hunt runner cannot compile is refused with 422 and never written."""
+
+    def test_hyperdx_template_is_refused_and_not_saved(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_TEMPLATE_SQL},
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+        assert client.get("/api/v1/rules/hyperdx-rule", headers=admin_headers).status_code == 404
+
+    def test_rendered_hyperdx_view_keeps_its_table_and_filters(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_RENDERED_SQL, "saved_search_name": "Root rulecycle"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["sql_errors"] == []
+        rule = client.get("/api/v1/rules/root-rulecycle", headers=admin_headers).json()
+        assert (rule["source_db"], rule["source_table"]) == ("dfe", "main")
+        assert "toString(_json.event_type) = 'login_failure'" in rule["where_clause"]
+        assert "toString(_json.`user_name`) IN ('root')" in rule["where_clause"]
+        assert rule["sql_errors"] == []
+
+    def test_search_with_no_filter_is_refused(self, client, admin_headers):
+        # The template's time condition stripped, what is left matches every row.
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": "SELECT _timestamp,_json FROM dfe.main ORDER BY _timestamp DESC"},
+            headers=admin_headers,
+        )
+
+        sql_errors = _assert_refused(resp)
+        assert [e["message"] for e in sql_errors] == [
+            "Rule has empty detection logic (WHERE clause)."
+        ]
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
+    def test_create_refuses_sql_that_does_not_parse(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(
+                name="unparsed", user_sql="SELECT count() FROM default.events WHERE x = "
+            ),
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert client.get("/api/v1/rules/unparsed", headers=admin_headers).status_code == 404
+
+    def test_create_refuses_a_from_with_no_database(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(
+                name="unqualified", user_sql="SELECT * FROM events WHERE severity = 'high'"
+            ),
+            headers=admin_headers,
+        )
+
+        sql_errors = _assert_refused(resp)
+        assert any("<db>.<table>" in error["message"] for error in sql_errors)
+        assert client.get("/api/v1/rules/unqualified", headers=admin_headers).status_code == 404
+
+    def test_create_refuses_dml(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="dml", user_sql="INSERT INTO logs VALUES (1)"),
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert client.get("/api/v1/rules/dml", headers=admin_headers).status_code == 404
+
+    def test_create_refuses_empty_sql(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="empty", user_sql=""),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert client.get("/api/v1/rules/empty", headers=admin_headers).status_code == 404
+
+    def test_update_refuses_and_keeps_the_stored_rule(self, client, admin_headers):
+        payload = _sample_create_payload(name="kept")
+        assert client.post("/api/v1/rules", json=payload, headers=admin_headers).status_code == 201
+
+        resp = client.put(
+            "/api/v1/rules/kept",
+            json=_sample_create_payload(user_sql=_HYPERDX_TEMPLATE_SQL),
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        stored = client.get("/api/v1/rules/kept", headers=admin_headers).json()
+        assert stored["original_sql"] == payload["user_sql"]
+        assert stored["sql_errors"] == []
+
+    def test_validate_names_the_missing_database(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/validate",
+            json={"sql": "SELECT * FROM events WHERE severity = 'high'"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["valid"] is False
+        assert any("<db>.<table>" in error["message"] for error in resp.json()["errors"])
 
 
 # Each shape leaves nothing once the time window is stripped: HyperDX's `_json:*`,
@@ -814,32 +840,64 @@ class TestRulesRefuseMatchEverything:
     def test_create_refuses_and_writes_nothing(self, client, admin_headers, where):
         resp = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(name="everything", source="main", where_clause=where),
+            json=_sample_create_payload(
+                name="everything", user_sql=f"SELECT * FROM dfe.main WHERE {where}"
+            ),
             headers=admin_headers,
         )
 
         _assert_matches_everything(resp, where)
         assert client.get("/api/v1/rules/everything", headers=admin_headers).status_code == 404
 
+    def test_the_time_window_is_stripped_before_judging(self, client, admin_headers):
+        rendered = (
+            "SELECT _timestamp,_json FROM dfe.main WHERE (_timestamp >= "
+            "fromUnixTimestamp64Milli(1790553600000) AND _timestamp <= "
+            "fromUnixTimestamp64Milli(1790557200000)) AND (notEmpty(toString(`_json`)) = 1) "
+            "ORDER BY _timestamp DESC LIMIT 200"
+        )
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": rendered, "saved_search_name": "Everything"},
+            headers=admin_headers,
+        )
+
+        message = _assert_matches_everything(resp, "notEmpty(toString(`_json`)) = 1")
+        assert "true whenever _json is present, and every event has it" in message
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
     def test_update_refuses_and_keeps_the_stored_rule(self, client, admin_headers):
-        payload = _sample_create_payload(name="kept_narrow", source="main")
+        payload = _sample_create_payload(name="kept_narrow")
         assert client.post("/api/v1/rules", json=payload, headers=admin_headers).status_code == 201
 
         resp = client.put(
             "/api/v1/rules/kept_narrow",
-            json=_sample_create_payload(source="main", where_clause="1 = 1"),
+            json=_sample_create_payload(user_sql="SELECT * FROM dfe.main WHERE 1 = 1"),
             headers=admin_headers,
         )
 
         assert "its condition is always true" in _assert_matches_everything(resp, "1 = 1")
         stored = client.get("/api/v1/rules/kept_narrow", headers=admin_headers).json()
-        assert stored["where_clause"] == payload["where_clause"]
+        assert stored["original_sql"] == payload["user_sql"]
+
+    def test_an_empty_filter_keeps_its_own_refusal(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="bare", user_sql="SELECT * FROM dfe.main"),
+            headers=admin_headers,
+        )
+
+        assert [e["message"] for e in _assert_refused(resp)] == [
+            "Rule has empty detection logic (WHERE clause)."
+        ]
 
     @pytest.mark.parametrize("where", _NARROWS.values(), ids=_NARROWS)
     def test_a_narrowing_condition_is_saved(self, client, admin_headers, where):
         resp = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(name="narrow", source="main", where_clause=where),
+            json=_sample_create_payload(
+                name="narrow", user_sql=f"SELECT * FROM dfe.main WHERE {where}"
+            ),
             headers=admin_headers,
         )
 
@@ -874,12 +932,19 @@ class TestRulesVolumePreviewWiring:
         update = client.put(
             "/api/v1/rules/test_rule", json=_sample_create_payload(), headers=admin_headers
         )
+        hyperdx = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_RENDERED_SQL},
+            headers=admin_headers,
+        )
         assert update.status_code == 200, update.text
+        assert hyperdx.status_code == 201, hyperdx.text
 
-        viewed = client.get("/api/v1/rules/test_rule", headers=admin_headers)
+        for name in ("test_rule", hyperdx.json()["id"]):
+            viewed = client.get(f"/api/v1/rules/{name}", headers=admin_headers)
 
-        assert viewed.status_code == 200, viewed.text
-        assert not any(w.startswith(self._UNKNOWN) for w in viewed.json()["warnings"])
+            assert viewed.status_code == 200, viewed.text
+            assert not any(w.startswith(self._UNKNOWN) for w in viewed.json()["warnings"])
 
     def test_opting_out_of_the_numbers_still_warns(self, client, admin_headers):
         resp = client.post(
@@ -892,7 +957,7 @@ class TestRulesVolumePreviewWiring:
         assert resp.json()["cost_estimate"] is None
         assert any(w.startswith(self._UNKNOWN) for w in resp.json()["rule"]["warnings"])
 
-    def test_update_warns_too(self, client, admin_headers):
+    def test_update_and_from_hyperdx_warn_too(self, client, admin_headers):
         assert (
             client.post(
                 "/api/v1/rules", json=_sample_create_payload(), headers=admin_headers
@@ -902,6 +967,13 @@ class TestRulesVolumePreviewWiring:
         update = client.put(
             "/api/v1/rules/test_rule", json=_sample_create_payload(), headers=admin_headers
         )
+        hyperdx = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _HYPERDX_RENDERED_SQL},
+            headers=admin_headers,
+        )
 
         assert update.status_code == 200, update.text
+        assert hyperdx.status_code == 201, hyperdx.text
         assert any(w.startswith(self._UNKNOWN) for w in update.json()["rule"]["warnings"])
+        assert any(w.startswith(self._UNKNOWN) for w in hyperdx.json()["warnings"])

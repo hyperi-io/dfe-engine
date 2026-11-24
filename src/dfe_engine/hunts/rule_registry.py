@@ -33,6 +33,9 @@ def _rule_to_yaml_dict(rule: Rule) -> dict[str, Any]:
     data.pop("rule_id", None)
     display = data.pop("name")
     data["display_name"] = display
+    # Absent means no description. A null key would appear on every rule that has none.
+    if data.get("description") is None:
+        data.pop("description", None)
     return data
 
 
@@ -215,6 +218,7 @@ class RuleRegistry:
                 {
                     "name": table,
                     "display_name": rule.name,
+                    "description": rule.description,
                     "severity": rule.severity,
                     "source": rule.source,
                     "source_db": rule.source_db,

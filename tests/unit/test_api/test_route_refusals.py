@@ -59,11 +59,7 @@ VIEWER_REFUSED = [
             "where_clause": "event_type = 'login'",
         },
     ),
-    (
-        "post",
-        "/api/v1/rules/check",
-        {"source": "windows-audit", "where_clause": "event_type = 'login'"},
-    ),
+    ("post", "/api/v1/rules/validate", {"sql": "event_type = 'login'"}),
     ("post", "/api/v1/rules/import", {"sql": "SELECT * FROM events WHERE event_type = 'login'"}),
     (
         "post",

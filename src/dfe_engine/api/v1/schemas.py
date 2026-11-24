@@ -96,8 +96,12 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaConversionError,
     ElasticSchemaService,
 )
-from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
-from dfe_engine.source.models import Source, SourceHeader, SourceWriteRequest
+from dfe_engine.source.models import (
+    PROMOTED_FIELD_TYPE,
+    Source,
+    SourceHeader,
+    SourceWriteRequest,
+)
 from dfe_engine.source.registry import SourceNotFoundError, SourceValidationError
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -783,6 +787,7 @@ async def add_meta_schema_version(
     body: MetaSchemaAddVersionRequest,
     user: CurrentUser,
     registry: SchemaReg,
+    response: Response,
 ) -> MetaSchemaVersionWriteResponse:
     """Add a new meta-schema version (bumps semver from current and sets it current)."""
     from dfe_engine.schema.registry import (
@@ -792,8 +797,8 @@ async def add_meta_schema_version(
     )
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.schema.schema_manager import (
-        SchemaManager,
         SchemaVersionError,
+        add_version_in,
         next_version_for_type,
     )
 
@@ -820,23 +825,32 @@ async def add_meta_schema_version(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
-    yaml_path = registry._yaml_path(canonical_path)
     version_type = body.type
     new_ver = next_version_for_type(current, version_type)
+    routing = ReviewRouting()
 
     try:
         if registry.schema_version_exists(canonical_path, new_ver):
             raise SchemaVersionError(f"Version {new_ver!r} already exists")
         col_dicts = [col.to_yaml_dict() for col in body.columns]
-        SchemaManager.add_version(
-            yaml_path,
-            new_ver,
-            col_dicts,
-            type=version_type,
-            summary=body.summary or "",
-            set_current=True,
+        saved = registry.edit_schema(
+            canonical_path,
+            lambda doc: add_version_in(
+                doc,
+                new_ver,
+                col_dicts,
+                origin=canonical_path,
+                type=version_type,
+                summary=body.summary or "",
+                set_current=True,
+            ),
+            message=f"schema: add {new_ver} to {canonical_path}",
+            created_by=git_author(user),
+            routing=routing,
         )
-    except SchemaVersionError as exc:
+    except SchemaNotFoundError:
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found") from None
+    except (SchemaVersionError, SchemaValidationError) as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
@@ -845,8 +859,12 @@ async def add_meta_schema_version(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
-    saved = registry.notify_schema_file_updated(canonical_path)
-    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
+    audit_resource_change(
+        user.user_id, "meta_schema", canonical_path, "updated", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     return meta_schema_version_write_response(saved, path=canonical_path)
 
 
@@ -860,6 +878,7 @@ async def delete_meta_schema_version(
     version: str,
     user: CurrentUser,
     registry: SchemaReg,
+    response: Response,
 ) -> None:
     """Delete a specific meta-schema version.
 
@@ -872,7 +891,7 @@ async def delete_meta_schema_version(
         canonical_schema_path,
     )
     from dfe_engine.schema.schema_loader import SchemaLoadError
-    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+    from dfe_engine.schema.schema_manager import SchemaVersionError, delete_version_in
 
     try:
         canonical_path = canonical_schema_path(schema_path)
@@ -891,10 +910,18 @@ async def delete_meta_schema_version(
             404, f"Version {version!r} not found for schema {canonical_path!r}", code="not_found"
         )
 
-    yaml_path = registry._yaml_path(canonical_path)
+    routing = ReviewRouting()
     try:
-        SchemaManager.delete_version(yaml_path, version)
-    except SchemaVersionError as exc:
+        registry.edit_schema(
+            canonical_path,
+            lambda doc: delete_version_in(doc, version, origin=canonical_path),
+            message=f"schema: delete {version} from {canonical_path}",
+            created_by=git_author(user),
+            routing=routing,
+        )
+    except SchemaNotFoundError:
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found") from None
+    except (SchemaVersionError, SchemaValidationError) as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
@@ -903,8 +930,12 @@ async def delete_meta_schema_version(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
-    registry.notify_schema_file_updated(canonical_path)
-    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
+    audit_resource_change(
+        user.user_id, "meta_schema", canonical_path, "updated", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
 
 
 @router.post(
@@ -918,6 +949,7 @@ async def create_meta_schema(
     user: CurrentUser,
     registry: SchemaReg,
     body: MetaSchemaCreateRequest,
+    response: Response,
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
     from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
@@ -960,13 +992,24 @@ async def create_meta_schema(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
+    routing = ReviewRouting()
     try:
-        saved = registry.save_schema(to_save)
+        saved = registry.save_schema(
+            to_save,
+            created_by=git_author(user),
+            description=f"schema: create {canonical_path}",
+            routing=routing,
+        )
     except SchemaValidationError as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
-    audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
+    audit_resource_change(
+        user.user_id, "meta_schema", canonical_path, "created", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     return saved.model_copy(update={"path": canonical_path})
 
 
@@ -980,6 +1023,7 @@ async def update_meta_schema(
     body: MetaSchemaUpdateRequest,
     user: CurrentUser,
     registry: SchemaReg,
+    response: Response,
     version: str | None = Query(
         None,
         description="Version to update summary for (required when summary is set)",
@@ -992,7 +1036,11 @@ async def update_meta_schema(
         canonical_schema_path,
     )
     from dfe_engine.schema.schema_loader import SchemaLoadError
-    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+    from dfe_engine.schema.schema_manager import (
+        SchemaVersionError,
+        set_current_in,
+        set_summary_in,
+    )
 
     try:
         canonical_path = canonical_schema_path(schema_path)
@@ -1017,22 +1065,25 @@ async def update_meta_schema(
             404, f"Version {version!r} not found for schema {canonical_path!r}", code="not_found"
         )
 
-    yaml_path = registry._yaml_path(canonical_path)
-
-    try:
-        if body.summary is not None:
-            summary_version = version
-            if summary_version is None:
-                raise ProblemError(
-                    status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    "Query parameter 'version' is required when updating summary",
-                    code="validation_error",
-                )
-            SchemaManager.update_version_summary(yaml_path, summary_version, body.summary)
-
+    def apply(doc: dict[str, Any]) -> None:
+        # The guard above rejects a summary without a version.
+        if body.summary is not None and version is not None:
+            set_summary_in(doc, version, body.summary, origin=canonical_path)
         if body.current is not None:
-            SchemaManager.set_current(yaml_path, body.current)
-    except SchemaVersionError as exc:
+            set_current_in(doc, body.current, origin=canonical_path)
+
+    routing = ReviewRouting()
+    try:
+        saved = registry.edit_schema(
+            canonical_path,
+            apply,
+            message=f"schema: update {canonical_path}",
+            created_by=git_author(user),
+            routing=routing,
+        )
+    except SchemaNotFoundError:
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found") from None
+    except (SchemaVersionError, SchemaValidationError) as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
@@ -1041,8 +1092,12 @@ async def update_meta_schema(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
-    saved = registry.notify_schema_file_updated(canonical_path)
-    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
+    audit_resource_change(
+        user.user_id, "meta_schema", canonical_path, "updated", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     return meta_schema_version_write_response(saved, path=canonical_path)
 
 
@@ -1055,6 +1110,7 @@ async def delete_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
+    response: Response,
 ) -> None:
     """Delete a meta-schema definition by registry path."""
     from dfe_engine.schema.registry import SchemaNotFoundError, SchemaValidationError
@@ -1063,13 +1119,19 @@ async def delete_meta_schema(
         registry.get_schema(schema_path)
     except SchemaNotFoundError:
         raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found")
+    routing = ReviewRouting()
     try:
-        registry.delete_schema(schema_path)
+        registry.delete_schema(schema_path, created_by=git_author(user), routing=routing)
     except SchemaValidationError as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
-    audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
+    audit_resource_change(
+        user.user_id, "meta_schema", schema_path, "deleted", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
 
 
 @router.get(
@@ -1137,6 +1199,7 @@ async def import_meta_schema(
     body: MetaSchemaExport,
     user: CurrentUser,
     registry: SchemaReg,
+    response: Response,
 ) -> MetaSchemaImportResult:
     """Import a meta-schema document exported from another deployment.
 
@@ -1145,12 +1208,20 @@ async def import_meta_schema(
     registry at its pinned version and nothing is written, so the read-only
     definition is never forked.
     """
+    routing = ReviewRouting()
     try:
-        result = apply_meta_schema_export(registry, body)
+        result = apply_meta_schema_export(
+            registry, body, created_by=git_author(user), routing=routing
+        )
     except ExchangeError as exc:
         raise_exchange_http(exc)
     if result.action == "created":
-        audit_resource_change(user.user_id, "meta_schema", result.path, "created")
+        audit_resource_change(
+            user.user_id, "meta_schema", result.path, "created", routing_audit_detail(routing)
+        )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     return result
 
 
@@ -1448,19 +1519,20 @@ def _ensure_writable_meta_schema_for_promote(
     meta: MetaSchema,
     columns,
     schema_registry,
-    *,
-    persist: bool,
-    user: CurrentUser,
-) -> tuple[str, MetaSchema, list, bool]:
-    """Use a per-source fork when promotion would mutate a ``resource_type: core`` schema."""
+) -> tuple[str, MetaSchema, list, dict[str, Any] | None]:
+    """Use a per-source fork when promotion would mutate a ``resource_type: core`` schema.
+
+    The last element is the document of a fork that does not exist yet, which the
+    caller writes with its new version in one commit. It is None for a schema
+    that is written in place.
+    """
     if meta.resource_type != "core":
-        return canonical, meta, columns, False
+        return canonical, meta, columns, None
 
     from dfe_engine.core_resources.policy import schema_registry_path_is_core
     from dfe_engine.schema.registry import canonical_schema_path
     from dfe_engine.schema.schema_loader import SchemaLoadError
-    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
-    from dfe_engine.yaml_utils import yaml_dump, yaml_load
+    from dfe_engine.schema.schema_manager import SchemaVersionError, fork_document
 
     fork_canonical = _fork_schema_path_for_source(source.source, canonical)
     pinned = _pinned_meta_schema_version(ver, meta)
@@ -1480,38 +1552,28 @@ def _ensure_writable_meta_schema_for_promote(
             fork_canonical,
             fork_meta,
             _columns_for_meta_version(fork_meta, fork_ver),
-            False,
+            None,
         )
 
-    if not persist:
-        return canonical, meta, columns, True
-
-    src_yaml = schema_registry._yaml_path(canonical)
-    dest_yaml = schema_registry._yaml_path(fork_canonical)
+    original = schema_registry.read_document(canonical)
+    if original is None:
+        raise ProblemError(404, f"Schema {canonical!r} not found", code="not_found")
     try:
-        SchemaManager.clone_meta_schema(
-            src_yaml,
-            dest_yaml,
+        fork_doc = fork_document(
+            original,
             source_version=pinned,
-            new_version=pinned,
             summary=f"Cloned from {canonical} for source {source.source}",
+            origin=canonical,
         )
     except (SchemaVersionError, SchemaLoadError) as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
-    fork_data = yaml_load(dest_yaml)
-    if isinstance(fork_data, dict):
-        fork_data["resource_type"] = "custom"
-        yaml_dump(fork_data, dest_yaml)
-
-    schema_registry.notify_schema_file_updated(fork_canonical)
-    audit_resource_change(user.user_id, "meta_schema", fork_canonical, "created")
-
-    fork_meta = schema_registry.get_schema(fork_canonical)
+    fork_meta = MetaSchema.model_validate(fork_doc)
+    fork_meta.path = fork_canonical
     fork_columns = _columns_for_meta_version(fork_meta, fork_meta.current)
-    return fork_canonical, fork_meta, fork_columns, True
+    return fork_canonical, fork_meta, fork_columns, fork_doc
 
 
 def _source_write_after_promote(
@@ -1914,9 +1976,10 @@ async def promote_field(
     landing source ``main``, is refused with 409 before any schema is resolved or
     written, dry run included. Its ``json-paths`` and ``sample-rows`` reads stay open.
     """
+    from dfe_engine.schema.registry import SchemaValidationError
     from dfe_engine.schema.schema_manager import (
-        SchemaManager,
         SchemaVersionError,
+        add_version_in,
         next_version_for_type,
     )
     from dfe_engine.services.schema.json_promotion_service import (
@@ -2037,15 +2100,8 @@ async def promote_field(
     if not new_columns:
         return PromoteFieldResponse(source_name=source_name, schema_version=None, results=results)
 
-    canonical, meta, columns, _forked = _ensure_writable_meta_schema_for_promote(
-        source,
-        ver,
-        canonical,
-        meta,
-        columns,
-        schema_registry,
-        persist=True,
-        user=user,
+    canonical, meta, columns, fork_doc = _ensure_writable_meta_schema_for_promote(
+        source, ver, canonical, meta, columns, schema_registry
     )
 
     merged = [col.to_yaml_dict() for col in columns]
@@ -2063,27 +2119,52 @@ async def promote_field(
     )
 
     new_ver = next_version_for_type(meta.current, "addition")
-    yaml_path = schema_registry._yaml_path(canonical)
-    try:
-        if schema_registry.schema_version_exists(canonical, new_ver):
-            raise SchemaVersionError(f"Version '{new_ver}' already exists")
-        SchemaManager.add_version(
-            yaml_path,
+    review = ReviewRouting()
+
+    def add_promoted_version(doc: dict[str, Any]) -> None:
+        add_version_in(
+            doc,
             new_ver,
             merged,
+            origin=canonical,
             type="addition",
             summary=f"Promote {len(new_columns)} JSON field(s) to columns",
             set_current=True,
         )
-    except SchemaVersionError as exc:
+
+    # A new fork is written once, carrying the promoted version, so a review branch holds the whole schema.
+    try:
+        if schema_registry.schema_version_exists(canonical, new_ver):
+            raise SchemaVersionError(f"Version '{new_ver}' already exists")
+        if fork_doc is not None:
+            add_promoted_version(fork_doc)
+            schema_registry.write_document(
+                canonical,
+                fork_doc,
+                message=f"schema: fork {canonical} for source {source_name}",
+                created_by=git_author(user),
+                routing=review,
+            )
+        else:
+            schema_registry.edit_schema(
+                canonical,
+                add_promoted_version,
+                message=f"schema: promote fields into {canonical} {new_ver}",
+                created_by=git_author(user),
+                routing=review,
+            )
+    except (SchemaVersionError, SchemaValidationError) as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
+    audit_resource_change(
+        user.user_id,
+        "meta_schema",
+        canonical,
+        "created" if fork_doc is not None else "updated",
+        routing_audit_detail(review),
+    )
 
-    schema_registry.notify_schema_file_updated(canonical)
-    audit_resource_change(user.user_id, "meta_schema", canonical, "updated")
-
-    review = ReviewRouting()
     try:
         source_registry.update_source_from_write(
             source_name,

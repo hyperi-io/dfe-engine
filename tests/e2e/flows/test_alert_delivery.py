@@ -164,8 +164,7 @@ class TestAlertDelivery:
             {
                 "name": hunt_parts["rule"],
                 "severity": "low",
-                "source": table,
-                "where_clause": f"{PAYLOAD_TEXT} LIKE '%{marker}%'",
+                "user_sql": (f"SELECT * FROM {table} WHERE {PAYLOAD_TEXT} LIKE '%{marker}%'"),
                 "estimate_cost": False,
             },
         )

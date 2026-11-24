@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""POST, PUT and check on /api/v1/rules accept a lookup only in ``hunts.lookup_databases``.
+"""POST, PUT and validate on /api/v1/rules accept a lookup only in ``hunts.lookup_databases``.
 
 The hunt runner's ClickHouse user reads every org, so a subquery or a table after IN
 answers from rows past the hunt's orgs. A database the deployment lists holds no
@@ -106,21 +106,15 @@ def test_an_update_to_an_unlisted_database_keeps_the_stored_lookup(client, admin
     assert stored["where_clause"] == "process_name IN (SELECT ioc FROM threat.iocs)"
 
 
-def test_check_takes_the_listed_databases_too(client, admin_headers):
-    listed = client.post(
-        "/api/v1/rules/check",
-        json={"source": "windows-audit", "where_clause": LOOKUP},
-        headers=admin_headers,
-    )
+def test_validate_takes_the_listed_databases_too(client, admin_headers):
+    sql = f"SELECT * FROM dfe.main WHERE {LOOKUP}"
+    listed = client.post("/api/v1/rules/validate", json={"sql": sql}, headers=admin_headers)
     unlisted = client.post(
-        "/api/v1/rules/check",
-        json={
-            "source": "windows-audit",
-            "where_clause": LOOKUP.replace("threat.iocs", "intel.iocs"),
-        },
+        "/api/v1/rules/validate",
+        json={"sql": sql.replace("threat.iocs", "intel.iocs")},
         headers=admin_headers,
     )
 
-    assert (listed.json()["valid"], listed.json()["errors"]) == (True, [])
+    assert listed.json() == {"valid": True, "errors": []}
     assert unlisted.json()["valid"] is False
     assert any("intel" in error["message"] for error in unlisted.json()["errors"])

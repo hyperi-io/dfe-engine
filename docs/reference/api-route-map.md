@@ -12,17 +12,17 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 129 | Not placed yet: see its question |
+| decide | 138 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 328 | |
+| total | 337 | |
 
 ## Questions
 
 | Question | Operations |
 |---|---|
 | [apps-depth](#apps-depth) | 22 |
+| [detection-rules](#detection-rules) | 17 |
 | [groups-scope](#groups-scope) | 11 |
-| [detection-rules](#detection-rules) | 9 |
 | [compute-helpers](#compute-helpers) | 8 |
 | [hunts-orgs](#hunts-orgs) | 7 |
 | [synthetic-data](#synthetic-data) | 7 |
@@ -38,12 +38,12 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | [clickhouse-cloud](#clickhouse-cloud) | 3 |
 | [gitops-classes](#gitops-classes) | 3 |
 | [samples](#samples) | 3 |
+| [client-config](#client-config) | 2 |
 | [hyperdx](#hyperdx) | 2 |
 | [lifecycle](#lifecycle) | 2 |
 | [pipeline-templates](#pipeline-templates) | 2 |
 | [source-schema-overlap](#source-schema-overlap) | 2 |
 | [usage-scope](#usage-scope) | 2 |
-| [client-config](#client-config) | 1 |
 | [defaults-apply](#defaults-apply) | 1 |
 | [deployment-facts](#deployment-facts) | 1 |
 
@@ -336,6 +336,30 @@ An instance's children sit 4 levels deep under the `deployment` root: drop `depl
 | `GET /api/v1/apps/{service}/{instance}/status` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/apps/{service}/{instance}/values` | - | - | - | - | decide | 0 |  |
 
+### detection-rules
+
+Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
+| `POST /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
+| `GET /api/v1/rules-v2` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/from-hyperdx` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/preview` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/validate` | - | - | - | - | decide | 0 |  |
+| `DELETE /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `GET /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `PUT /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/import` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/validate` | - | - | - | - | decide | ui 2 |  |
+| `DELETE /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+| `GET /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+| `PUT /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
+
 ### groups-scope
 
 A group is system- or org-scoped, so `orgs/{org}/groups` cannot own a system group: one `identity/groups/{group}` collection with the scope as a field, or split between the two.
@@ -353,22 +377,6 @@ A group is system- or org-scoped, so `orgs/{org}/groups` cannot own a system gro
 | `DELETE /api/v1/auth/groups/{name}/members/{username}` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/auth/groups/{name}/sensitive-attributes` | - | - | - | - | decide | 0 |  |
 | `PUT /api/v1/auth/groups/{name}/sensitive-attributes` | - | - | - | - | decide | 0 |  |
-
-### detection-rules
-
-Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `GET /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
-| `POST /api/v1/rules` | - | - | - | - | decide | ui 3, infra 1 |  |
-| `POST /api/v1/rules/check` | - | - | - | - | decide | ui 2 |  |
-| `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules/import` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
-| `DELETE /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
-| `GET /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
-| `PUT /api/v1/rules/{name}` | - | - | - | - | decide | ui 3 |  |
 
 ### compute-helpers
 
@@ -549,6 +557,15 @@ Sample tasks: fold into `system/operations/{operation}` with the result inline, 
 | `GET /api/v1/samples` | - | - | - | - | decide | infra 1 |  |
 | `GET /api/v1/samples/{task_id}` | - | - | - | - | decide | 0 |  |
 
+### client-config
+
+The console's runtime bootstrap: `system/client-config`, or where the console first reads it.
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/config/client` | - | - | - | - | decide | ui 2, infra 1 |  |
+| `GET /api/v1/config/features` | - | - | - | - | decide | 0 |  |
+
 ### hyperdx
 
 The Search reads for the caller's org: under `orgs/{org}`, or a root of their own.
@@ -593,14 +610,6 @@ Usage reads the whole deployment or one org, and `orgs/{org}/usage` covers only 
 |---|---|---|---|---|---|---|---|
 | `GET /api/v1/usage` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/usage/overview` | - | - | - | - | decide | 0 |  |
-
-### client-config
-
-The console's runtime bootstrap: `system/client-config`, or where the console first reads it.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `GET /api/v1/config/client` | - | - | - | - | decide | ui 2, infra 1 |  |
 
 ### defaults-apply
 

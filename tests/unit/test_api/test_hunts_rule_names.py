@@ -186,22 +186,16 @@ def test_a_rule_made_from_a_long_saved_search_name_is_one_a_hunt_can_reference(
     }
 
     first = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
-    created_first = client.post(
-        "/api/v1/rules", json={**_RULE, "name": first.json()["name"]}, headers=admin_headers
-    )
     second = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
-    created_second = client.post(
-        "/api/v1/rules", json={**_RULE, "name": second.json()["name"]}, headers=admin_headers
-    )
-    ids = [first.json()["name"], second.json()["name"]]
+    ids = [first.json()["id"], second.json()["id"]]
     hunt = client.post(
         "/api/v1/hunts",
         json={"name": "windows_hunt", **_HUNT, "rules": ids},
         headers=admin_headers,
     )
 
-    assert first.status_code == second.status_code == 200
-    assert created_first.status_code == created_second.status_code == 201
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
     assert ids == ["s" * _LIMIT, "s" * (_LIMIT - 2) + "-2"]
     assert hunt.status_code == 201, hunt.text
 

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 from common.hunt_files import plant_hunt, store_rule_file
 
-from dfe_engine.api.deps import get_hunt_config_registry
+from dfe_engine.api.deps import get_hunt_config_registry, get_rule_registry
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
 
@@ -191,6 +191,61 @@ class TestUpdateWithACondition:
             client.get(f"{RULES}/bob_attempts", headers=admin_headers).json()["condition"] is None
         )
 
+    def test_sql_replaces_a_condition_and_drops_it(self, client, admin_headers, clickhouse):
+        _created(client, admin_headers)
+        sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
+
+        resp = client.put(f"{RULES}/bob_attempts", json=_rule(user_sql=sql), headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert (
+            client.get(f"{RULES}/bob_attempts", headers=admin_headers).json()["condition"] is None
+        )
+
+    def test_a_condition_reads_the_source_the_rule_already_has(
+        self, client, admin_headers, clickhouse
+    ):
+        sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
+        client.post(RULES, json=_rule("by_sql", user_sql=sql), headers=admin_headers)
+        body = {"name": "by_sql", "condition": {"field": "host", "value": "alpha"}}
+
+        resp = client.put(f"{RULES}/by_sql", json=body, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rule"]["source_table"] == "windows-audit"
+
+    def test_a_condition_on_a_stored_table_no_source_carries_is_refused(
+        self, client, admin_headers, clickhouse
+    ):
+        get_rule_registry().save(
+            Rule(rule_id="bare", name="bare", where_clause="x = 1", source_table="unregistered")
+        )
+
+        resp = client.put(
+            f"{RULES}/bare",
+            json={"name": "bare", "condition": {"field": "host", "value": "a"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert "name the source" in resp.text
+
+    def test_a_condition_on_a_stored_table_a_source_carries_reads_that_source(
+        self, client, admin_headers, clickhouse
+    ):
+        get_rule_registry().save(
+            Rule(rule_id="bare", name="bare", where_clause="x = 1", source_table="events")
+        )
+
+        resp = client.put(
+            f"{RULES}/bare",
+            json={"name": "bare", "condition": {"field": "host", "value": "a"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rule"]["source"] == "events"
+
 
 class TestARefusedWriteSavesNothing:
     @pytest.mark.parametrize(
@@ -199,9 +254,9 @@ class TestARefusedWriteSavesNothing:
             (
                 {"where_clause": "x = 1"},
                 "validation_error",
-                "not both",
+                "one of the three",
             ),
-            ({"condition": None}, "validation_error", "give 'where_clause', 'condition'"),
+            ({"condition": None}, "validation_error", "one of the three"),
             ({"source": None}, "validation_error", "source"),
             ({"source": "dfe.windows-audit"}, "invalid_sql", "a label, not a <db>.<table>"),
             ({"source": "a b"}, "invalid_sql", "is not a table label"),

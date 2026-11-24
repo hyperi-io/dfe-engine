@@ -66,6 +66,7 @@ from scalo.api import (
     scalo_extra,
 )
 from scalo.concurrency import run_blocking
+from scalo.logger import logger
 
 from dfe_engine.api import body_limits
 from dfe_engine.api.deps import (
@@ -95,6 +96,7 @@ from dfe_engine.appmgmt import (
     UnknownAppError,
     ValidationResult,
     appconfig,
+    argo_refresh,
     catalogue,
     contract,
     dryrun,
@@ -673,6 +675,39 @@ class HistoryEntry(BaseModel):
     )
 
 
+class ArgoHealth(BaseModel):
+    """The health Argo CD reports for an instance's Application."""
+
+    # Argo adds values over time, so these stay strings rather than enums.
+    status: str = Field(
+        description=(
+            "Argo CD's health: Healthy, Progressing, Degraded, Suspended, Missing or Unknown."
+        ),
+    )
+
+
+class ArgoCondition(BaseModel):
+    """One condition Argo CD writes on an instance's Application."""
+
+    type: str = Field(
+        description=("The condition kind, such as ComparisonError, InvalidSpecError or SyncError."),
+    )
+    message: str = ""
+
+
+class ArgoSync(BaseModel):
+    """What Argo CD says about an instance's Application, read when the status is asked."""
+
+    status: str = Field(description="Argo CD's sync state: Synced, OutOfSync or Unknown.")
+    revision: str | None = Field(
+        description="The revision Argo CD last compared, or null before its first compare."
+    )
+    health: ArgoHealth
+    conditions: list[ArgoCondition] = Field(
+        description="Argo CD's conditions on the Application, empty when it has none."
+    )
+
+
 class StatusResponse(BaseModel):
     """Whether an instance is reporting telemetry, and since when."""
 
@@ -687,6 +722,13 @@ class StatusResponse(BaseModel):
     last_seen_epoch: float | None = None
     started_epoch: float | None = None
     uptime_seconds: float | None = None
+    sync: ArgoSync | None = Field(
+        default=None,
+        description=(
+            "What Argo CD says about the instance's Application. Null off Kubernetes, "
+            "with no service account mounted, or when the Application cannot be read."
+        ),
+    )
 
 
 class ResourceBucketModel(BaseModel):
@@ -2435,6 +2477,43 @@ def metrics_unavailable(exc: MetricsUnavailableError) -> ProblemError:
     )
 
 
+def _argo_sync(request: Request, app: AppInstance) -> ArgoSync | None:
+    """What Argo CD says about the instance's Application, or None where it is not read.
+
+    Argo CD runs only on Kubernetes, and a read or parse that fails leaves the status
+    call intact.
+    """
+    if _deploy_target(request) is not DeployTarget.KUBERNETES:
+        return None
+    state = request.app.state
+    body = argo_refresh.read_application(
+        app.application_name,
+        transport=getattr(state, "argo_transport", None),
+        service_account=getattr(state, "argo_service_account", argo_refresh.SERVICE_ACCOUNT),
+        crypto_profile=state.settings.crypto_profile,
+    )
+    if body is None:
+        return None
+    try:
+        status = body.get("status") or {}
+        sync = status.get("sync") or {}
+        health = status.get("health") or {}
+        return ArgoSync(
+            status=sync.get("status", "Unknown"),
+            revision=sync.get("revision"),
+            health=ArgoHealth(status=health.get("status", "Unknown")),
+            conditions=[
+                ArgoCondition(type=c["type"], message=c.get("message", ""))
+                for c in status.get("conditions") or []
+            ],
+        )
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning(
+            "argo application status unreadable", application=app.application_name, error=str(exc)
+        )
+        return None
+
+
 @router.get("/{service}/{instance}/status")
 def get_status(
     service: str,
@@ -2449,7 +2528,9 @@ def get_status(
     _require_metrics_read(request, user, service)
     telemetry_name = _telemetry_name(app=app, process=process, settings=request.app.state.settings)
     if process is None and not app.descriptor.emits_telemetry:
-        return StatusResponse(telemetry_name=telemetry_name, reporting=None)
+        return StatusResponse(
+            telemetry_name=telemetry_name, reporting=None, sync=_argo_sync(request, app)
+        )
     try:
         status = _reader(request, client).status(telemetry_name)
     except MetricsUnavailableError as exc:
@@ -2460,6 +2541,7 @@ def get_status(
         last_seen_epoch=status.last_seen_epoch,
         started_epoch=status.started_epoch,
         uptime_seconds=status.uptime_seconds,
+        sync=_argo_sync(request, app),
     )
 
 

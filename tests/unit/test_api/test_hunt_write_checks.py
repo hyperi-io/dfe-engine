@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_hunt_write_checks.py
-#  Purpose:      A hunt write checks each rule's query, its results table, and a non-default target
+#  Purpose:      A hunt write checks each rule's query and its results table
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -8,9 +8,8 @@
 """POST and PUT /api/v1/hunts refuse a hunt the runner could not run.
 
 Each rule the hunt names passes the query check a rule save runs. The results table is
-held to the columns the runner's INSERT names, read from ``system.columns``. A target other
-than ``<data database>.detection`` needs ``confirm=true``. The ClickHouse here answers
-the column read and the plan, and nothing else.
+held to the columns the runner's INSERT names, read from ``system.columns``. The ClickHouse
+here answers the column read and the plan, and nothing else.
 """
 
 from pathlib import Path
@@ -77,71 +76,6 @@ def _stored(client, headers) -> list[str]:
     return [row["name"] for row in client.get(HUNTS, headers=headers).json()["items"]]
 
 
-class TestANonDefaultTargetNeedsConfirmation:
-    """The hunt writes detections where an operator never looked, so the write says so first."""
-
-    @pytest.mark.parametrize(
-        "target",
-        [
-            pytest.param(None, id="no target, the default"),
-            pytest.param("detection", id="bare core table"),
-            pytest.param("dfe.detection", id="qualified core table"),
-        ],
-    )
-    def test_the_core_detection_table_needs_none(self, client, admin_headers, target):
-        body = _hunt() if target is None else _hunt(global_target_table_name=target)
-
-        resp = client.post(HUNTS, json=body, headers=admin_headers)
-
-        assert resp.status_code == 201, resp.text
-
-    @pytest.mark.parametrize(
-        "target",
-        [
-            pytest.param("logs_alerts", id="another table"),
-            pytest.param("dfe.alerts", id="another table, qualified"),
-            pytest.param("other.detection", id="the core name in another database"),
-        ],
-    )
-    def test_any_other_target_is_a_400_until_confirmed(self, client, admin_headers, target):
-        body = _hunt(global_target_table_name=target)
-
-        refused = client.post(HUNTS, json=body, headers=admin_headers)
-        confirmed = client.post(HUNTS, json=body, params={"confirm": "true"}, headers=admin_headers)
-
-        assert refused.status_code == 400, refused.text
-        assert refused.json()["code"] == "confirmation_required"
-        assert "confirm=true" in refused.json()["detail"]
-        assert confirmed.status_code == 201, confirmed.text
-        assert _stored(client, admin_headers) == ["windows_hunt"]
-
-    def test_a_refused_create_writes_nothing(self, client, admin_headers):
-        client.post(
-            HUNTS, json=_hunt(global_target_table_name="logs_alerts"), headers=admin_headers
-        )
-
-        assert _stored(client, admin_headers) == []
-
-    def test_an_update_to_another_target_is_refused_and_keeps_the_stored_hunt(
-        self, client, admin_headers
-    ):
-        assert client.post(HUNTS, json=_hunt(), headers=admin_headers).status_code == 201
-        body = {
-            k: v for k, v in _hunt(global_target_table_name="logs_alerts").items() if k != "name"
-        }
-
-        refused = client.put(f"{HUNTS}/windows_hunt", json=body, headers=admin_headers)
-        confirmed = client.put(
-            f"{HUNTS}/windows_hunt", json=body, params={"confirm": "true"}, headers=admin_headers
-        )
-
-        assert refused.status_code == 400, refused.text
-        assert refused.json()["code"] == "confirmation_required"
-        assert confirmed.status_code == 200, confirmed.text
-        stored = client.get(f"{HUNTS}/windows_hunt", headers=admin_headers).json()
-        assert stored["global_target_table_name"] == "logs_alerts"
-
-
 class TestTheResultsTableTakesWhatTheRunnerInserts:
     @pytest.mark.parametrize(
         ("tables", "fragment"),
@@ -171,15 +105,35 @@ class TestTheResultsTableTakesWhatTheRunnerInserts:
 
         assert resp.status_code == 201, resp.text
 
-    def test_a_confirmed_other_target_is_checked_too(self, client, admin_headers, clickhouse):
+    def test_another_target_is_checked_too(self, client, admin_headers, clickhouse):
         clickhouse.tables[("dfe", "logs_alerts")] = ["rule_id"]
         body = _hunt(global_target_table_name="logs_alerts")
 
-        resp = client.post(HUNTS, json=body, params={"confirm": "true"}, headers=admin_headers)
+        resp = client.post(HUNTS, json=body, headers=admin_headers)
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "invalid_target"
         assert "dfe.logs_alerts lacks the columns" in resp.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            pytest.param(None, id="no target, the default"),
+            pytest.param("detection", id="bare core table"),
+            pytest.param("logs_alerts", id="another table"),
+            pytest.param("dfe.logs_alerts", id="another table, qualified"),
+        ],
+    )
+    def test_a_target_that_takes_the_insert_is_saved_with_no_extra_flag(
+        self, client, admin_headers, clickhouse, target
+    ):
+        """The console's hunt form posts the target as typed and nothing else."""
+        clickhouse.tables[("dfe", "logs_alerts")] = _INSERT_COLUMNS
+        body = _hunt() if target is None else _hunt(global_target_table_name=target)
+
+        resp = client.post(HUNTS, json=body, headers=admin_headers)
+
+        assert resp.status_code == 201, resp.text
 
     def test_an_unreadable_clickhouse_leaves_the_table_unchecked(
         self, client, admin_headers, clickhouse

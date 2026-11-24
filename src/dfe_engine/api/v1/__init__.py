@@ -36,6 +36,7 @@ from dfe_engine.api.v1.queries import router as queries_router
 from dfe_engine.api.v1.repository import router as repository_router
 from dfe_engine.api.v1.roles import router as roles_router
 from dfe_engine.api.v1.rules import router as rules_router
+from dfe_engine.api.v1.rulesV2 import router as rules_v2_router
 from dfe_engine.api.v1.sampler import router as sampler_router
 from dfe_engine.api.v1.schemas import router as schemas_router
 from dfe_engine.api.v1.scim import router as scim_router
@@ -118,6 +119,7 @@ def build_v1_router(settings: DFESettings) -> APIRouter:
     v1_router.include_router(admin_links_router)
     v1_router.include_router(fieldmaps_router)
     v1_router.include_router(rules_router)
+    v1_router.include_router(rules_v2_router)
     v1_router.include_router(alerts_router)
     v1_router.include_router(system_router)
     v1_router.include_router(hunts_router)

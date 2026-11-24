@@ -238,9 +238,8 @@ There is no progress stream: poll the operation, and read `metadata` for progres
 | list, get, apply, delete | `/orgs/{org}/ingest-credentials[/{credential}]` | An org's ingest credentials. `PUT` with `If-None-Match: *` mints the bearer token and returns it once, `If-Match` changes `orgs`, `default_org` and `listeners`. A binding the receiver could not hold answers `422 invalid_binding`. An update or delete that loses a race changes nothing and answers `412` when its own `If-Match` no longer matches, else `409 conflict` because another write won |
 | POST | `/orgs/{org}/ingest-credentials/{credential}/rotate` | Mint a new token in place of the old one, returned once. A rotate that loses a race answers the same: `412` on an `If-Match` it sent, else `409 conflict` |
 | POST | `/rules` | Create hunt rule |
-| POST | `/rules/check` | Check a source and WHERE clause as a save would, writing nothing |
+| POST | `/rules/validate` | Validate rule |
 | POST | `/rules/import` | Read a SELECT into a source and WHERE clause, writing nothing |
-| POST | `/rules/from-hyperdx` | Read a Search view into the fields a rule editor opens with |
 | POST | `/rules/preview` | Compile a rule condition and check it as a save would, writing nothing |
 | GET | `/system/version` | Stack, engine, ui and every pinned app's version (the console footer) |
 | GET | `/system/deployment` | Profile, transports, whether compiled routing reaches the running apps, and versions -- what a pane must not guess |

@@ -320,7 +320,7 @@
       "dfe-infra": 1,
       "dfe-ui": 3
     },
-    "/api/v1/rules/check": {
+    "/api/v1/rules/validate": {
       "dfe-ui": 2
     },
     "/api/v1/rules/{name}": {

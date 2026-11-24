@@ -1,4 +1,4 @@
-"""Tests for SchemaManager -- schema version management write operations."""
+"""Tests for the schema version edits and SchemaManager's column validation."""
 
 import pytest
 
@@ -6,12 +6,24 @@ from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.schema.schema_manager import (
     SchemaManager,
     SchemaVersionError,
+    add_version_in,
+    delete_version_in,
+    fork_document,
     next_version_for_type,
+    set_current_in,
+    set_summary_in,
 )
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 # -- Fixtures -------------------------------------------------------
+
+
+def _apply(edit, path, *args, **kwargs):
+    """Run one document edit against the YAML file at *path*, as the registry does."""
+    document = yaml_load(path)
+    edit(document, *args, origin=str(path), **kwargs)
+    yaml_dump(document, path)
 
 
 @pytest.fixture
@@ -89,18 +101,18 @@ class TestNextVersionForType:
 
 class TestSetCurrent:
     def test_set_current(self, multi_version_schema):
-        SchemaManager.set_current(multi_version_schema, "1.0.0")
+        _apply(set_current_in, multi_version_schema, "1.0.0")
         data = yaml_load(multi_version_schema)
         assert data["current"] == "1.0.0"
 
     def test_set_current_unknown_version(self, multi_version_schema):
         with pytest.raises(SchemaVersionError, match="not found"):
-            SchemaManager.set_current(multi_version_schema, "9.9.9")
+            _apply(set_current_in, multi_version_schema, "9.9.9")
 
 
 class TestUpdateVersionSummary:
     def test_updates_summary_only(self, versioned_schema):
-        SchemaManager.update_version_summary(versioned_schema, "1.0.0", "Revised summary")
+        _apply(set_summary_in, versioned_schema, "1.0.0", "Revised summary")
         data = yaml_load(versioned_schema)
         assert data["versions"]["1.0.0"]["summary"] == "Revised summary"
         assert data["versions"]["1.0.0"]["type"] == "model"
@@ -108,29 +120,25 @@ class TestUpdateVersionSummary:
 
 class TestDeleteVersion:
     def test_deletes_non_current_version(self, multi_version_schema):
-        SchemaManager.delete_version(multi_version_schema, "1.0.0")
+        _apply(delete_version_in, multi_version_schema, "1.0.0")
         data = yaml_load(multi_version_schema)
         assert "1.0.0" not in data["versions"]
         assert "1.1.0" in data["versions"]
         assert data["current"] == "1.1.0"
 
     def test_repoints_current_when_deleting_current(self, multi_version_schema):
-        SchemaManager.delete_version(multi_version_schema, "1.1.0")
+        _apply(delete_version_in, multi_version_schema, "1.1.0")
         data = yaml_load(multi_version_schema)
         assert "1.1.0" not in data["versions"]
         assert data["current"] == "1.0.0"
 
     def test_rejects_unknown_version(self, multi_version_schema):
         with pytest.raises(SchemaVersionError, match="not found"):
-            SchemaManager.delete_version(multi_version_schema, "9.9.9")
+            _apply(delete_version_in, multi_version_schema, "9.9.9")
 
     def test_rejects_last_remaining_version(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="last remaining"):
-            SchemaManager.delete_version(versioned_schema, "1.0.0")
-
-    def test_missing_file(self, tmp_path):
-        with pytest.raises(SchemaLoadError, match="not found"):
-            SchemaManager.delete_version(tmp_path / "missing.yaml", "1.0.0")
+            _apply(delete_version_in, versioned_schema, "1.0.0")
 
 
 class TestAddVersion:
@@ -141,7 +149,8 @@ class TestAddVersion:
             {"name": "message", "type": "text", "use_case": "substring_search"},
             {"name": "severity", "type": "string", "attribute": ["lowcardinality"]},
         ]
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "1.1.0",
             new_cols,
@@ -170,7 +179,8 @@ class TestAddVersion:
                 "expr": "@source: EventId",
             }
         )
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "1.2.0",
             [col.to_yaml_dict()],
@@ -185,7 +195,8 @@ class TestAddVersion:
         assert loaded[0].ch_override == "DateTime"
 
     def test_set_current_true(self, versioned_schema):
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "2.0.0",
             [{"name": "ts", "type": "datetime"}],
@@ -196,7 +207,8 @@ class TestAddVersion:
         assert data["current"] == "2.0.0"
 
     def test_set_current_false(self, versioned_schema):
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "2.0.0",
             [{"name": "ts", "type": "datetime"}],
@@ -208,7 +220,8 @@ class TestAddVersion:
 
     def test_refuse_duplicate_version(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="already exists"):
-            SchemaManager.add_version(
+            _apply(
+                add_version_in,
                 versioned_schema,
                 "1.0.0",
                 [{"name": "ts", "type": "datetime"}],
@@ -216,11 +229,12 @@ class TestAddVersion:
 
     def test_refuse_empty_columns(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="columns must contain at least one column"):
-            SchemaManager.add_version(versioned_schema, "1.1.0", [])
+            _apply(add_version_in, versioned_schema, "1.1.0", [])
 
     def test_validates_columns(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="validation failed"):
-            SchemaManager.add_version(
+            _apply(
+                add_version_in,
                 versioned_schema,
                 "1.1.0",
                 [{"name": "bad_col", "type": "nonexistent_type"}],
@@ -228,7 +242,8 @@ class TestAddVersion:
 
     def test_skip_validation(self, versioned_schema):
         # Should not raise even with invalid type
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "1.1.0",
             [{"name": "col", "type": "nonexistent_type"}],
@@ -238,7 +253,8 @@ class TestAddVersion:
         assert "1.1.0" in data["versions"]
 
     def test_preserves_existing_versions(self, versioned_schema):
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "1.1.0",
             [{"name": "ts", "type": "datetime"}],
@@ -253,12 +269,13 @@ class TestAddVersion:
             SchemaColumn(name="ts", type="datetime"),
             SchemaColumn(name="user", type="string"),
         ]
-        SchemaManager.add_version(versioned_schema, "2.0.0", cols)
+        _apply(add_version_in, versioned_schema, "2.0.0", cols)
         loaded = SchemaLoader.load_columns(versioned_schema, version="2.0.0")
         assert len(loaded) == 2
 
     def test_auto_generates_date(self, versioned_schema):
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             versioned_schema,
             "1.1.0",
             [{"name": "ts", "type": "datetime"}],
@@ -266,120 +283,6 @@ class TestAddVersion:
         data = yaml_load(versioned_schema)
         assert "date" in data["versions"]["1.1.0"]
         assert len(data["versions"]["1.1.0"]["date"]) == 10  # YYYY-MM-DD
-
-    def test_file_not_found(self, tmp_path):
-        with pytest.raises(SchemaLoadError, match="not found"):
-            SchemaManager.add_version(
-                tmp_path / "missing.yaml",
-                "1.0.0",
-                [{"name": "ts", "type": "datetime"}],
-            )
-
-
-# -- TestCloneVersion -----------------------------------------------
-
-
-class TestCloneVersion:
-    def test_clone_from_explicit_version(self, versioned_schema):
-        result = SchemaManager.clone_version(
-            versioned_schema,
-            "2.0.0",
-            source_version="1.0.0",
-            type="model",
-            summary="Cloned from 1.0.0",
-        )
-        assert len(result) == 3
-        assert result[0].name == "event_time"
-
-        # Verify in file
-        cols = SchemaLoader.load_columns(versioned_schema, version="2.0.0")
-        assert len(cols) == 3
-
-    def test_clone_from_current(self, multi_version_schema):
-        result = SchemaManager.clone_version(
-            multi_version_schema,
-            "2.0.0",
-            type="model",
-            summary="Major revision",
-        )
-        # current is 1.1.0 which has 3 columns
-        assert len(result) == 3
-        names = [c.name for c in result]
-        assert "new_col" in names
-
-    def test_refuse_duplicate_new_version(self, multi_version_schema):
-        with pytest.raises(SchemaVersionError, match="already exists"):
-            SchemaManager.clone_version(
-                multi_version_schema,
-                "1.0.0",
-                source_version="1.1.0",
-            )
-
-    def test_source_version_not_found(self, versioned_schema):
-        with pytest.raises(SchemaVersionError, match="not found"):
-            SchemaManager.clone_version(
-                versioned_schema,
-                "2.0.0",
-                source_version="9.9.9",
-            )
-
-    def test_modification_add(self, versioned_schema):
-        result = SchemaManager.clone_version(
-            versioned_schema,
-            "1.1.0",
-            source_version="1.0.0",
-            column_modifications=[
-                {"action": "add", "column": {"name": "severity", "type": "string"}},
-            ],
-        )
-        assert len(result) == 4
-        assert result[-1].name == "severity"
-
-    def test_modification_remove(self, versioned_schema):
-        result = SchemaManager.clone_version(
-            versioned_schema,
-            "2.0.0",
-            source_version="1.0.0",
-            type="model",
-            column_modifications=[
-                {"action": "remove", "name": "message"},
-            ],
-        )
-        assert len(result) == 2
-        names = [c.name for c in result]
-        assert "message" not in names
-
-    def test_modification_update(self, versioned_schema):
-        result = SchemaManager.clone_version(
-            versioned_schema,
-            "2.0.0",
-            source_version="1.0.0",
-            type="model",
-            column_modifications=[
-                {"action": "update", "name": "message", "column": {"type": "string"}},
-            ],
-        )
-        msg_col = next(c for c in result if c.name == "message")
-        assert msg_col.type == "string"
-
-    def test_modification_remove_nonexistent_raises(self, versioned_schema):
-        with pytest.raises(SchemaVersionError, match="not found for removal"):
-            SchemaManager.clone_version(
-                versioned_schema,
-                "2.0.0",
-                source_version="1.0.0",
-                column_modifications=[
-                    {"action": "remove", "name": "nonexistent"},
-                ],
-            )
-
-    def test_returns_schema_columns(self, versioned_schema):
-        result = SchemaManager.clone_version(
-            versioned_schema,
-            "2.0.0",
-            source_version="1.0.0",
-        )
-        assert all(isinstance(c, SchemaColumn) for c in result)
 
 
 # -- TestValidateMetaSchemaColumns ----------------------------------
@@ -422,193 +325,75 @@ class TestValidateMetaSchemaColumns:
             SchemaManager.validate_meta_schema_columns(meta)
 
 
-# -- TestCreateMetaSchema -------------------------------------------
+# -- TestForkDocument -----------------------------------------------
 
 
-class TestCreateMetaSchema:
-    def test_create_new_file(self, tmp_path):
-        path = tmp_path / "new_schema.yaml"
-        SchemaManager.create_meta_schema(
-            path,
-            [
-                {"name": "ts", "type": "datetime", "order": 0},
-                {"name": "user_id", "type": "string"},
-            ],
-            summary="New source schema",
-        )
-        assert path.exists()
+class TestForkDocument:
+    def test_fork_carries_the_current_version_as_a_custom_schema(self, multi_version_schema):
+        fork = fork_document(yaml_load(multi_version_schema), summary="Forked", origin="core")
 
-        # Verify loadable by SchemaLoader
-        cols = SchemaLoader.load_columns(path)
-        assert len(cols) == 2
-        assert cols[0].name == "ts"
-
-    def test_refuses_existing_file(self, versioned_schema):
-        with pytest.raises(SchemaVersionError, match="already exists"):
-            SchemaManager.create_meta_schema(
-                versioned_schema,
-                [{"name": "ts", "type": "datetime"}],
-            )
-
-    def test_validates_columns(self, tmp_path):
-        with pytest.raises(SchemaVersionError, match="validation failed"):
-            SchemaManager.create_meta_schema(
-                tmp_path / "bad.yaml",
-                [{"name": "bad", "type": "not_a_type"}],
-            )
-
-    def test_creates_parent_dirs(self, tmp_path):
-        path = tmp_path / "deep" / "nested" / "schema.yaml"
-        SchemaManager.create_meta_schema(
-            path,
-            [{"name": "ts", "type": "datetime"}],
-        )
-        assert path.exists()
-
-    def test_version_tree_format(self, tmp_path):
-        path = tmp_path / "schema.yaml"
-        SchemaManager.create_meta_schema(
-            path,
-            [{"name": "ts", "type": "datetime"}],
-            initial_version="0.1.0",
-            type="model",
-            summary="Alpha",
-        )
-        data = yaml_load(path)
-        assert data["current"] == "0.1.0"
-        assert "0.1.0" in data["versions"]
-        ver = data["versions"]["0.1.0"]
-        assert ver["type"] == "model"
-        assert ver["summary"] == "Alpha"
-        assert len(ver["columns"]) == 1
-
-
-# -- TestCloneMetaSchema --------------------------------------------
-
-
-class TestCloneMetaSchema:
-    def test_clone_creates_new_file(self, versioned_schema, tmp_path):
-        dest = tmp_path / "cloned.yaml"
-        SchemaManager.clone_meta_schema(versioned_schema, dest)
-        assert dest.exists()
-
-        cols = SchemaLoader.load_columns(dest)
-        assert len(cols) == 3
-        assert cols[0].name == "event_time"
-
-    def test_clone_uses_current_version(self, multi_version_schema, tmp_path):
-        dest = tmp_path / "cloned.yaml"
-        SchemaManager.clone_meta_schema(multi_version_schema, dest)
-        cols = SchemaLoader.load_columns(dest)
+        assert fork["resource_type"] == "custom"
+        assert fork["current"] == "1.1.0"
+        assert list(fork["versions"]) == ["1.1.0"]
         # current is 1.1.0 which has 3 columns including new_col
-        assert len(cols) == 3
-        names = [c.name for c in cols]
-        assert "new_col" in names
+        assert [c["name"] for c in fork["versions"]["1.1.0"]["columns"]] == [
+            "ts",
+            "old_col",
+            "new_col",
+        ]
+        assert fork["versions"]["1.1.0"]["summary"] == "Forked"
 
-    def test_clone_explicit_version(self, multi_version_schema, tmp_path):
-        dest = tmp_path / "cloned.yaml"
-        SchemaManager.clone_meta_schema(
-            multi_version_schema,
-            dest,
-            source_version="1.0.0",
+    def test_fork_of_an_explicit_version(self, multi_version_schema):
+        fork = fork_document(
+            yaml_load(multi_version_schema), source_version="1.0.0", summary="Forked", origin="core"
         )
-        cols = SchemaLoader.load_columns(dest)
-        assert len(cols) == 2  # 1.0.0 only has 2 columns
 
-    def test_refuse_existing_dest(self, versioned_schema, tmp_path):
-        dest = tmp_path / "existing.yaml"
-        dest.write_text("existing content")
-        with pytest.raises(SchemaVersionError, match="already exists"):
-            SchemaManager.clone_meta_schema(versioned_schema, dest)
+        assert fork["current"] == "1.0.0"
+        assert len(fork["versions"]["1.0.0"]["columns"]) == 2  # 1.0.0 only has 2 columns
 
-    def test_source_not_found(self, tmp_path):
-        with pytest.raises(SchemaLoadError, match="not found"):
-            SchemaManager.clone_meta_schema(
-                tmp_path / "missing.yaml",
-                tmp_path / "dest.yaml",
+    def test_fork_leaves_the_source_untouched(self, versioned_schema):
+        source = yaml_load(versioned_schema)
+
+        fork_document(source, summary="Forked", origin="core")
+
+        assert source == yaml_load(versioned_schema)
+
+    def test_unknown_source_version_is_refused(self, versioned_schema):
+        with pytest.raises(SchemaVersionError, match="not found"):
+            fork_document(
+                yaml_load(versioned_schema), source_version="9.9.9", summary="Forked", origin="core"
             )
 
-    def test_default_summary(self, versioned_schema, tmp_path):
-        dest = tmp_path / "cloned.yaml"
-        SchemaManager.clone_meta_schema(versioned_schema, dest)
-        data = yaml_load(dest)
-        assert "Cloned from" in data["versions"]["1.0.0"]["summary"]
+    def test_a_document_with_no_version_tree_is_refused(self):
+        with pytest.raises(SchemaLoadError, match="must be a mapping"):
+            fork_document({"columns": []}, summary="Forked", origin="core")
 
 
 # -- Integration ----------------------------------------------------
 
 
 class TestIntegration:
-    def test_create_add_clone_lifecycle(self, tmp_path):
-        path = tmp_path / "lifecycle.yaml"
+    def test_fork_then_modify_schema(self, versioned_schema, tmp_path):
+        """Fork a meta schema, then evolve the fork independently."""
+        fork = tmp_path / "fork.yaml"
+        yaml_dump(fork_document(yaml_load(versioned_schema), summary="Forked", origin="test"), fork)
 
-        # Create initial schema
-        SchemaManager.create_meta_schema(
-            path,
-            [
-                {"name": "ts", "type": "datetime", "order": 0},
-                {"name": "user", "type": "string"},
-            ],
-            initial_version="1.0.0",
-            summary="Initial",
-        )
-
-        # Add a second version with extra column
-        SchemaManager.add_version(
-            path,
+        _apply(
+            add_version_in,
+            fork,
             "1.1.0",
             [
-                {"name": "ts", "type": "datetime", "order": 0},
-                {"name": "user", "type": "string"},
-                {"name": "action", "type": "string", "attribute": ["lowcardinality"]},
+                *yaml_load(fork)["versions"]["1.0.0"]["columns"],
+                {"name": "extra", "type": "integer"},
             ],
-            type="addition",
-            summary="Added action",
+            summary="Added extra",
         )
 
-        # Clone v1.1.0 to v2.0.0, removing user column
-        result = SchemaManager.clone_version(
-            path,
-            "2.0.0",
-            source_version="1.1.0",
-            type="model",
-            summary="Removed user",
-            column_modifications=[{"action": "remove", "name": "user"}],
-        )
-        assert len(result) == 2
-
-        # All three versions are loadable
-        v1 = SchemaLoader.load_columns(path, version="1.0.0")
-        v11 = SchemaLoader.load_columns(path, version="1.1.0")
-        v2 = SchemaLoader.load_columns(path, version="2.0.0")
-        assert len(v1) == 2
-        assert len(v11) == 3
-        assert len(v2) == 2
-
-        # Current is 2.0.0
-        meta = SchemaLoader.load_version_metadata(path)
-        assert meta["current"] == "2.0.0"
-
-    def test_clone_then_modify_schema(self, versioned_schema, tmp_path):
-        """Clone a meta schema, then evolve the clone independently."""
-        clone = tmp_path / "clone.yaml"
-        SchemaManager.clone_meta_schema(versioned_schema, clone)
-
-        # Add a version to the clone
-        SchemaManager.clone_version(
-            clone,
-            "1.1.0",
-            source_version="1.0.0",
-            column_modifications=[
-                {"action": "add", "column": {"name": "extra", "type": "integer"}},
-            ],
-        )
-
-        # Clone has 2 versions, source still has 1
-        clone_meta = SchemaLoader.load_version_metadata(clone)
-        source_meta = SchemaLoader.load_version_metadata(versioned_schema)
-        assert len(clone_meta["versions"]) == 2
-        assert len(source_meta["versions"]) == 1
+        # The fork has 2 versions with the new one current, and the source still has 1
+        assert len(SchemaLoader.load_version_metadata(fork)["versions"]) == 2
+        assert SchemaLoader.load_version_metadata(fork)["current"] == "1.1.0"
+        assert len(SchemaLoader.load_columns(fork, version="1.1.0")) == 4
+        assert len(SchemaLoader.load_version_metadata(versioned_schema)["versions"]) == 1
 
 
 class TestRetiredUseCaseWriteBack:
@@ -642,10 +427,12 @@ class TestRetiredUseCaseWriteBack:
         )
         return path
 
-    def test_a_clone_of_a_retired_version_carries_the_current_names(self, retired_schema):
-        SchemaManager.clone_version(retired_schema, "1.1.0", source_version="1.0.0")
+    def test_a_fork_of_a_retired_version_carries_the_current_names(self, retired_schema):
+        fork = fork_document(
+            yaml_load(retired_schema), source_version="1.0.0", summary="Forked", origin="test"
+        )
 
-        written = yaml_load(retired_schema)["versions"]["1.1.0"]["columns"]
+        written = fork["versions"]["1.0.0"]["columns"]
         by_name = {col["name"]: col for col in written}
 
         assert by_name["message"]["use_case"] == "word_search"
@@ -654,14 +441,17 @@ class TestRetiredUseCaseWriteBack:
 
     def test_the_version_that_was_stored_is_left_as_it_was(self, retired_schema):
         """The rewrite lands on the version being written, never on history."""
-        SchemaManager.clone_version(retired_schema, "1.1.0", source_version="1.0.0")
+        source = yaml_load(retired_schema)
 
-        stored = yaml_load(retired_schema)["versions"]["1.0.0"]["columns"]
+        fork_document(source, source_version="1.0.0", summary="Forked", origin="test")
+
+        stored = source["versions"]["1.0.0"]["columns"]
 
         assert [col["name"] for col in stored if col.get("use_case") == "fulltext"] == ["message"]
 
     def test_a_new_version_written_from_retired_dicts_lands_current(self, retired_schema):
-        SchemaManager.add_version(
+        _apply(
+            add_version_in,
             retired_schema,
             "2.0.0",
             [{"name": "body", "type": "text", "use_case": "text_search", "_field_type": "base"}],
@@ -689,8 +479,10 @@ class TestRetiredUseCaseWriteBack:
             path,
         )
 
-        SchemaManager.clone_version(path, "1.1.0", source_version="1.0.0")
+        fork = fork_document(
+            yaml_load(path), source_version="1.0.0", summary="Forked", origin=str(path)
+        )
 
-        written = yaml_load(path)["versions"]["1.1.0"]["columns"]
+        written = fork["versions"]["1.0.0"]["columns"]
 
         assert "use_case" not in written[0]

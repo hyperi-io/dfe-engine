@@ -55,7 +55,7 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
-from dfe_engine.hunts.hunt_target_check import is_default_target, resolve_target
+from dfe_engine.hunts.hunt_target_check import resolve_target
 from dfe_engine.hunts.rule_compiler import detection_clause
 from dfe_engine.hunts.rule_creation_service import service_from_settings
 from dfe_engine.hunts.rule_names import RuleNameError, missing_rules, rule_file
@@ -172,24 +172,6 @@ def _validate_hunt_config(
         raise ProblemError(422, str(exc), code="validation_error") from exc
 
 
-def _confirm_target(config: dict[str, Any], data_database: str, confirm: bool) -> tuple[str, str]:
-    """The table the hunt writes to, refused unless confirmed when it is not the core one.
-
-    Raises:
-        ProblemError: 400 ``confirmation_required`` when the hunt writes anywhere other than
-            ``<data database>.detection`` and ``confirm`` is not set.
-    """
-    database, table = resolve_target(config, data_database)
-    if not confirm and not is_default_target(database, table, data_database):
-        raise ProblemError(
-            400,
-            f"this hunt writes detections to {database}.{table} and not "
-            f"{data_database}.detection; pass confirm=true to write there",
-            code="confirmation_required",
-        )
-    return database, table
-
-
 def _stored_rule_errors(
     config: dict[str, Any], settings: Any, rules: Any, service: Any
 ) -> list[dict[str, Any]]:
@@ -225,21 +207,18 @@ def _stored_rule_errors(
     return problems
 
 
-def _check_hunt_will_run(
-    config: dict[str, Any], settings: Any, rules: Any, *, confirm: bool
-) -> None:
-    """Refuse a hunt the runner could not run, or one writing to a table nobody confirmed.
+def _check_hunt_will_run(config: dict[str, Any], settings: Any, rules: Any) -> None:
+    """Refuse a hunt the runner could not run.
 
     Each stored rule passes the query check a save runs, and the results table is held to
     the columns the runner's INSERT names. Nothing is checked against ClickHouse where none
     is configured or reachable.
 
     Raises:
-        ProblemError: 400 ``confirmation_required`` for an unconfirmed target other than
-            the core detection table, 422 ``invalid_target`` for a table the INSERT does
-            not fit, and 422 ``invalid_sql`` for a rule ClickHouse cannot run.
+        ProblemError: 422 ``invalid_target`` for a table the INSERT does not fit, and 422
+            ``invalid_sql`` for a rule ClickHouse cannot run.
     """
-    database, table = _confirm_target(config, settings.clickhouse.effective_data_database, confirm)
+    database, table = resolve_target(config, settings.clickhouse.effective_data_database)
     service = service_from_settings(settings)
     reason = service.target_error(database, table)
     if reason is not None:
@@ -778,20 +757,12 @@ def create_hunt(
     settings: Settings,
     request: Request,
     response: Response,
-    confirm: bool = Query(
-        False,
-        description=(
-            "Must be true when the hunt writes detections anywhere other than "
-            "<data database>.detection"
-        ),
-    ),
 ) -> HuntDetailResponse:
     """Create a new hunt configuration YAML.
 
     Each rule the hunt names passes the query check a rule save runs, and the results
     table is checked against the columns the runner writes (422 ``invalid_sql``,
-    ``invalid_target``). A target other than ``<data database>.detection`` needs
-    ``confirm=true`` (400 ``confirmation_required``).
+    ``invalid_target``).
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
@@ -801,7 +772,7 @@ def create_hunt(
         raise ProblemError(409, f"Hunt '{body.name}' already exists", code="conflict")
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings, rules)
-    _check_hunt_will_run(config, settings, rules, confirm=confirm)
+    _check_hunt_will_run(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(body.name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
@@ -855,18 +826,10 @@ def update_hunt(
     settings: Settings,
     request: Request,
     response: Response,
-    confirm: bool = Query(
-        False,
-        description=(
-            "Must be true when the hunt writes detections anywhere other than "
-            "<data database>.detection"
-        ),
-    ),
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration, resolving its customers afresh.
 
-    The checks of the create apply, including ``confirm=true`` for a target other than
-    ``<data database>.detection``.
+    The rule and results-table checks of the create apply.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
@@ -883,7 +846,7 @@ def update_hunt(
     if body.enabled is None and "enabled" in stored:
         config["enabled"] = stored["enabled"]
     _validate_hunt_config(config, settings, rules, _held_rules(stored))
-    _check_hunt_will_run(config, settings, rules, confirm=confirm)
+    _check_hunt_will_run(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
     _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)

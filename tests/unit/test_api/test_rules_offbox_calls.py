@@ -83,10 +83,10 @@ def test_update_refuses_it_and_keeps_the_stored_condition(client, admin_headers,
     assert stored["where_clause"] == "severity = 'high'"
 
 
-def test_check_reports_the_call_without_creating_anything(client, admin_headers):
+def test_validate_reports_the_call_without_creating_anything(client, admin_headers):
     resp = client.post(
-        "/api/v1/rules/check",
-        json={"source": "windows-audit", "where_clause": OFFBOX_WHERE["url"]},
+        "/api/v1/rules/validate",
+        json={"sql": f"SELECT * FROM dfe.main WHERE {OFFBOX_WHERE['url']}"},
         headers=admin_headers,
     )
 
