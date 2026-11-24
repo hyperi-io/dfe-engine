@@ -35,19 +35,20 @@ from .hdx_sanitizer import (
 )
 from .rule_rewriter import TIME_PLACEHOLDER, TIMESTAMP_COLUMNS, strip_time_placeholder
 
+# Every quantifier below is possessive, so the patterns run in linear time on any input.
 # The legacy export names the table through two placeholders and no database.
-_TEMPLATE_FROM = re.compile(r"\{\{\s*org_id\s*\}\}\s*\.\s*\{\{\s*source_table_name\s*\}\}")
+_TEMPLATE_FROM = re.compile(r"\{\{\s*+org_id\s*+\}\}\s*+\.\s*+\{\{\s*+source_table_name\s*+\}\}")
 _TEMPLATE_TABLE = "dfe_import_template_source"
 _TEMPLATE_REFERENCE = "{{org_id}}.{{source_table_name}}"
-_DOUBLE_BRACE_TIME = re.compile(r"\{\{\s*timestamp_condition\s*\}\}")
+_DOUBLE_BRACE_TIME = re.compile(r"\{\{\s*+timestamp_condition\s*+\}\}")
 # A bracketed placeholder is a conjunct of its own, so its AND goes with it.
 _BRACKETED_TIME_CONJUNCT = re.compile(
-    r"\(\s*\{timestamp_condition\}\s*\)\s+AND\s+"
-    r"|(?<!\s)\s+AND\s+\(\s*\{timestamp_condition\}\s*\)",
+    r"\(\s*+\{timestamp_condition\}\s*+\)\s++AND\s++"
+    r"|(?<!\s)\s++AND\s++\(\s*+\{timestamp_condition\}\s*+\)",
     re.IGNORECASE,
 )
 # What a time placeholder leaves once its conjunct is gone: nothing that narrows.
-_NO_FILTER = re.compile(r"\(*\s*1\s*\)*")
+_NO_FILTER = re.compile(r"\(*+\s*+1\s*+\)*+")
 
 _GROUP_BY_REFUSAL = (
     "GROUP BY builds groups, and a rule matches single rows. Remove it, and the HAVING "
