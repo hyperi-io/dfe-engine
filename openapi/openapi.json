@@ -13954,7 +13954,7 @@
           "Rules V2"
         ],
         "summary": "Validate Rule Sql",
-        "description": "Validate a detection query (SELECT ... FROM ...) without creating a rule.\n\nReturns any syntax errors or validation issues found.",
+        "description": "Validate a detection query (SELECT ... FROM ...) without creating a rule.\n\n``FROM {{source}}`` stands in for the table the hunt names. The check fills\nit with the deployment's data database and landing table so the statement\nparses, and does not plan that stand-in table: its columns are not the\nsource's. A named table is planned, and the response lists any syntax errors\nor validation issues.",
         "operationId": "rules-v2.validate",
         "requestBody": {
           "content": {
@@ -51766,6 +51766,12 @@
             ],
             "title": "Source Type",
             "description": "How the rule's SQL was written: raw, or hyperdx for SQL a Search view renders. Absent when the rule is a WHERE fragment, a CEL filter, or a match"
+          },
+          "original_sql": {
+            "type": "string",
+            "title": "Original Sql",
+            "description": "The SQL the rule was written as. Empty when the rule is a WHERE fragment, a CEL filter, or a match",
+            "default": ""
           },
           "warnings": {
             "items": {
