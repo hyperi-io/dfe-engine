@@ -12,12 +12,13 @@ Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated v
 ClickHouse), not in this API process. This router provides:
 - Scheduling status (runner liveness via active ClickHouse leases)
 - Hunt configuration CRUD (YAML under ``hunts.hunt_dir``)
-- Paginated hunt list with search, each row carrying its own run state
+- Paginated hunt list with search, each row carrying its current run state
+- One hunt's finished fires: row count, error, duration and cost, without the rows
 - On-demand execution: queue a fire the running runner claims on its next poll
 
-Run state rides the LIST rows rather than a per-hunt endpoint. The page renders a
-table of hunts, so a per-hunt endpoint would be one request per row for something
-one query already answers for all of them.
+Current run state rides the LIST rows. The page renders a table of hunts, so a
+per-hunt status endpoint would be one request per row for something one query
+already answers for all of them. The history of each fire is the executions list.
 """
 
 import time
@@ -26,7 +27,17 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import AliasChoices, BaseModel, Field, field_validator
-from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
+from scalo.api import (
+    ListParams,
+    ListQuery,
+    Page,
+    ProblemError,
+    decode_page_token,
+    encode_page_token,
+    list_query,
+    paginate,
+    sort_by_order,
+)
 from scalo.logger import logger
 
 from dfe_engine.api.conventions import apply_search
@@ -56,14 +67,16 @@ from dfe_engine.hunts.hunt_config_registry import (
 )
 from dfe_engine.hunts.hunt_target_check import DETECTION_TABLE
 from dfe_engine.hunts.rule_compiler import RuleTables, detection_clause, rule_tables
-from dfe_engine.hunts.rule_creation_service import service_from_settings
+from dfe_engine.hunts.rule_creation_service import CostEstimate, service_from_settings
 from dfe_engine.hunts.rule_names import RuleNameError, missing_rules, rule_file
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
 from dfe_engine.hunts.rule_rewriter import RuleRewriter
 from dfe_engine.hunts.run_status import (
+    HuntExecutionRow,
     RunStatus,
     clear_auto_disable,
     live_runner_count,
+    read_hunt_executions,
     read_run_status,
 )
 from dfe_engine.hunts.schedule import next_due, read_schedule
@@ -516,6 +529,25 @@ class HuntCreateRequest(HuntWriteRequest):
         return v
 
 
+class HuntExecution(BaseModel):
+    """One finished fire of a hunt. The rows it wrote are not included."""
+
+    execution_id: str = Field(
+        description="This fire's id: the hunt name and the scheduled fire, as {hunt}:{fire}"
+    )
+    fire: int = Field(description="Epoch seconds of the scheduled fire")
+    status: str = Field(description="completed, or failed when the fire raised")
+    rows_returned: int = Field(description="Rows the fire wrote. A failed fire is 0")
+    error: str | None = Field(
+        default=None, description="Why the fire failed. Absent when it completed"
+    )
+    execution_time_ms: float = Field(description="How long the fire took, in milliseconds")
+    cost_window_minutes: int = Field(
+        description="Lookback the alert-volume estimate counted over, 0 when it was not measured"
+    )
+    cost_estimate: CostEstimate
+
+
 class HuntRunQueued(BaseModel):
     """Response from queueing an ad-hoc hunt run."""
 
@@ -839,6 +871,85 @@ def create_hunt(
             HuntDetailResponse.from_stored_config(body.name, config), _rules_dir(settings, rules)
         ),
         rules,
+    )
+
+
+def _execution_cost(row: HuntExecutionRow) -> CostEstimate:
+    """The stored estimate, or an unmeasured one when the fire did not record one."""
+    if row.cost_estimate:
+        try:
+            return CostEstimate.model_validate_json(row.cost_estimate)
+        except ValueError:
+            pass
+    return CostEstimate(
+        window_minutes=row.cost_window_minutes,
+        warnings=["The alert volume was not measured for this execution."],
+    )
+
+
+def _execution(name: str, row: HuntExecutionRow) -> HuntExecution:
+    return HuntExecution(
+        execution_id=f"{name}:{row.fire}",
+        fire=row.fire,
+        status=row.status,
+        rows_returned=row.rows_returned,
+        error=row.error or None,
+        execution_time_ms=row.execution_time_ms,
+        cost_window_minutes=row.cost_window_minutes,
+        cost_estimate=_execution_cost(row),
+    )
+
+
+@router.get(
+    "/{name}/executions",
+    response_model=Page[HuntExecution],
+    dependencies=[Depends(require_platform_action(scopes_dict["hunt_read"]))],
+)
+def list_hunt_executions(
+    name: str, registry: HuntConfigReg, query: ListParams
+) -> Page[HuntExecution]:
+    """List one hunt's finished fires, newest first.
+
+    Each item is one fire, named ``{hunt}:{fire}``: how many rows it wrote, the error
+    when it failed, how long it took, and the alert-volume estimate over its cost
+    window. The rows
+    themselves are not returned. A run-now that is still queued is not a fire yet,
+    and a one-off rule run is not a hunt fire, so neither appears here.
+
+    503 is reserved for ClickHouse actually being unreachable.
+    """
+    try:
+        registry.get(name)
+    except HuntConfigNotFoundError:
+        raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
+
+    start = decode_page_token(query) + query.skip
+    try:
+        client, db = _data_database_client()
+        rows, total = read_hunt_executions(client, db, name, limit=query.page_size, offset=start)
+    except Exception as exc:
+        if not _clickhouse_unreachable(exc):
+            logger.exception(f"could not list executions for hunt '{name}': {exc}")
+            raise ProblemError(
+                500,
+                "The executions could not be listed and the cause was not a ClickHouse "
+                "connection failure; the error is in the engine log",
+                code="executions_unavailable",
+            ) from exc
+        logger.error(f"could not list executions for hunt '{name}': {exc}")
+        raise ProblemError(
+            503,
+            "The hunt coordination tables in ClickHouse are unreachable, so the "
+            "executions could not be listed.",
+            code="clickhouse_unreachable",
+        ) from exc
+
+    end = start + query.page_size
+    next_token = encode_page_token(end, query) if end < total else None
+    return Page[HuntExecution](
+        items=[_execution(name, row) for row in rows],
+        next_page_token=next_token,
+        total_size=total,
     )
 
 

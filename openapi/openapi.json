@@ -14224,34 +14224,23 @@
         }
       }
     },
-    "/api/v1/rules-v2/{name}/run": {
+    "/api/v1/rules-v2/run": {
       "post": {
         "tags": [
           "Rules V2"
         ],
-        "summary": "Run Rule",
-        "description": "Run one stored rule against a source, writing nothing.\n\nThe source is read the way a sample of it is read: its own table when that\nversion is deployed, otherwise the landing table filtered to the source's\nmatch. The volume estimate and the SELECT of matching rows share the\nlookback window, and both are held to the orgs the caller may read. A\ndetection the hunt runner would refuse, or a SELECT ClickHouse rejects,\ncomes back with 200 and the reason in ``sql_errors``.",
+        "summary": "Run Rule Draft",
+        "description": "Run a stored rule, or a detection that has not been saved, writing nothing.\n\nGive ``rule.name`` to run a stored rule, or one of ``rule.where_clause``,\n``rule.cel_filter``, ``rule.user_sql``, or ``rule.match`` to run that detection\nwithout creating a rule.\nThe source is read the way a sample of it is read: its own table when that\nversion is deployed, otherwise the landing table filtered to the source's\nmatch. The volume estimate and the SELECT of matching rows share the lookback\nwindow, and both are held to the orgs the caller may read. A detection the\nhunt runner would refuse, or a SELECT ClickHouse rejects, comes back with\n200 and the reason in ``sql_errors``.",
         "operationId": "rules-v2.run",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RuleV2RunRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -16956,6 +16945,144 @@
             "positional": []
           },
           "action": "hunt:write"
+        }
+      }
+    },
+    "/api/v1/hunts/{name}/executions": {
+      "get": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "List Hunt Executions",
+        "description": "List one hunt's finished fires, newest first.\n\nEach item is one fire, named ``{hunt}:{fire}``: how many rows it wrote, the error\nwhen it failed, how long it took, and the alert-volume estimate over its cost\nwindow. The rows\nthemselves are not returned. A run-now that is still queued is not a fire yet,\nand a one-off rule run is not a hunt fire, so neither appears here.\n\n503 is reserved for ClickHouse actually being unreachable.",
+        "operationId": "hunts.executions.list",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items per page: 0 means 50, above 1000 is cut to it",
+              "default": 0,
+              "title": "Page Size"
+            },
+            "description": "Items per page: 0 means 50, above 1000 is cut to it"
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_page_token of the previous page",
+              "title": "Page Token"
+            },
+            "description": "The next_page_token of the previous page"
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items to skip, after page_token",
+              "default": 0,
+              "title": "Skip"
+            },
+            "description": "Items to skip, after page_token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_HuntExecution_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "hunts",
+          "resource": "executions",
+          "hierarchy": [
+            "hunts",
+            "executions"
+          ],
+          "verb": "list",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "hunt:read"
         }
       }
     },
@@ -43871,6 +43998,67 @@
         "title": "HuntEngineStatus",
         "description": "Current state of the background hunt scheduler."
       },
+      "HuntExecution": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id",
+            "description": "This fire's id: the hunt name and the scheduled fire, as {hunt}:{fire}"
+          },
+          "fire": {
+            "type": "integer",
+            "title": "Fire",
+            "description": "Epoch seconds of the scheduled fire"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "completed, or failed when the fire raised"
+          },
+          "rows_returned": {
+            "type": "integer",
+            "title": "Rows Returned",
+            "description": "Rows the fire wrote. A failed fire is 0"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Why the fire failed. Absent when it completed"
+          },
+          "execution_time_ms": {
+            "type": "number",
+            "title": "Execution Time Ms",
+            "description": "How long the fire took, in milliseconds"
+          },
+          "cost_window_minutes": {
+            "type": "integer",
+            "title": "Cost Window Minutes",
+            "description": "Lookback the alert-volume estimate counted over, 0 when it was not measured"
+          },
+          "cost_estimate": {
+            "$ref": "#/components/schemas/CostEstimate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "execution_id",
+          "fire",
+          "status",
+          "rows_returned",
+          "execution_time_ms",
+          "cost_window_minutes",
+          "cost_estimate"
+        ],
+        "title": "HuntExecution",
+        "description": "One finished fire of a hunt. The rows it wrote are not included."
+      },
       "HuntRuleEntry": {
         "properties": {
           "rule_name": {
@@ -47538,6 +47726,44 @@
           "items"
         ],
         "title": "Page[HistoryEntry]"
+      },
+      "Page_HuntExecution_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HuntExecution"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_page_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page Token"
+          },
+          "total_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "Page[HuntExecution]"
       },
       "Page_HuntSummary_": {
         "properties": {
@@ -52146,15 +52372,20 @@
             ],
             "title": "Cost Window Minutes",
             "description": "Lookback window in minutes the volume estimate and the run both use. Absent or 0 uses the deployment's preview window."
+          },
+          "rule": {
+            "$ref": "#/components/schemas/RuleV2RunRule",
+            "description": "Stored rule name, or the detection to run without saving it"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "source"
+          "source",
+          "rule"
         ],
         "title": "RuleV2RunRequest",
-        "description": "A source to run one stored rule against, and the window to count."
+        "description": "A source to run against, and the rule to check."
       },
       "RuleV2RunResponse": {
         "properties": {
@@ -52229,7 +52460,93 @@
           "execution_time_ms"
         ],
         "title": "RuleV2RunResponse",
-        "description": "One on-demand run of a stored rule. Nothing is written."
+        "description": "One on-demand run. Nothing is written, and an unsaved detection is not stored."
+      },
+      "RuleV2RunRule": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Stored rule to run. Omit it and give one detection (where_clause, cel_filter, user_sql, or match) to run a rule that has not been saved"
+          },
+          "where_clause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Where Clause",
+            "description": "Detection condition to run, the SQL after WHERE. Give this or one other detection to run a rule that has not been saved"
+          },
+          "cel_filter": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cel Filter",
+            "description": "CEL expression to run. Give this or one other detection, not more"
+          },
+          "user_sql": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Sql",
+            "description": "Full detection query to run. The FROM is dropped, as on save, and the source in this request names the table. Give this or one other detection, not more"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "raw",
+                  "hyperdx"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type",
+            "description": "'raw' or 'hyperdx' when the detection is ``user_sql``. Ignored otherwise"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleCondition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structured match to run, the same shape as a source match. Give this or one other detection, not more"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RuleV2RunRule",
+        "description": "The rule a run checks: a stored name, or one detection that has not been saved."
       },
       "RuleV2Summary": {
         "properties": {

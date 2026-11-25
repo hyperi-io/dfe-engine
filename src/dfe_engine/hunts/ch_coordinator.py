@@ -133,6 +133,39 @@ _STATE_COLUMNS = [
     "auto_disabled_reason",
 ]
 
+# What a finished fire stores beyond the row that queued it. Declared on hunt_run
+# 1.1.0. An already-created table gains them here, because a runner can record a
+# fire before the schema phase has applied that version.
+_RUN_COLUMNS = ["hunt_id", "fire", "status", "rows_written"]
+_EXECUTION_COLUMNS = (
+    ("error", "String DEFAULT ''"),
+    ("duration_ms", "Float64 DEFAULT 0"),
+    ("cost_window_minutes", "UInt32 DEFAULT 0"),
+    ("cost_estimate", "String DEFAULT ''"),
+)
+_ERROR_LIMIT = 2000
+
+
+def ensure_execution_columns(ch: Any, database: str) -> None:
+    """Add the fire's error, duration and cost columns when the table predates them."""
+    target = f"{quote_identifier(database)}.{quote_identifier('hunt_run')}"
+    for name, typedef in _EXECUTION_COLUMNS:
+        ch.command(f"ALTER TABLE {target} ADD COLUMN IF NOT EXISTS `{name}` {typedef}")
+
+
+def execution_columns_present(ch: Any, database: str) -> bool:
+    """Whether hunt_run already has the columns a finished fire writes."""
+    try:
+        rows = ch.query(
+            "SELECT count() FROM system.columns "
+            "WHERE database = {db:String} AND table = 'hunt_run' AND name = 'cost_estimate'",
+            parameters={"db": database},
+        ).result_rows
+    except Exception:
+        return False
+    return bool(rows and int(rows[0][0]))
+
+
 # The runner's stop on a hunt is its own hunt_state row, keyed ``<hunt_id>#stopped``, so
 # the counter row's read-then-write never carries it and no overrun can overwrite it.
 STOP_MARK = "#stopped"
@@ -183,6 +216,9 @@ class ChCoordinator:
         self._margin = margin
         self._ch = ch
         self._db = database
+        # True once hunt_run has the execution columns, so later fires skip the probe.
+        self._run_wide = False
+        self._ensure_logged = False
         self._qdb = quote_identifier(database)
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
@@ -573,14 +609,48 @@ class ChCoordinator:
 
     # ---- runs (row count + operator run-now) --------------------------
 
-    def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
-        """Record what a completed fire wrote (replaces any request for that fire)."""
-        self._ch.insert(
-            "hunt_run",
-            [[hunt_id, fire, "completed", int(rows_written)]],
-            column_names=["hunt_id", "fire", "status", "rows_written"],
-            database=self._db,
-        )
+    def _wide_run(self) -> bool:
+        """Whether a fire can store its error, duration and cost on this table."""
+        if self._run_wide:
+            return True
+        try:
+            ensure_execution_columns(self._ch, self._db)
+        except Exception as exc:
+            if not self._ensure_logged:
+                logger.warning("hunt execution columns were not added", error=str(exc))
+                self._ensure_logged = True
+        self._run_wide = execution_columns_present(self._ch, self._db)
+        return self._run_wide
+
+    def record_run(
+        self,
+        hunt_id: str,
+        fire: int,
+        rows_written: int,
+        *,
+        status: str = "completed",
+        error: str = "",
+        duration_ms: float = 0.0,
+        cost_window_minutes: int = 0,
+        cost_estimate: str = "",
+    ) -> None:
+        """Record a finished fire (replaces any request for that same fire).
+
+        ``completed`` is a fire whose statements committed. ``failed`` is one that
+        raised. A table that predates the execution columns keeps the original four,
+        so an older coordination table still accepts the row.
+        """
+        if status not in ("completed", "failed"):
+            raise ValueError(f"a finished fire is completed or failed, not {status!r}")
+        error = error.strip()
+        if len(error) > _ERROR_LIMIT:
+            error = error[:_ERROR_LIMIT]
+        row = [hunt_id, fire, status, int(rows_written)]
+        columns = _RUN_COLUMNS
+        if self._wide_run():
+            row.extend([error, float(duration_ms), int(cost_window_minutes), cost_estimate])
+            columns = [*_RUN_COLUMNS, *(name for name, _typedef in _EXECUTION_COLUMNS)]
+        self._ch.insert("hunt_run", [row], column_names=columns, database=self._db)
 
     def request_run(self, hunt_id: str, fire: int) -> None:
         """Mark a hunt due at *fire*, for the running runner to claim on its next poll.

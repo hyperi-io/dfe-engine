@@ -36,6 +36,8 @@ class HuntStatement(BaseModel):
         target: The (database, table) a compiled rule writes its detections to. A
             statement with one carries an ``{unseen}`` placeholder, so it reads the
             overlap and skips what it already detected. None for a direct query.
+        where_clause: The rule's detection condition, so a fire can estimate its
+            volume. Empty for a direct query.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -48,6 +50,7 @@ class HuntStatement(BaseModel):
     summary_params: dict[str, str] = {}
     source: tuple[str, str] | None = None
     target: tuple[str, str] | None = None
+    where_clause: str = ""
 
 
 class HuntSpec(BaseModel):
@@ -60,6 +63,8 @@ class HuntSpec(BaseModel):
     queries: list[HuntStatement] = []
     # The org names a rules hunt reads, or None for a direct query, which is its own SQL.
     customers: list[str] | None = None
+    # Tenant ids of those orgs, so a fire's volume estimate counts the same rows it reads.
+    tenant_ids: list[str] = []
     # Its customers the engine stored no tenant ids for, so every fire is refused.
     unresolved_customers: list[str] = []
     # Optional target metadata. Empty by default - the query carries its own target,

@@ -12,9 +12,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 138 | Not placed yet: see its question |
+| decide | 139 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 337 | |
+| total | 338 | |
 
 ## Questions
 
@@ -24,7 +24,7 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | [detection-rules](#detection-rules) | 17 |
 | [groups-scope](#groups-scope) | 11 |
 | [compute-helpers](#compute-helpers) | 8 |
-| [hunts-orgs](#hunts-orgs) | 7 |
+| [hunts-orgs](#hunts-orgs) | 8 |
 | [synthetic-data](#synthetic-data) | 7 |
 | [queries](#queries) | 6 |
 | [repository](#repository) | 6 |
@@ -348,11 +348,11 @@ Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sou
 | `POST /api/v1/rules-v2` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules-v2/from-hyperdx` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules-v2/preview` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules-v2/run` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules-v2/validate` | - | - | - | - | decide | 0 |  |
 | `DELETE /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
 | `PUT /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/rules-v2/{name}/run` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/import` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
@@ -406,6 +406,7 @@ A hunt can target several customer orgs, so `orgs/{org}/hunts` cannot own every 
 | `DELETE /api/v1/hunts/{name}` | - | - | - | - | decide | ui 4 |  |
 | `GET /api/v1/hunts/{name}` | - | - | - | - | decide | ui 4 |  |
 | `PUT /api/v1/hunts/{name}` | - | - | - | - | decide | ui 4 |  |
+| `GET /api/v1/hunts/{name}/executions` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/hunts/{name}/run` | - | - | - | - | decide | ui 2 |  |
 
 ### synthetic-data

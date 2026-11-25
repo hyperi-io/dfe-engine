@@ -6,7 +6,7 @@ POST   /api/v1/rules-v2              -> Create a rule
 GET    /api/v1/rules-v2/{name}    -> Rule detail
 PUT    /api/v1/rules-v2/{name}    -> Update rule
 DELETE /api/v1/rules-v2/{name}    -> Delete rule
-POST   /api/v1/rules-v2/{name}/run   -> Run one stored rule against a source, writing nothing
+POST   /api/v1/rules-v2/run         -> Run a stored rule, or a detection that has not been saved
 POST   /api/v1/rules-v2/validate     -> Validate SQL without creating
 POST   /api/v1/rules-v2/preview      -> Compile a condition and check it as a save would, saving nothing
 
@@ -274,8 +274,79 @@ class RulePreviewResponse(BaseModel):
     cost_estimate: CostEstimate | None = None
 
 
+_DETECTIONS = ("where_clause", "cel_filter", "user_sql", "match")
+
+
+def _given_detections(body: object) -> list[str]:
+    """Which detection forms *body* carries."""
+    return [name for name in _DETECTIONS if getattr(body, name, None) is not None]
+
+
+class RuleV2RunRule(BaseModel):
+    """The rule a run checks: a stored name, or one detection that has not been saved."""
+
+    model_config = {"extra": "forbid"}
+
+    name: Description = Field(
+        default=None,
+        description=(
+            "Stored rule to run. Omit it and give one detection "
+            "(where_clause, cel_filter, user_sql, or match) to run a rule that has not been saved"
+        ),
+    )
+    where_clause: Description = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Detection condition to run, the SQL after WHERE. Give this or one other "
+            "detection to run a rule that has not been saved"
+        ),
+    )
+    cel_filter: Description = Field(
+        default=None,
+        min_length=1,
+        description="CEL expression to run. Give this or one other detection, not more",
+    )
+    user_sql: Description = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Full detection query to run. The FROM is dropped, as on save, and the "
+            "source in this request names the table. Give this or one other detection, not more"
+        ),
+    )
+    source_type: Literal["raw", "hyperdx"] | None = Field(
+        default=None,
+        description="'raw' or 'hyperdx' when the detection is ``user_sql``. Ignored otherwise",
+    )
+    match: RuleCondition | None = Field(
+        default=None,
+        description=(
+            "Structured match to run, the same shape as a source match. "
+            "Give this or one other detection, not more"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _name_or_one_detection(self) -> RuleV2RunRule:
+        given = _given_detections(self)
+        if len(given) > 1:
+            raise ValueError(
+                "give 'where_clause', 'cel_filter', 'user_sql' or 'match', one of them"
+            )
+        if self.name and given:
+            raise ValueError("give 'name' or one detection, not both")
+        if not self.name and not given:
+            raise ValueError(
+                "give 'name', or one of 'where_clause', 'cel_filter', 'user_sql', 'match'"
+            )
+        if self.where_clause is not None and _STATEMENT.match(_normalize_where(self.where_clause)):
+            raise ValueError("where_clause is the detection condition, not a full SQL statement")
+        return self
+
+
 class RuleV2RunRequest(BaseModel):
-    """A source to run one stored rule against, and the window to count."""
+    """A source to run against, and the rule to check."""
 
     model_config = {"extra": "forbid"}
 
@@ -291,10 +362,13 @@ class RuleV2RunRequest(BaseModel):
             "Absent or 0 uses the deployment's preview window."
         ),
     )
+    rule: RuleV2RunRule = Field(
+        description="Stored rule name, or the detection to run without saving it",
+    )
 
 
 class RuleV2RunResponse(BaseModel):
-    """One on-demand run of a stored rule. Nothing is written."""
+    """One on-demand run. Nothing is written, and an unsaved detection is not stored."""
 
     source: str = Field(description="Source label the run read")
     source_db: str = Field(description="Database the run read")
@@ -705,12 +779,11 @@ def preview_rule(
 
 
 @router.post(
-    "/{name}/run",
+    "/run",
     response_model=RuleV2RunResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
 )
-def run_rule(
-    name: str,
+def run_rule_draft(
     body: RuleV2RunRequest,
     user: CurrentUser,
     settings: Settings,
@@ -719,19 +792,20 @@ def run_rule(
     schemas: SchemaReg,
     request: Request,
 ) -> RuleV2RunResponse:
-    """Run one stored rule against a source, writing nothing.
+    """Run a stored rule, or a detection that has not been saved, writing nothing.
 
+    Give ``rule.name`` to run a stored rule, or one of ``rule.where_clause``,
+    ``rule.cel_filter``, ``rule.user_sql``, or ``rule.match`` to run that detection
+    without creating a rule.
     The source is read the way a sample of it is read: its own table when that
     version is deployed, otherwise the landing table filtered to the source's
-    match. The volume estimate and the SELECT of matching rows share the
-    lookback window, and both are held to the orgs the caller may read. A
-    detection the hunt runner would refuse, or a SELECT ClickHouse rejects,
-    comes back with 200 and the reason in ``sql_errors``.
+    match. The volume estimate and the SELECT of matching rows share the lookback
+    window, and both are held to the orgs the caller may read. A detection the
+    hunt runner would refuse, or a SELECT ClickHouse rejects, comes back with
+    200 and the reason in ``sql_errors``.
     """
-    return _run_stored_rule(
-        name=name,
-        source_name=body.source,
-        cost_window_minutes=body.cost_window_minutes,
+    return _run_rule_request(
+        body=body,
         tenant_ids=held_tenant_ids(request, user, scopes_dict["rule_validate"]),
         settings=settings,
         registry=registry,
@@ -1231,6 +1305,63 @@ def _source_read(source_name, sources, schemas, settings, client):
     return database, table, extra
 
 
+def _draft_rule(settings: Settings, spec: RuleV2RunRule) -> tuple[Rule, list[SqlValidationError]]:
+    """The rule *spec* would store, without storing it."""
+    write = _RuleWriteFields(
+        where_clause=spec.where_clause,
+        cel_filter=spec.cel_filter,
+        user_sql=spec.user_sql,
+        source_type=(spec.source_type or "raw") if spec.user_sql else "raw",
+        match=spec.match,
+    )
+    return _rule_from_write(
+        settings, write, rule_id="draft", display_name="draft", description=None
+    )
+
+
+def _run_rule_request(
+    *,
+    body: RuleV2RunRequest,
+    tenant_ids: list[str] | None,
+    settings: Settings,
+    registry,
+    sources,
+    schemas,
+) -> RuleV2RunResponse:
+    """Run the detection in ``body.rule``, or the stored rule it names. Writes nothing."""
+    spec = body.rule
+    if _given_detections(spec):
+        rule, errors = _draft_rule(settings, spec)
+        return _run_stored_rule(
+            name=spec.name or "draft",
+            source_name=body.source,
+            cost_window_minutes=body.cost_window_minutes,
+            tenant_ids=tenant_ids,
+            settings=settings,
+            registry=registry,
+            sources=sources,
+            schemas=schemas,
+            rule=rule,
+            compile_errors=errors,
+        )
+    if not spec.name:
+        raise ProblemError(
+            422,
+            "give 'name', or one of 'where_clause', 'cel_filter', 'user_sql', 'match'",
+            code="detection_required",
+        )
+    return _run_stored_rule(
+        name=spec.name,
+        source_name=body.source,
+        cost_window_minutes=body.cost_window_minutes,
+        tenant_ids=tenant_ids,
+        settings=settings,
+        registry=registry,
+        sources=sources,
+        schemas=schemas,
+    )
+
+
 def _run_stored_rule(
     *,
     name: str,
@@ -1241,8 +1372,10 @@ def _run_stored_rule(
     registry,
     sources,
     schemas,
+    rule: Rule | None = None,
+    compile_errors: list[SqlValidationError] | None = None,
 ) -> RuleV2RunResponse:
-    """Estimate and run one stored rule against a source. Writes nothing."""
+    """Estimate and run one rule against a source. Writes nothing."""
     from clickhouse_connect.driver.exceptions import ClickHouseError
     from scalo.resilience import ServiceUnavailable
 
@@ -1250,10 +1383,11 @@ def _run_stored_rule(
     from dfe_engine.hunts.hunt_output import matching_rows, tenant_condition
     from dfe_engine.hunts.rule_guard import preview_settings
 
-    try:
-        rule = registry.get(name)
-    except RuleNotFoundError:
-        raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
+    if rule is None:
+        try:
+            rule = registry.get(name)
+        except RuleNotFoundError:
+            raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
 
     service = _rule_service(settings)
     client = service._query_client()
@@ -1282,7 +1416,7 @@ def _run_stored_rule(
             truncated=truncated,
         )
 
-    errors = _where_errors(settings, rule.where_clause)
+    errors = list(compile_errors or []) or _where_errors(settings, rule.where_clause)
     if errors:
         return answer(estimate=_unmeasured_cost(window, "the detection was not run"), errors=errors)
 
