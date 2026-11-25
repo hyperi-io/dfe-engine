@@ -46,9 +46,14 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
             "from_catalogue_intake": "beats",
             "from_catalogue_item": "cisco-asa",
             "match": {
-                "field": "data_stream.dataset",
-                "operator": "equals",
-                "value": "cisco_asa.log",
+                "any": [
+                    {
+                        "field": "data_stream.dataset",
+                        "operator": "equals",
+                        "value": "cisco_asa.log",
+                    },
+                    {"field": "event.dataset", "operator": "equals", "value": "cisco_asa.log"},
+                ]
             },
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",
@@ -105,7 +110,12 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
             "fetcher": None,
             "from_catalogue_intake": "beats",
             "from_catalogue_item": "okta",
-            "match": {"field": "data_stream.dataset", "operator": "equals", "value": "okta.system"},
+            "match": {
+                "any": [
+                    {"field": "data_stream.dataset", "operator": "equals", "value": "okta.system"},
+                    {"field": "event.dataset", "operator": "equals", "value": "okta.system"},
+                ]
+            },
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",
             "variant": "filebeat.okta.default",
@@ -119,7 +129,12 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
             "fetcher": None,
             "from_catalogue_intake": "beats",
             "from_catalogue_item": "coredns-log",
-            "match": {"field": "data_stream.dataset", "operator": "equals", "value": "coredns.log"},
+            "match": {
+                "any": [
+                    {"field": "data_stream.dataset", "operator": "equals", "value": "coredns.log"},
+                    {"field": "event.dataset", "operator": "equals", "value": "coredns.log"},
+                ]
+            },
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",
             "variant": "filebeat.coredns_log.json",
