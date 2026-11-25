@@ -17,7 +17,7 @@ overview: [schema.md](schema.md).
 | `src/dfe_engine/schema/schema_loader.py` | `SchemaLoader` - YAML loading, composition, validation |
 | `src/dfe_engine/schema/schema_ddl.py` | `DDLGenerator`, `DDLConfig` - column/index/view DDL generation |
 | `src/dfe_engine/schema/schema_builder_v2.py` | `SchemaBuilderV2`, `SchemaBuildResult` - Source -> DDL orchestration |
-| `src/dfe_engine/schema/schema_manager.py` | `SchemaManager` - version write operations (add, clone, create) |
+| `src/dfe_engine/schema/schema_manager.py` | In-memory version edits (add, delete, set current, fork) |
 | `src/dfe_engine/schema/applier.py` | `SchemaApplier`, `ManifestApplier`, `plan_source_table`, `read_table` - brings a live table to its CREATE TABLE, for a source deploy and the manifest alike |
 | dfe-schemas `dfe_schemas/clickhouse.py` | `PlatformProbe` (Cloud or self-hosted, probed once per connection), `engine_clause` (the one `Replicated*` form), `create_database`, the settings realign |
 | `src/dfe_engine/fieldmap/view_generator.py` | `ViewGenerator` - standard field map -> view DDL |
@@ -187,39 +187,24 @@ add_ddl = gen.generate_alter_add_column("my_table", column)
 view_ddl = gen.generate_view("my_table", {"SourceIP": "source_ip"}, "sigma")
 ```
 
-### SchemaManager (`src/dfe_engine/schema/schema_manager.py`)
+### Schema version edits (`src/dfe_engine/schema/schema_manager.py`)
 
 Version WRITE operations - published versions are immutable, so all changes
-create new version entries:
+create new version entries. Each edit works on a schema document in memory, and
+`SchemaRegistry.edit_schema` writes the result:
 
 ```python
-from dfe_engine.schema.schema_manager import SchemaManager
+from dfe_engine.schema.schema_manager import add_version_in, fork_document
 
-SchemaManager.create_meta_schema(
-    "meta/new_source.yaml",
-    columns=[{"name": "event_type", "type": "string"}],
-    initial_version="1.0.0",
-    summary="Initial schema",
-)
-SchemaManager.add_version(
-    "meta/syslog.yaml",
+add_version_in(
+    document,
     "1.1.0",
     columns=[...],  # complete column snapshot
+    origin="meta/syslog",
     type="addition",
     summary="Added geo_country column",
 )
-SchemaManager.clone_version(
-    "meta/syslog.yaml",
-    "2.0.0",
-    source_version="1.1.0",
-    type="model",
-    summary="Changed message type",
-    column_modifications=[
-        {"action": "update", "name": "message", "column": {"type": "string"}},
-        {"action": "add", "column": {"name": "new_field", "type": "integer"}},
-        {"action": "remove", "name": "old_field"},
-    ],
-)
+fork = fork_document(document, source_version="1.1.0", summary="Forked", origin="meta/syslog")
 ```
 
 ### The applier (`src/dfe_engine/schema/applier.py`)

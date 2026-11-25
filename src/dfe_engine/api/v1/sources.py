@@ -127,6 +127,7 @@ from dfe_engine.source.deployment import (
     SourceDeploymentStore,
     SourcePlanArtifact,
     TtlChange,
+    columns_added_for_table,
     ensure_build_artifact,
     execute_ddl,
     plan_deploy_statements,
@@ -512,7 +513,7 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
                 if change.unpark and not written.review_required:
                     derived.drop_parked(gc, change.app, user.user_id)
                 if written.changed and not written.review_required:
-                    pushed.append(f"{change.app.service}-{change.app.instance}")
+                    pushed.append(change.app.application_name)
             # Each write renders the app config itself, so its hint is the only
             # report of that change: the render below finds the file current.
             hints += written.restart_required
@@ -550,7 +551,7 @@ def _hard_refresh_pushed(settings: Any, applications: list[str]) -> None:
     """
     if not applications or settings.deployment.target != DeployTarget.KUBERNETES:
         return
-    failed = argo_refresh.refresh_applications(applications)
+    failed = argo_refresh.refresh_applications(applications, crypto_profile=settings.crypto_profile)
     if failed:
         logger.warning(f"Argo CD not asked to refresh: {', '.join(failed)}")
 
@@ -2472,7 +2473,7 @@ async def _execute_source_deploy(
     )
     if isinstance(applied, SchemaDeployResult):
         return applied
-    source, version_id, result, views, statements_applied, db, ttl_change = applied
+    source, version_id, result, views, statements_applied, db, ttl_change, columns_added = applied
     await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
 
     # Off the event loop: the admin calls block for their full timeout when no
@@ -2512,6 +2513,7 @@ async def _execute_source_deploy(
         topics_removed=topics.removed,
         topics_pending_removal=topics.pending,
         ttl_change=ttl_change,
+        columns_added=list(columns_added),
     )
     store = SourceDeploymentStore.from_settings(settings)
     record = ReviewRouting()
@@ -2683,6 +2685,7 @@ class _AppliedSchema(NamedTuple):
     statements_applied: int
     database: str
     ttl_change: TtlChange | None
+    columns_added: tuple[str, ...] = ()
 
 
 def _record_source_deploy(
@@ -2722,32 +2725,34 @@ def _record_source_deploy(
 
 def _dry_run_table_moves(
     builder: Any, source: Source, version_id: str, result: Any, settings: Any
-) -> tuple[TtlChange | None, SettingsChange | None, str | None]:
-    """The TTL and settings moves a deploy would make on the source's table, and why unknown.
+) -> tuple[TtlChange | None, SettingsChange | None, tuple[str, ...], str | None]:
+    """The TTL, settings and column moves a deploy would make on the source's table, and why unknown.
 
     Only a deployed source has a table to move. The table is read within
     ``clickhouse.interactive_budget_seconds``; a ClickHouse that cannot be read
-    leaves both moves unknown and says so.
+    leaves every move unknown and says so.
     """
     if source.deployed_version is None:
-        return None, None, None
+        return None, None, (), None
     db = settings.clickhouse.effective_data_database
     client = get_interactive_clickhouse_client(settings)
     try:
         live = live_tables(client, db).get(source.table_name)
         if live is None:
-            return None, None, None
+            return None, None, (), None
         settings_change = settings_change_for_table(builder, source, result, db=db, client=client)
+        columns_added = columns_added_for_table(source, result, db=db, client=client)
     except SchemaApplyError as exc:
         return (
             None,
             None,
+            (),
             hide_backend_text(
                 _CH_UNREADABLE, exc, event="dry run: live table unreadable", source=source.source
             ),
         )
     ttl_change = ttl_change_for_table(builder, source, version_id, result, db=db, live=live.ttl)
-    return ttl_change, settings_change, None
+    return ttl_change, settings_change, columns_added, None
 
 
 def _plan_and_apply_ddl(
@@ -2877,7 +2882,7 @@ def _apply_source_schema(
 
     # Plan mode: hand the DDL + validation back for review. Never write to ClickHouse.
     if dry_run:
-        ttl_change, settings_change, live_table_error = _dry_run_table_moves(
+        ttl_change, settings_change, columns_added, live_table_error = _dry_run_table_moves(
             builder, source, version_id, result, settings
         )
         return SchemaDeployResult(
@@ -2890,6 +2895,7 @@ def _apply_source_schema(
             validation_errors=validation_errors,
             ttl_change=ttl_change,
             settings_change=settings_change,
+            columns_added=list(columns_added),
             live_table_error=live_table_error,
         )
 
@@ -2931,11 +2937,14 @@ def _apply_source_schema(
         from dfe_engine.governance.ch.reconciler import fence_tables
 
         # Only a dry run leaves ch unset, and a dry run has returned before this.
-        fence_tables(ch._client, database=db)  # ty: ignore[unresolved-attribute]
+        if ch is not None:
+            fence_tables(ch._client, database=db)
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
-    return _AppliedSchema(source, version_id, result, views, applied, db, planned.ttl_change)
+    return _AppliedSchema(
+        source, version_id, result, views, applied, db, planned.ttl_change, planned.columns_added
+    )
 
 
 @router.get(

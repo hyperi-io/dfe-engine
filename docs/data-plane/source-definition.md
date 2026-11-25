@@ -113,6 +113,9 @@ transform:
   #   unmatched: fallback               # passthrough (default), fallback or stop
   #   fallback: filebeat.cisco_asa.default   # registry name, required exactly when unmatched is fallback
   #   candidates: []                    # registry names detection may name, empty means every source
+  # conf:                               # elastic only: settings the program reads, set as _conf on each event
+  #   tz_offset: "+10:00"
+  #   tz_map: [{tz_short: AEST, tz_long: Australia/Sydney}]
   config_file: /etc/vector/filebeat.yaml
   env: {}                               # Per-transform ENV overrides
   files: []                             # Enrichment files (CSV, MMDB)
@@ -154,8 +157,9 @@ next schema apply moves an existing table onto a changed value with `ALTER
 TABLE ... MODIFY TTL`, and shortening it expires the rows older than the new
 value.
 
-`derived_schema` NARROWS. The table's columns become exactly the names its
-`select` list carries, in that order, after the common header. A name the base
+`derived_schema` NARROWS. The table's columns become the names its
+`select` list carries, in that order, after the common header, then any column
+promoted out of `_json` since the list was written. A name the base
 meta schema does not define is a hard error, never an appended column, and
 `index` is the only per-column key it may set -- `type`, `expr`, `comment` and
 `attribute` all resolve from the base. `additional_fields` is still the append
@@ -321,6 +325,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
 | transform mode and detect | `mode` and `detect` only for an app whose manifest declares `mode_path` and `detect_path` (`elastic`). `detect` only with `mode: agentless`, which takes no `variant`. `detect.fallback` is required when `unmatched` is `fallback` and refused otherwise, and `candidates` holds distinct non-blank names |
+| transform conf | `conf` only for an app whose manifest declares `conf_path` (`elastic`), at most 16 KiB serialised and 16 levels deep, with no key named `secret`, `password`, `token`, `api_key` or `client_secret` at any depth. The app refuses, at start, a key its variant never reads |
 | catalogue entry | the intake must be one the entry arrives by, the variant one it compiles to and not one a mounted contract of the deployed transform leaves out (409 `missing_variant`), and the source name a legal label |
 | schema | files exist and pass `SchemaBuilderV2` validation, and carry `_source` as a column (injected if missing) |
 

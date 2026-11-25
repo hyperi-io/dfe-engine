@@ -293,6 +293,13 @@ class AppDescriptor:
     detects nothing.
     """
 
+    conf_path: str = ""
+    """This app's own config block holding a source's per-source settings.
+
+    Written whole from a source's ``transform.conf``, and empty where the app reads
+    none, in which case a source naming a ``conf`` for it is refused.
+    """
+
     config_file: str = ""
     """The config file this app's own image reads, by name. Empty where it reads none.
 
@@ -551,6 +558,7 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         variant_path=str(raw.get("variant_path", "")),
         mode_path=str(raw.get("mode_path", "")),
         detect_path=str(raw.get("detect_path", "")),
+        conf_path=str(raw.get("conf_path", "")),
         config_file=_config_file_from(service, raw.get("consumes")),
         display_name=_display_name_from(service, raw.get("display_name")),
         emits_telemetry=_emits_telemetry_from(service, raw.get("telemetry")),
@@ -561,9 +569,9 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
             service, "deployment_owned_when", raw.get("deployment_owned_when")
         ),
     )
-    # The variant, mode and detect settings are written into one of the derived blocks, so a path outside
+    # The variant, mode, detect and conf settings are written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
-    for compiled_path in (app.variant_path, app.mode_path, app.detect_path):
+    for compiled_path in (app.variant_path, app.mode_path, app.detect_path, app.conf_path):
         if compiled_path:
             app.block_for(compiled_path)
     # A gate on a path nothing owns is a typo that silently owns nothing.

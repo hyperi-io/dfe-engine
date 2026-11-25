@@ -49,24 +49,31 @@ class TestValidatorSourceModel:
         HuntValidator.validate_hunt_configuration(data, rule_dir, "timestamp_load")
 
     def test_source_ref_without_global_source(self, rule_dir):
-        """Config with per-rule source and no global_source_table_name validates."""
+        """Config with a per-rule source_table_name and no global_source_table_name validates."""
         data = _base_hunt_data()
         del data["global_source_table_name"]
-        data["rules"][0]["source"] = "windows_audit"
+        data["rules"][0]["source_table_name"] = "dfe.windows_audit"
         HuntValidator.validate_hunt_configuration(data, rule_dir, "timestamp_load")
 
-    def test_missing_both_source_and_global_fails(self, rule_dir):
-        """Config with neither source nor global_source_table_name fails."""
+    @pytest.mark.parametrize(
+        "rule_extra",
+        [
+            pytest.param({}, id="no per-rule source"),
+            pytest.param({"source": "x"}, id="key the runner never reads"),
+        ],
+    )
+    def test_missing_both_source_and_global_fails(self, rule_dir, rule_extra):
+        """Config with neither source_table_name nor global_source_table_name fails."""
         data = _base_hunt_data()
         del data["global_source_table_name"]
-        # rules have no 'source' field either
-        with pytest.raises(ValueError, match=r"global_source_table_name.*source"):
+        data["rules"][0].update(rule_extra)
+        with pytest.raises(ValueError, match=r"global_source_table_name.*source_table_name"):
             HuntValidator.validate_hunt_configuration(data, rule_dir, "timestamp_load")
 
     def test_source_validated_against_registry(self, rule_dir):
-        """When source_registry is provided, unknown sources get a warning."""
+        """When source_registry is provided, an override no source is named for gets a warning."""
         data = _base_hunt_data()
-        data["rules"][0]["source"] = "nonexistent_source"
+        data["rules"][0]["source_table_name"] = "dfe.nonexistent_source"
 
         registry = MagicMock()
         registry.get_source.side_effect = KeyError("not found")

@@ -85,6 +85,24 @@ async def _ensure_startup_topics(
     return ensured
 
 
+def _log_rules_without_sources(source_registry: Any) -> None:
+    """Log the stored rules that read no registered source. Never raises.
+
+    A rule is saved against a registered source, so one stored before that is listed here
+    for its author to save again. None is changed or dropped.
+    """
+    from dfe_engine.api.deps import get_rule_registry_optional
+    from dfe_engine.hunts.rule_sources import log_unsourced_rules, source_check
+
+    rules = get_rule_registry_optional()
+    if rules is None or source_registry is None:
+        return
+    try:
+        log_unsourced_rules(rules.list_rules(), source_check(source_registry))
+    except Exception as exc:  # the listing is advisory and must never break startup
+        logger.warning("stored rules not checked for sources at startup", error=str(exc))
+
+
 def _bootstrap_orgs(app: FastAPI, settings: DFESettings) -> None:
     """Build the org registry and where your org is named, then seed the orgs the settings name."""
     import os
@@ -357,6 +375,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from dfe_engine.api.deps import get_source_registry_optional
 
     source_registry = get_source_registry_optional()
+    _log_rules_without_sources(source_registry)
     from dfe_engine.orgs.tenancy import Tenancy
     from dfe_engine.source.registry import read_tenancy_from
 
@@ -507,6 +526,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         secrets=app.state.dfe_secrets,
         metrics=app.state.oidc_login_metrics,
         directory_deadline_seconds=settings.auth.oidc_login_directory_deadline_seconds,
+        crypto_profile=settings.crypto_profile,
     )
 
     # Bootstrap HyperDX client (optional)

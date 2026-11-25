@@ -20,7 +20,7 @@ _ = _Names()
 
 # Routing blocks the source compile emits: dumped into the YAML each app reads.
 _.default_db, _.default_org_id, _.default_table, _.dlq, _.from_field, _.org_id_field
-_.org_routes, _.table_fields, _.topic_suffixes
+_.org_routes, _.table_fields, _.table_schema_versions, _.topic_suffixes
 
 # API request and response bodies: pydantic fills or emits these fields for clients.
 _.brokers
@@ -93,7 +93,7 @@ _.check_cooldown, _.cooldown_td, _.dispatch, _.ensure_table_exists, _.get_ddl, _
 _.max_alerts_per_run, _.record_fire
 
 # Documented library API (docs/data-plane/schema-classes.md, query-api-python.md).
-_.clone_version, _.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas
+_.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas
 _.to_pydict, _.to_pylist
 
 # Helpers and constants currently used only by tests.

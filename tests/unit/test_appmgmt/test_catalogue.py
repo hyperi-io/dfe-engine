@@ -329,6 +329,13 @@ class TestShippedManifest:
 
         assert paths == {"dfe-transform-elastic": ("config.source.mode", "config.source.detect")}
 
+    def test_only_elastic_reads_per_source_settings(self):
+        paths = {
+            name: app.conf_path for name, app in catalogue.APP_CATALOGUE.items() if app.conf_path
+        }
+
+        assert paths == {"dfe-transform-elastic": "config.source.conf"}
+
     def test_the_fetchers_instance_maps_are_its_keyed_families(self):
         # dfe-fetcher's SourcesConfig carries rest, db and file as maps keyed by
         # instance id, and every other family as one flat block.
@@ -352,8 +359,8 @@ class TestManifestParsing:
         yaml_dump({"apps": {"dfe-thing": app}, **top}, path)
         return path
 
-    @pytest.mark.parametrize("key", ["mode_path", "detect_path"])
-    def test_a_mode_or_detect_path_outside_the_derived_blocks_is_refused(self, tmp_path, key):
+    @pytest.mark.parametrize("key", ["mode_path", "detect_path", "conf_path"])
+    def test_a_mode_detect_or_conf_path_outside_the_derived_blocks_is_refused(self, tmp_path, key):
         extra = {
             "routing": {
                 "compiler": "transform",

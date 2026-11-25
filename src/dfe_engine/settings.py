@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from dfe_schemas.clickhouse import platform_override
 from pydantic import BaseModel, Field, field_validator, model_validator
+from scalo.crypto import CryptoProfile
 
 from .names import MAX_NAME_LENGTH
 from .orgs.available_ids import DEFAULT_LIMIT as AVAILABLE_IDS_LIMIT
@@ -1779,13 +1780,16 @@ class GitopsWriteSettings(BaseModel):
     pushes. Field names mirror scalo's :class:`~scalo.resilience.ResilienceConfig`;
     a budget of 0 makes one attempt.
 
-    After ``failure_threshold`` calls in a row run out of budget, a circuit breaker
-    opens: writes answer 503 at once without calling the forge, with ``Retry-After``
-    set to what is left of ``reset_timeout``. Then one write probes the forge, and
-    the breaker closes if the forge answers it or reopens if it runs out of budget
-    too. A refusal, bad credentials or a missing repo is the forge answering, so it
-    never opens the breaker. These two mirror scalo's
-    :class:`~scalo.resilience.CircuitBreakerConfig`.
+    After ``failure_threshold`` writes run out of budget within ``failure_window_seconds``
+    with none getting through, a circuit breaker opens: writes answer 503 at once
+    without calling the forge, with ``Retry-After`` set to what is left of
+    ``reset_timeout``. A write is a fetch and a push, and counts as failed when either
+    ran out of budget, so a forge that serves fetches but drops pushes opens it. Then
+    one write probes the forge, and the breaker closes if the forge answers it or
+    reopens if it runs out of budget too. A refusal, bad credentials or a missing
+    repo is the forge answering, so it never opens the breaker. The threshold and
+    reset timeout mirror scalo's :class:`~scalo.resilience.CircuitBreakerConfig`,
+    which has no window.
 
     """
 
@@ -1807,7 +1811,13 @@ class GitopsWriteSettings(BaseModel):
     failure_threshold: int = Field(
         default=3,
         ge=1,
-        description="Calls in a row that run out of budget before writes fail at once.",
+        description="Writes in a row that run out of budget before writes fail at once.",
+    )
+    # Spent budgets from one outage arrive within minutes, so one from last week must not count.
+    failure_window_seconds: float = Field(
+        default=300.0,
+        gt=0.0,
+        description="How long a write that ran out of budget counts towards the breaker, seconds.",
     )
     # scalo's default: a forge still down costs one probe's budget per window, not one
     # per write, and a recovered one is back in use within the window.
@@ -2374,6 +2384,25 @@ class DFESettings(BaseModel):
             "dev/development/local/test/ci for local development. DFE_ENGINE_ENV."
         ),
     )
+    crypto_profile: CryptoProfile = Field(
+        default=CryptoProfile.PROD,
+        description=(
+            "TLS profile of the engine's outbound HTTPS clients: the OIDC providers and "
+            "the Argo refresh. 'prod' is a TLS 1.2 floor, 'highsec' TLS 1.3 only with "
+            "post-quantum key exchange, 'devtest' prod algorithms with quieter warnings. "
+            "SCALO_TLS_VERIFY and SCALO_TLS_ALLOW_WEAK still apply. "
+            "DFE_ENGINE_CRYPTO_PROFILE."
+        ),
+    )
+    feature_flags: dict[str, bool] = Field(
+        default_factory=dict,
+        description=(
+            "Flags a deployment turns on or off. Each key is true or false, and a "
+            "key that is absent is off. Code reads one with feature_enabled; the UI "
+            "reads the object from GET /api/v1/config/features. "
+            "DFE_ENGINE_FEATURE_FLAGS, a JSON object."
+        ),
+    )
     e2e_server: bool = Field(
         default=False,
         description=(
@@ -2381,6 +2410,36 @@ class DFESettings(BaseModel):
             "(seed-admin). DFE_ENGINE_E2E_SERVER. Refused in a production posture."
         ),
     )
+
+    @field_validator("feature_flags", mode="before")
+    @classmethod
+    def _feature_flags_are_booleans(cls, value: Any) -> Any:
+        # JSON true/false only. A string or 1 would coerce under lax bool parsing
+        # and turn a typo into a live flag.
+        if not isinstance(value, dict):
+            raise ValueError("feature_flags must be an object whose values are true or false")
+        for key, flag in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("feature_flags keys must be non-empty strings")
+            if type(flag) is not bool:
+                raise ValueError(
+                    f"feature_flags[{key!r}] must be true or false, not {type(flag).__name__}"
+                )
+        return value
+
+    def feature_enabled(self, name: str) -> bool:
+        """True when the deployment turned ``name`` on.
+
+        A flag that is absent is off, so a check written before anyone sets the
+        flag stays on the existing path.
+
+        Args:
+            name: The flag key, as it appears in ``DFE_ENGINE_FEATURE_FLAGS``.
+
+        Returns:
+            The configured value, or False when the key is absent.
+        """
+        return self.feature_flags.get(name, False)
 
     @model_validator(mode="after")
     def _a_bus_needs_a_broker(self) -> DFESettings:
@@ -2576,6 +2635,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_STACK_MANIFEST_REPOSITORY": "stack_manifest_repository",
             "DFE_ENGINE_UI_VERSION": "ui_version",
             "DFE_ENGINE_ENV": "env",
+            "DFE_ENGINE_CRYPTO_PROFILE": "crypto_profile",
         },
     ),
     (
@@ -2675,6 +2735,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_GITOPS_WRITE_TIMEOUT_SECONDS": "gitops.write.timeout_seconds",
             "DFE_ENGINE_GITOPS_WRITE_BUDGET_SECONDS": "gitops.write.budget_seconds",
             "DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT": "gitops.write.reset_timeout",
+            "DFE_ENGINE_GITOPS_WRITE_FAILURE_WINDOW_SECONDS": "gitops.write.failure_window_seconds",
             "DFE_ENGINE_GITOPS_PACK_INTERVAL_SECONDS": "gitops.pack.interval_seconds",
         },
     ),
@@ -2767,6 +2828,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
 _ENV_JSON_FIELDS = {
     "DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS": "auth.source_provider_bindings",
     "DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS": "auth.local.seed_accounts",
+    "DFE_ENGINE_FEATURE_FLAGS": "feature_flags",
     "DFE_ENGINE_ORGS_SEED_ORGS": "orgs.seed_orgs",
 }
 

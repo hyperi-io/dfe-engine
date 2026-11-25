@@ -4,6 +4,7 @@ import pytest
 
 from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.fieldmap.registry import FieldMapRegistry
+from dfe_engine.schema.applier import read_table
 from dfe_engine.schema.schema_builder_v2 import (
     SchemaBuildError,
     SchemaBuilderV2,
@@ -223,6 +224,34 @@ class TestBuild:
         assert "severity" in names
 
         assert "ngrams(3)" in result.create_table_ddl
+
+    def test_build_with_derived_keeps_a_column_promoted_after_the_selection(
+        self, registry, schemas_dir
+    ):
+        yaml_dump(
+            {
+                "columns": [
+                    {"name": "message", "type": "text"},
+                    {"name": "user_name", "type": "string"},
+                    {
+                        "name": "probe_value",
+                        "type": "string",
+                        "expr": "@source: probe.value",
+                        "_field_type": "promoted",
+                    },
+                ]
+            },
+            schemas_dir / "promoted_meta.yaml",
+        )
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(meta_schema="promoted_meta.yaml", derived_schema="derived.yaml")
+
+        result = builder.build(source)
+
+        names = [c.name for c in result.columns]
+        assert "probe_value" in names
+        assert "probe_value" in read_table(result.create_table_ddl).columns
+        assert "user_name" not in names
 
     def test_build_minimal_profile(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from authlib.integrations.starlette_client import OAuth
 from pydantic import BaseModel
+from scalo.crypto import CryptoProfile, ssl_context
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
@@ -327,13 +328,28 @@ async def fill_from_userinfo_endpoint(
         fetched = await client.userinfo(token=token)
         return merge_userinfo_claims(id_token_claims=claims, userinfo_claims=dict(fetched))
     except Exception as exc:
+        failure = describe_http_error(exc)
         logger.warning(
-            "OIDC RP: userinfo claims not used",
+            f"OIDC RP: userinfo claims not used ({_failure_summary(failure)})",
             issuer=issuer,
             operation="userinfo",
-            **describe_http_error(exc),
+            **failure,
         )
         return claims
+
+
+def _failure_summary(failure: dict[str, object]) -> str:
+    """The failure's class and its status or socket reason, for a log line read as plain text.
+
+    Built from :func:`describe_http_error`'s fields, never the exception text, which can
+    carry the request URL.
+    """
+    parts = [str(failure["error_type"])]
+    if "status" in failure:
+        parts.append(f"HTTP {failure['status']}")
+    elif "transport_failure" in failure:
+        parts.append(str(failure["transport_failure"]))
+    return ", ".join(parts)
 
 
 class OidcRelyingParty:
@@ -351,6 +367,8 @@ class OidcRelyingParty:
 
     ``directory_deadline_seconds`` bounds one login's directory group lookup,
     ``auth.oidc_login_directory_deadline_seconds`` in the engine's settings.
+    ``crypto_profile`` sets the TLS profile of every call to a provider:
+    discovery, JWKS, token and userinfo.
     """
 
     def __init__(
@@ -360,8 +378,10 @@ class OidcRelyingParty:
         secrets: DfeSecrets | None = None,
         metrics: LoginMetrics | None = None,
         directory_deadline_seconds: float = DEFAULT_DIRECTORY_DEADLINE_SECONDS,
+        crypto_profile: CryptoProfile = CryptoProfile.PROD,
     ) -> None:
         self._oauth = OAuth()
+        tls = ssl_context(crypto_profile)
         self._secrets = secrets
         self._metrics = metrics if metrics is not None else LoginMetrics()
         self._directory_deadline_seconds = directory_deadline_seconds
@@ -392,7 +412,11 @@ class OidcRelyingParty:
                     f"{provider.issuer.rstrip('/')}/.well-known/openid-configuration"
                 ),
                 # PKCE: an intercepted authorization code is useless without the session's verifier.
-                client_kwargs={"scope": provider.scopes, "code_challenge_method": "S256"},
+                client_kwargs={
+                    "scope": provider.scopes,
+                    "code_challenge_method": "S256",
+                    "verify": tls,
+                },
             )
             self._providers[name] = provider
             logger.info("OIDC RP registered provider", provider=name, issuer=provider.issuer)
@@ -591,6 +615,7 @@ def build_relying_party(
     secrets: DfeSecrets | None = None,
     metrics: LoginMetrics | None = None,
     directory_deadline_seconds: float = DEFAULT_DIRECTORY_DEADLINE_SECONDS,
+    crypto_profile: CryptoProfile = CryptoProfile.PROD,
 ) -> OidcRelyingParty | None:
     """Build an RP over the registry's CURRENT contents, or None if it cannot be built.
 
@@ -612,6 +637,7 @@ def build_relying_party(
             secrets=secrets,
             metrics=metrics,
             directory_deadline_seconds=directory_deadline_seconds,
+            crypto_profile=crypto_profile,
         )
     except Exception as exc:
         # The text can quote a provider file's values, so the log takes the class and status only.

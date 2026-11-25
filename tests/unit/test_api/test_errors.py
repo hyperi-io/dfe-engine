@@ -194,7 +194,7 @@ def on_a_deploy_repo(api_settings: DFESettings) -> DFESettings:
     return api_settings
 
 
-_RULE = {"name": "r1", "user_sql": "SELECT * FROM dfe.main WHERE 1 = 1"}
+_RULE = {"name": "r1", "source": "main", "where_clause": "severity = 'high'"}
 
 
 class TestABadRequestNeverAnswers500:

@@ -108,19 +108,18 @@ class HuntValidator:
                 "'global_target_table_name'", global_target_table_name
             )
 
-        # Source model: hunts can use 'source' (resolved via SourceRegistry) OR
-        # 'global_source_table_name' (direct table reference). At least one required.
+        # The runner reads a rule's 'source_table_name', else the hunt's 'global_source_table_name'.
         global_source_table_name = hunt_data.get("global_source_table_name")
-        has_source_ref = any(r.get("source") for r in hunt_data.get("rules", []))
+        has_source_ref = any(r.get("source_table_name") for r in hunt_data.get("rules", []))
         if not has_source_ref:
             if (
                 not isinstance(global_source_table_name, str)
                 or not global_source_table_name.strip()
             ):
                 raise ValueError(
-                    "Either 'global_source_table_name' or per-rule 'source' field is required."
+                    "Either 'global_source_table_name' or per-rule 'source_table_name' is required."
                 )
-        # A blank one defers to the per-rule 'source'. Anything else must name a table.
+        # A blank one defers to the per-rule 'source_table_name'. Anything else must name a table.
         if global_source_table_name is not None and str(global_source_table_name).strip():
             HuntValidator._validate_table_name(
                 "'global_source_table_name'", global_source_table_name, split=plain_source_name
@@ -223,15 +222,16 @@ class HuntValidator:
                     "create-time existence check skipped (rule may be added later)."
                 )
 
-            # Validate source reference if SourceRegistry available
-            source_name = rule_info.get("source")
-            if source_name and source_registry:
+            # A source's table carries its label, so the override's table names the source it reads.
+            source_table = rule_info.get("source_table_name")
+            if source_table and source_registry:
+                source_name = plain_source_name(source_table)[1]
                 try:
                     source_registry.get_source(source_name)
                 except Exception:
                     logger.warning(
-                        f"Rule '{rule_name}' references source '{source_name}' "
-                        f"which is not in the SourceRegistry."
+                        f"Rule '{rule_name}' reads '{source_table}', and no registered source "
+                        f"is named '{source_name}'."
                     )
 
             initial_checkpoint_lookback_minutes = rule_info.get(

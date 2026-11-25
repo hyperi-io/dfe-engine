@@ -275,8 +275,8 @@ def apply_source_bundle(
         source_registry: Source registry to write through.
         schema_registry: Schema registry the definitions are written through.
         bundle: The bundle document.
-        created_by: Git author for the source commit.
-        routing: Records the source write when it went to a review branch instead of main.
+        created_by: Git author for the schema and source commits.
+        routing: Records each schema or source write that went to a review branch instead of main.
 
     Returns:
         What was written or resolved.
@@ -317,7 +317,10 @@ def apply_source_bundle(
     except SourceValidationError as exc:
         raise ExchangeError(str(exc)) from exc
 
-    results = [apply_meta_schema_export(schema_registry, document) for document in definitions]
+    results = [
+        apply_meta_schema_export(schema_registry, document, created_by=created_by, routing=routing)
+        for document in definitions
+    ]
     source_registry.save_source(
         source,
         created_by=created_by,

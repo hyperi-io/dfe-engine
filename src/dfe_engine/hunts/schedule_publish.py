@@ -21,6 +21,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.hunts.hunt_spec import HuntSpec
+from dfe_engine.hunts.hunt_target_check import DETECTION_TABLE
 from dfe_engine.hunts.rule_compiler import detection_cap
 from dfe_engine.hunts.schedule import publish_schedule
 from dfe_engine.hunts.spec_loader import load_specs
@@ -47,7 +48,7 @@ def spec_sources(
     hunts = settings.hunts
     return {
         "rules_dir": hunts.rules_dir if rules_dir is None else rules_dir,
-        "default_target": f"{database}.detection",
+        "default_target": f"{database}.{DETECTION_TABLE}",
         "default_database": database,
         "max_detections": detection_cap(
             hunts.max_detections_per_run, hunts.max_detections_per_run_ceiling

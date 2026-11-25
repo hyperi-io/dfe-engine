@@ -104,7 +104,7 @@ dfe-loader reads three things from the table, never a profile YAML or a source d
 2. Column COMMENTs, which hold the loader directives.
 3. The table COMMENT, which holds `@profile` and `@profile_version` for a header-composed table (dfe-schemas `render.py`).
 
-The loader caches that schema for `schema.cache_ttl_secs` (300 by default, dfe-loader `docs/config-schema.yaml`), so an applied change reaches it on the next refresh, and until then it keeps using the schema it holds.
+The loader caches that schema for `schema.cache_ttl_secs` (300 by default, dfe-loader `docs/config-schema.yaml`). A source deploy moves the source's entry in the loader's `routing.table_schema_versions`, and the reload that follows drops that table's cached schema, so a column the deploy added fills from the next record. Any other applied change reaches the loader on the next refresh, and until then it keeps using the schema it holds.
 
 ## What has to agree
 

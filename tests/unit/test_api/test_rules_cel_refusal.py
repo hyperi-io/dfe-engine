@@ -14,12 +14,14 @@ the author's input, reported the way refused SQL is.
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("rule_sources")
+
 REFUSED_CEL = {
     "invalid": ("severity ==", "Failed to parse expression"),
     "profile violation": ("timestamp(event_time) > 0", "not allowed in the expression profile"),
 }
 
-_SQL = "SELECT * FROM dfe.main WHERE severity = 'high'"
+_WHERE = "severity = 'high'"
 
 
 def _payload(name: str, cel_filter: str) -> dict:
@@ -27,7 +29,7 @@ def _payload(name: str, cel_filter: str) -> dict:
         "name": name,
         "display_name": "CEL",
         "severity": "high",
-        "user_sql": _SQL,
+        "where_clause": _WHERE,
         "cel_filter": cel_filter,
         "source": "windows-audit",
     }

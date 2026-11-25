@@ -63,12 +63,14 @@ RUNTIME_VERBS = (
 
 RUNTIME_RENDERERS: dict[str, set[str]] = {
     # Tiers, quotas and the per-org and per-group users come from gitops config,
-    # so the statements cannot be manifest data.
+    # so the statements cannot be manifest data. ALTER TABLE is the projection's
+    # row mutation on the dfe_meta tables, not a schema change.
     "governance/ch/render.py": {
         "CREATE ROLE",
         "CREATE USER",
         "CREATE QUOTA",
         "CREATE SETTINGS PROFILE",
+        "ALTER TABLE",
     },
     # One view per source per standard, named from the source's own field map.
     "fieldmap/remap_view.py": {"CREATE OR REPLACE VIEW"},

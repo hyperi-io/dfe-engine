@@ -74,6 +74,11 @@ class AppInstance:
         return f"{self.service}-{self.instance}{_OVERLAY_SUFFIX}"
 
     @property
+    def application_name(self) -> str:
+        """The Argo CD Application that deploys this instance."""
+        return f"{self.service}-{self.instance}"
+
+    @property
     def parked_name(self) -> str:
         """The gitcrud resource name for the authored files kept while the instance is away."""
         return f"{self.service}-{self.instance}{_PARKED_SUFFIX}"

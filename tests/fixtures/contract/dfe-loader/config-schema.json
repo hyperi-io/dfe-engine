@@ -39,7 +39,6 @@
         "recv_buffer_size": 10000,
         "recv_timeout_ms": 100,
         "max_message_size": 16777216,
-        "compression": false,
         "default_topic": "main_land",
         "acknowledgements": {
           "enabled": true
@@ -195,6 +194,14 @@
         "table": "dlq"
       }
     },
+    "memory": {
+      "description": "Memory limits. **Restart required.**",
+      "$ref": "#/$defs/MemoryConfig",
+      "default": {
+        "limit_bytes": 0,
+        "pressure_threshold": 0.8
+      }
+    },
     "routing": {
       "description": "Table and tenant routing. **Hot-reloaded**, `routing.dlq` aside.",
       "$ref": "#/$defs/RoutingConfig",
@@ -209,6 +216,7 @@
         "org_routes": [],
         "external_topics": [],
         "source_to_table": {},
+        "table_schema_versions": {},
         "topic_suffixes": [
           "_land",
           "_load"
@@ -231,14 +239,6 @@
         "flush_bytes": 67108864,
         "flush_rows": 20000,
         "flush_age_secs": 5
-      }
-    },
-    "memory": {
-      "description": "Memory limits. **Hot-reloaded.**",
-      "$ref": "#/$defs/MemoryConfig",
-      "default": {
-        "limit_bytes": 0,
-        "pressure_threshold": 0.8
       }
     },
     "timestamp_dq": {
@@ -710,11 +710,6 @@
           "minimum": 0,
           "default": 16777216
         },
-        "compression": {
-          "description": "Enable gzip compression for gRPC messages.",
-          "type": "boolean",
-          "default": false
-        },
         "default_topic": {
           "description": "Default topic name for messages without a topic in gRPC metadata.\nUsed as the routing key when the sender doesn't set a topic.",
           "type": "string",
@@ -813,7 +808,7 @@
       }
     },
     "InsertFormat": {
-      "description": "Insert format for data writes.\n\nControls how rows are encoded and sent to `ClickHouse`. `RowBinary` is the\ndefault — it uses schema reflection to encode `Map<String, Value>` directly\nto binary, so `ClickHouse` skips JSON parsing entirely. This significantly\nreduces CPU load on the `ClickHouse` cluster at scale.\n\n`JsonEachRow` is the fallback — simpler, self-describing, but the `ClickHouse`\nserver pays the cost of parsing every JSON row on ingest.",
+      "description": "Insert format for data writes.\n\nControls how rows are encoded and sent to `ClickHouse`. `RowBinary` is the\ndefault — it uses schema reflection to encode `Map<String, Value>` directly\nto binary, so `ClickHouse` parses only `JSON` columns, which travel as text.\n\n`JsonEachRow` is the fallback — simpler, self-describing, but the `ClickHouse`\nserver pays the cost of parsing every JSON row on ingest.",
       "oneOf": [
         {
           "description": "Schema-reflected `RowBinary` (default).\n\nFetches schema from `system.columns`, encodes values to binary client-side.\n`ClickHouse` receives pre-columnarised data — zero server-side parsing.\nTotal CPU (client + cluster) is significantly lower than `JSONEachRow`.",
@@ -886,7 +881,7 @@
           "default": 60
         },
         "pending_max_per_table": {
-          "description": "Max messages buffered per table while waiting for schema resolution.\nOn Kafka, excess messages route to DLQ with a security event. On gRPC,\na table at this cap stops intake until its schema resolves.",
+          "description": "Max messages buffered per table while waiting for schema resolution.\nOn Kafka, the cap starts once the table's first schema fetch answers,\nand past it messages route to DLQ with a security event. Until then\nthey use free space under `pending_max_total`. On gRPC, a table at this cap stops\nintake until its schema resolves.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
@@ -1367,6 +1362,24 @@
         }
       }
     },
+    "MemoryConfig": {
+      "type": "object",
+      "properties": {
+        "limit_bytes": {
+          "description": "Maximum memory for buffers in bytes. 0 = auto-detect (67% of available)",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "pressure_threshold": {
+          "description": "Pressure threshold (0.0-1.0) - pause consumption above this",
+          "type": "number",
+          "format": "double",
+          "default": 0.8
+        }
+      }
+    },
     "RoutingConfig": {
       "type": "object",
       "properties": {
@@ -1421,6 +1434,14 @@
         },
         "source_to_table": {
           "description": "Source value to table name mapping\nMaps extracted source values to destination table names",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "table_schema_versions": {
+          "description": "Schema version of each table, keyed by table name. A reload that changes\na table's version re-reads its columns and column directives.",
           "type": "object",
           "additionalProperties": {
             "type": "string"
@@ -1585,24 +1606,6 @@
         }
       }
     },
-    "MemoryConfig": {
-      "type": "object",
-      "properties": {
-        "limit_bytes": {
-          "description": "Maximum memory for buffers in bytes. 0 = auto-detect (67% of available)",
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 0
-        },
-        "pressure_threshold": {
-          "description": "Pressure threshold (0.0-1.0) - pause consumption above this",
-          "type": "number",
-          "format": "double",
-          "default": 0.8
-        }
-      }
-    },
     "TimestampDqConfig": {
       "type": "object",
       "properties": {
@@ -1621,7 +1624,7 @@
           "default": 0
         },
         "invalid_action": {
-          "type": "string",
+          "$ref": "#/$defs/InvalidTimestampAction",
           "default": "replace_with_now"
         },
         "correct_known_bad": {
@@ -1629,6 +1632,16 @@
           "default": true
         }
       }
+    },
+    "InvalidTimestampAction": {
+      "description": "What the loader does with a timestamp that fails the data-quality checks.",
+      "oneOf": [
+        {
+          "description": "Replace the timestamp with the ingest time.",
+          "type": "string",
+          "const": "replace_with_now"
+        }
+      ]
     },
     "FieldSanitizationConfig": {
       "type": "object",

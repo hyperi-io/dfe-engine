@@ -45,6 +45,8 @@ class ErrorCode:
     PASSWORD_CHANGE_REQUIRED = "password_change_required"  # noqa: S105, RUF100 - an error code, not a password
     INVALID_SQL = "invalid_sql"
     RULE_MATCHES_EVERYTHING = "rule_matches_everything"
+    IMPORT_REFUSED = "import_refused"
+    INVALID_TARGET = "invalid_target"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
     SECRETS_UNAVAILABLE = "secrets_unavailable"
@@ -206,7 +208,7 @@ def install_exception_handlers(app: FastAPI) -> None:
     from dfe_engine.api.task_manager import TaskCapacityError
     from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
     from dfe_engine.appmgmt.appconfig import SharedInstanceConflictError
-    from dfe_engine.appmgmt.contract import RefusedNullError
+    from dfe_engine.appmgmt.contract import RefusedConfigError
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
     from dfe_engine.auth.protected_accounts import ProtectedAccountError
     from dfe_engine.gitcrud.engine import ResourceNotFoundError
@@ -308,9 +310,9 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def invalid_name(_request: Request, exc: InvalidNameError):
         return _answer(400, ErrorCode.INVALID_NAME, str(exc))
 
-    # Any write path that reaches the deploy repo with a null the app refuses, named by path.
-    @app.exception_handler(RefusedNullError)
-    async def refused_null(_request: Request, exc: RefusedNullError):
+    # Any write path that reaches the deploy repo with a value or key the app refuses, named by path.
+    @app.exception_handler(RefusedConfigError)
+    async def refused_config(_request: Request, exc: RefusedConfigError):
         return _answer(400, exc.code, str(exc), paths=exc.paths)
 
     # Any write path that would give a shared container an instance it cannot run.

@@ -592,6 +592,77 @@ def test_the_write_that_opens_the_breaker_says_when_to_come_back(
     assert caught.value.retry_after_seconds >= 40
 
 
+def test_a_forge_that_serves_fetches_but_drops_pushes_opens_the_breaker(
+    tmp_path: Path, serve
+) -> None:
+    """Each write's fetch is answered and its push is not: the write counts as failed.
+
+    Counting calls, the answered fetch reset the count before every push failed, so
+    this forge never opened the breaker and every write cost its full push timeout.
+    """
+    bare, branch = _seed(tmp_path)
+    manager = _manager()
+
+    def hold(app: Callable) -> _HoldAnswers:
+        return _HoldAnswers(app, when=_is_push_upload, seconds=1.0, times=100)
+
+    repo = _clone(
+        tmp_path,
+        bare,
+        branch,
+        serve(bare, hold),
+        metrics=GitopsMetrics(manager),
+        write=GitopsWriteSettings(
+            timeout_seconds=0.3, budget_seconds=0.0, failure_threshold=2, reset_timeout=60.0
+        ),
+    )
+
+    for version in (1, 2):
+        with pytest.raises(GitopsUnavailableError):
+            repo.publish({"x.yaml": f"v: {version}\n"}, message="push dropped")
+    assert _breaker(manager, "opened") == 1
+
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 3\n"}, message="breaker open")
+    assert _breaker(manager, "rejected") == 1
+    assert _retries(manager, "push", "exhausted") == 2
+    assert _retries(manager, "fetch", "exhausted") == 0
+
+
+def test_a_spent_budget_stops_counting_towards_the_breaker_once_its_window_has_passed(
+    tmp_path: Path, black_hole: CountingListener
+) -> None:
+    """Two spent budgets a window apart never open it, where two inside one window do."""
+    window = 0.5
+    bare, branch = _seed(tmp_path)
+    manager = _manager()
+    repo = _clone(
+        tmp_path,
+        bare,
+        branch,
+        f"http://127.0.0.1:{black_hole.port}/deploy.git",
+        metrics=GitopsMetrics(manager),
+        write=GitopsWriteSettings(
+            timeout_seconds=0.2,
+            budget_seconds=0.0,
+            failure_threshold=2,
+            failure_window_seconds=window,
+            reset_timeout=60.0,
+        ),
+    )
+
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 1\n"}, message="first")
+    time.sleep(window + 0.1)
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 2\n"}, message="second, after the window")
+    assert _breaker(manager, "opened") == 0
+
+    with pytest.raises(GitopsUnavailableError):
+        repo.publish({"x.yaml": "v: 3\n"}, message="third, inside the window")
+    assert _breaker(manager, "opened") == 1
+
+
 class _Outage:
     """WSGI layer in front of the real git server: a forge that is down, or answering.
 

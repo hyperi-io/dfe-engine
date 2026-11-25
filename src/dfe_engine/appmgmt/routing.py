@@ -42,6 +42,7 @@ manifest edit. The registry here maps a declared compiler NAME to the function
 that implements it - a new app reusing an existing compiler needs no code at all.
 """
 
+import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -237,7 +238,13 @@ def _loader(
     db = settings.clickhouse.effective_data_database
     # Only the keys the sources derive: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
-    compiled = compile_loader_routing(registry, db=db, tenancy=tenancy)
+    compiled = compile_loader_routing(
+        registry,
+        db=db,
+        tenancy=tenancy,
+        derived_base_dir=derived_reference_root(settings),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
     blocks: dict[str, Any] = {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
     capture = compile_loader_capture(
         registry,
@@ -424,6 +431,7 @@ def _transform(
         name, inner = app.block_for(app.variant_path)
         set_path(blocks.setdefault(name, {}), inner, flow.transform.variant)
     _write_detection(app, blocks, source.transform)
+    _write_conf(app, blocks, source.transform)
     return blocks
 
 
@@ -445,6 +453,16 @@ def _write_detection(
         name, inner = app.block_for(app.detect_path)
         detect = transform.detect.model_dump(mode="json", exclude_defaults=True)
         set_path(blocks.setdefault(name, {}), inner, detect)
+
+
+def _write_conf(
+    app: AppDescriptor, blocks: dict[str, Any], transform: SourceTransform | None
+) -> None:
+    """Write the source's ``conf`` where the app names it, when there is any to write."""
+    if transform is None or not transform.conf or not app.conf_path:
+        return
+    name, inner = app.block_for(app.conf_path)
+    set_path(blocks.setdefault(name, {}), inner, copy.deepcopy(transform.conf))
 
 
 Compiler = Callable[[AppDescriptor, SourceReader, Any, str | None, Tenancy | None], dict[str, Any]]

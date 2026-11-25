@@ -35,7 +35,7 @@ from scalo.logger.filters import MASK_VALUE, mask_url_userinfo
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
-from dfe_engine.gitcrud.engine import flatten, get_path, set_path
+from dfe_engine.gitcrud.engine import del_path, flatten, get_path, set_path
 from dfe_engine.manifest import ManifestError, manifest_path
 from dfe_engine.masking import (
     CREDENTIAL_MAP,
@@ -153,19 +153,24 @@ class MaskedValueError(ValueError):
     """The refusal code a route answers with."""
 
 
-class RefusedNullError(ValueError):
-    """Raised when an app's config would carry a null its parser refuses.
+class RefusedConfigError(ValueError):
+    """Raised when an app's config holds a value or a key its parser refuses.
 
-    The app stops at startup on such a null, so the write is refused before it
-    reaches the deploy repo.
+    The app stops at startup on it, so the write is refused before it reaches the
+    deploy repo.
+
+    Attributes:
+        paths: The overlay path of each refusal.
+        reasons: One sentence per refusal, in the same order.
     """
 
     code = "invalid_value"
     """The refusal code a route answers with."""
 
-    def __init__(self, paths: list[str]) -> None:
-        self.paths = paths
-        super().__init__(f"{', '.join(paths)} does not accept a null")
+    def __init__(self, refusals: dict[str, str]) -> None:
+        self.paths = list(refusals)
+        self.reasons = list(refusals.values())
+        super().__init__(", ".join(self.reasons))
 
 
 class CredentialReentryError(MaskedValueError):
@@ -944,14 +949,22 @@ def _wholly_masked(shown: Any) -> bool:
     return isinstance(shown, list) and bool(shown) and all(_wholly_masked(i) for i in shown)
 
 
-def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
+def _number_or_absent(value: Any) -> bool:
+    """Whether ``value`` is a number, or nothing at all."""
+    if isinstance(value, _Missing):
+        return True
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _field_unchanged(written: Any, stored: Any, shown: Any, *, numbers_move: bool = False) -> bool:
     """Whether one field beside a masked credential leaves it where it was set.
 
     A masked value, or a list of them, is judged by its own restore, and a value the
     read showed only as a credential may be typed again. A URL whose password alone
     was masked may take a new password and nothing else. A mapping, or a list as
     long as the stored one, is judged item by item, so a setting inside a neighbour
-    that also holds a credential still counts. Anything else is exactly as stored.
+    that also holds a credential still counts. Anything else is exactly as stored,
+    except that ``numbers_move`` lets a number be added, changed or dropped.
     """
     if _holds_mask(written) or _wholly_masked(shown):
         return True
@@ -961,16 +974,23 @@ def _field_unchanged(written: Any, stored: Any, shown: Any) -> bool:
         seen = shown if isinstance(shown, dict) else {}
         return all(
             _field_unchanged(
-                written.get(key, MISSING), stored.get(key, MISSING), seen.get(key, MISSING)
+                written.get(key, MISSING),
+                stored.get(key, MISSING),
+                seen.get(key, MISSING),
+                numbers_move=numbers_move,
             )
             for key in written.keys() | stored.keys()
         )
     if isinstance(written, list) and isinstance(stored, list) and len(written) == len(stored):
         views = shown if isinstance(shown, list) and len(shown) == len(stored) else None
         return all(
-            _field_unchanged(item, stored[i], views[i] if views else MISSING)
+            _field_unchanged(
+                item, stored[i], views[i] if views else MISSING, numbers_move=numbers_move
+            )
             for i, item in enumerate(written)
         )
+    if numbers_move and _number_or_absent(written) and _number_or_absent(stored):
+        return True
     return written == stored
 
 
@@ -986,11 +1006,12 @@ def _require_unchanged_holder(
 
     A field holds one when it is a masked credential or a mapping with one as its
     own field, so ``brokers`` beside a ``sasl`` mapping holding a masked password
-    counts, and a credential nested deeper does not. Only a field that is not a
-    mapping counts as changed: a mapping beside the credential is judged at its own
-    level, so ``producer.retries`` beside ``sasl`` passes. A document root never
-    counts, per :data:`_DOCUMENT_ROOTS`. ``remedy`` ends the refusal with what the
-    caller can do.
+    counts, and a credential nested deeper does not. A mapping beside the credential
+    counts as changed unless only numbers in it changed, because any text in it,
+    such as a URL in dfe-fetcher's ``vars`` or inline ``profile``, can name where the
+    credential is sent, and ``producer.retries`` beside ``sasl`` cannot. A document
+    root never counts, per :data:`_DOCUMENT_ROOTS`. ``remedy`` ends the refusal with
+    what the caller can do.
 
     Raises:
         CredentialReentryError: A field beside a masked credential was changed,
@@ -1009,10 +1030,11 @@ def _require_unchanged_holder(
     changed = sorted(
         str(key)
         for key in (value.keys() | kept.keys()) - masked
-        if not isinstance(value.get(key), dict)
-        and not isinstance(kept.get(key), dict)
-        and not _field_unchanged(
-            value.get(key, MISSING), kept.get(key, MISSING), seen.get(key, MISSING)
+        if not _field_unchanged(
+            value.get(key, MISSING),
+            kept.get(key, MISSING),
+            seen.get(key, MISSING),
+            numbers_move=isinstance(value.get(key), dict) or isinstance(kept.get(key), dict),
         )
     )
     if changed:
@@ -1119,55 +1141,56 @@ def require_clear_keeps_credentials(doc: dict, path: str) -> None:
     whole mapping that holds it, sends it nowhere new.
 
     Raises:
-        CredentialReentryError: ``path`` sits beside a credential in the same mapping.
+        CredentialReentryError: ``path`` sits beside a credential in a mapping above it.
     """
     if not credential_var(doc, path):
         _require_unchanged_enclosing_holder(doc, path, MISSING)
 
 
 def _require_unchanged_enclosing_holder(doc: dict, path: str, value: Any) -> None:
-    """Refuse a write at ``path`` that changes the mapping it sits in beside a credential.
+    """Refuse a write at ``path`` that changes any mapping above it beside a credential.
 
-    Only the parent of ``path`` is judged, as :func:`_require_unchanged_holder` judges
-    a write of it, so ``kafka.brokers`` is refused beside ``kafka.sasl.password`` and
-    ``kafka.producer.retries`` is not. A document root is never judged, per
-    :data:`_DOCUMENT_ROOTS`. The mapping is judged as a read showed it with ``value``
-    written in, so every credential in it stands masked beside the change. A
-    :data:`MISSING` value is judged as the field removed.
+    Each mapping above ``path``, below its document root per :data:`_DOCUMENT_ROOTS`,
+    is judged as :func:`_require_unchanged_holder` judges a write of it, so
+    ``kafka.brokers`` is refused beside ``kafka.sasl.password``, and so is
+    ``sources.rest.a.vars.base_url`` beside ``sources.rest.a.auth.token``, while
+    ``kafka.producer.retries`` is not. Each mapping is judged as a read showed it with
+    ``value`` written in, so every credential in it stands masked beside the change.
+    A :data:`MISSING` value is judged as the field removed.
 
     Raises:
         CredentialReentryError: ``value`` changes a field beside that credential, or
             lands inside a mapping the read showed as one mask.
     """
     parts = path.split(".")
-    if len(parts) < 2:
-        return
-    holder = ".".join(parts[:-1])
-    if holder in _DOCUMENT_ROOTS:
-        return
-    stored = get_path(doc, holder, MISSING)
-    if not isinstance(stored, dict):
-        return
-    shown = shown_var(doc, holder, stored)
-    if not _carries_mask(shown):
-        return
-    if not isinstance(shown, dict):
-        raise CredentialReentryError(
-            f"{holder} was read as {REDACTED!r} whole, so {path} inside it cannot be "
-            f"written alone: write {holder} in full"
+    for depth in range(len(parts) - 1, 0, -1):
+        holder = ".".join(parts[:depth])
+        if holder in _DOCUMENT_ROOTS:
+            return
+        stored = get_path(doc, holder, MISSING)
+        if not isinstance(stored, dict):
+            continue
+        shown = shown_var(doc, holder, stored)
+        if not _carries_mask(shown):
+            continue
+        if not isinstance(shown, dict):
+            raise CredentialReentryError(
+                f"{holder} was read as {REDACTED!r} whole, so {path} inside it cannot be "
+                f"written alone: write {holder} in full"
+            )
+        inner = ".".join(parts[depth:])
+        written = copy.deepcopy(shown)
+        if isinstance(value, _Missing):
+            del_path(written, inner)
+        else:
+            set_path(written, inner, value)
+        _require_unchanged_holder(
+            written,
+            stored,
+            shown,
+            holder,
+            remedy=f"write {holder} whole, with its credentials typed again",
         )
-    written = copy.deepcopy(shown)
-    if isinstance(value, _Missing):
-        written.pop(parts[-1], None)
-    else:
-        set_path(written, parts[-1], value)
-    _require_unchanged_holder(
-        written,
-        stored,
-        shown,
-        holder,
-        remedy=f"write {holder} whole, with its credentials typed again",
-    )
 
 
 def redact_var(doc: dict, path: str, value: Any) -> Any:
@@ -1424,18 +1447,129 @@ def refused_nulls(app_contract: AppContract, path: str, value: Any) -> list[str]
     return _refused_nulls(value, node, root, path)
 
 
-def check_overlay(doc: dict) -> None:
-    """Refuse an instance overlay whose ``config:`` block holds a null its app refuses.
+def _denies_unnamed_keys(node: dict | None, root: dict) -> bool:
+    """Whether a mapping held to ``node`` stops the app on a key the schema does not name.
 
-    The app's chart renders that block as the app's file verbatim, nulls
-    included, so the refusal has to happen before the overlay is written. An
-    overlay naming no app in the manifest is not an app's config and passes.
+    serde's ``deny_unknown_fields`` publishes ``additionalProperties: false``. A key
+    named by any variant of an enum is taken, so every object branch has to deny it.
+    """
+    if node is None:
+        return False
+    objects = [b for b in _branches(node, root) if "properties" in b or b.get("type") == "object"]
+    return bool(objects) and all(b.get("additionalProperties") is False for b in objects)
+
+
+def _stated_types(node: dict, root: dict) -> set[str]:
+    """The JSON types ``node`` and its branches name, empty where none is named."""
+    named: set[str] = set()
+    for branch in _branches(node, root):
+        found = branch.get("type")
+        named |= {found} if isinstance(found, str) else set(found or ())
+    named.discard("null")
+    return named
+
+
+def _refused_shapes(value: Any, node: dict | None, root: dict, path: str) -> dict[str, str]:
+    """Each path in ``value`` holding a type its schema does not take, or an unnamed key it refuses.
+
+    Reaches inside maps and lists, which the option walk takes as one value each.
+    """
+    if value is None or node is None:
+        return {}
+    named = _stated_types(node, root)
+    held = _json_type(value)
+    if named and held not in named and not (held == "integer" and "number" in named):
+        return {path: f"{path} takes {' or '.join(sorted(named))}, not {held}"}
+    found: dict[str, str] = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = _schema_child(node, str(key), root)
+            here = f"{path}.{key}"
+            if child is None and _denies_unnamed_keys(node, root):
+                found[here] = f"{here} is not a key the app reads, and the app stops on it"
+            else:
+                found |= _refused_shapes(item, child, root, here)
+    elif isinstance(value, list):
+        items = _schema_items(node, root)
+        for index, item in enumerate(value):
+            found |= _refused_shapes(item, items, root, f"{path}[{index}]")
+    return found
+
+
+def _judge_options(
+    options: dict[str, DeclaredOption], value: Any, path: str
+) -> tuple[dict[str, str], list[str]]:
+    """Each declared option under ``path`` judged by type and closed set, and each key none explains."""
+    option = options.get(path)
+    if option is not None:
+        reason = "" if value is None else check_value(option, value)
+        return ({path: reason} if reason else {}), []
+    if not isinstance(value, dict):
+        return {}, [path]
+    wrong: dict[str, str] = {}
+    unexplained: list[str] = []
+    for key, child in value.items():
+        found, missing = _judge_options(options, child, f"{path}.{key}")
+        wrong |= found
+        unexplained += missing
+    return wrong, unexplained
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigJudgement:
+    """What an app makes of a ``config:`` block, by overlay path.
+
+    Attributes:
+        refused: Each path the app stops on at startup, with the reason: a null
+            the field does not take, a wrong type, a value outside a closed set,
+            or a key a section that refuses unnamed keys does not name.
+        undeclared: Each path no option declares in a section that takes unnamed
+            keys. The app reads past it, so the value has no effect.
+    """
+
+    refused: dict[str, str]
+    undeclared: list[str]
+
+
+def judge(app_contract: AppContract, config: dict) -> ConfigJudgement:
+    """Judge ``config`` as the app's whole ``config:`` block against its contract.
+
+    With no contract mounted nothing is judged.
+    """
+    if not app_contract.available:
+        return ConfigJudgement(refused={}, undeclared=[])
+    root = app_contract.schema
+    refused = {
+        path: f"{path} does not accept a null"
+        for path in refused_nulls(app_contract, CONFIG_ROOT, config)
+    }
+    wrong, unexplained = _judge_options(declared_options(app_contract), config, CONFIG_ROOT)
+    refused |= {path: reason for path, reason in wrong.items() if path not in refused}
+    for path, reason in _refused_shapes(config, root, root, CONFIG_ROOT).items():
+        if not _under_any(path, refused):
+            refused[path] = reason
+    undeclared = [p for p in unexplained if not _under_any(p, refused)]
+    return ConfigJudgement(refused=refused, undeclared=undeclared)
+
+
+def _under_any(path: str, refused: dict[str, str]) -> bool:
+    """Whether ``path`` is a refused path or sits inside one."""
+    return any(path == r or path.startswith((f"{r}.", f"{r}[")) for r in refused)
+
+
+def check_overlay(doc: dict) -> None:
+    """Refuse an instance overlay whose ``config:`` block its app would stop on.
+
+    The app's chart renders that block as the app's file verbatim, so the
+    refusal has to happen before the overlay is written. Every writer meets it,
+    the source compilers included. An overlay naming no app in the manifest is
+    not an app's config and passes.
 
     With no contract mounted for the app the overlay passes, and the first such
-    write warns, because nothing then stops a refused null reaching the pod.
+    write warns, because nothing then stops a refused value reaching the pod.
 
     Raises:
-        RefusedNullError: The block holds a null a declared field does not take.
+        RefusedConfigError: The block holds what :func:`judge` refuses.
     """
     service = str(get_path(doc, DEPLOY_SERVICE_PATH, default="") or "")
     config = doc.get(CONFIG_ROOT)
@@ -1448,14 +1582,14 @@ def check_overlay(doc: dict) -> None:
             _UNJUDGED.add(service)
             logger.warning(
                 "no config contract is mounted for this app, so its overlay writes are "
-                "not checked for a null the app refuses at startup",
+                "not checked for a value the app refuses at startup",
                 app=service,
                 contract_dir=str(contract_root() or ""),
             )
         return
-    refused = refused_nulls(found, CONFIG_ROOT, config)
+    refused = judge(found, config).refused
     if refused:
-        raise RefusedNullError(refused)
+        raise RefusedConfigError(refused)
 
 
 def check_env_value(value: Any) -> str:
@@ -1497,22 +1631,21 @@ def _chart_value_set(overlay: dict, path: str) -> bool:
 
 
 def chart_supplier(
-    service: str, path: str, overlay: dict | None = None, *, chart_deployed: bool = True
+    service: str, path: str, overlay: dict, *, chart_deployed: bool = True
 ) -> str | None:
     """What the deployment sets this option with, or None where it sets nothing.
 
     ``path`` is the overlay path, ``config.`` rooted, so a caller compares the
     request's own keys rather than re-deriving them. ``overlay`` is the
-    instance's, which decides the options the chart sets only on a value of its own.
+    instance's, which decides the options the chart sets only on a value of its own,
+    so a caller with no overlay passes ``{}`` and says it has none.
     ``chart_deployed`` is as for :func:`_chart_derived`.
     """
     inner = path.split(".", 1)[1] if path.startswith(f"{CONFIG_ROOT}.") else path
-    return _chart_derived(service, overlay or {}, chart_deployed=chart_deployed).get(inner)
+    return _chart_derived(service, overlay, chart_deployed=chart_deployed).get(inner)
 
 
-def chart_env_names(
-    service: str, overlay: dict | None = None, *, chart_deployed: bool = True
-) -> dict[str, str]:
+def chart_env_names(service: str, overlay: dict, *, chart_deployed: bool = True) -> dict[str, str]:
     """Environment names the deployment sets for this app, each with the option it decides.
 
     A supplier in the app's ``deployment_owned`` is either an environment name or a
@@ -1523,7 +1656,7 @@ def chart_env_names(
     ``chart_deployed`` are as for :func:`chart_supplier`.
     """
     out: dict[str, str] = {}
-    derived = _chart_derived(service, overlay or {}, chart_deployed=chart_deployed)
+    derived = _chart_derived(service, overlay, chart_deployed=chart_deployed)
     for inner, supplier in derived.items():
         if ENV_NAME.match(supplier):
             out.setdefault(supplier, f"{CONFIG_ROOT}.{inner}")

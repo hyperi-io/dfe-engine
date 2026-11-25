@@ -139,7 +139,8 @@ class SchemaBuilderV2:
                               deploy repo rather than the schemas tree, so the two
                               roots differ. Pass
                               ``DerivedSchemaRegistry.reference_root``. None keeps
-                              them in the schemas tree.
+                              them in the schemas tree. The meta schemas a
+                              deployment writes sit under the same root.
             field_map_registry: Optional FieldMapRegistry for generating standard
                                 views (sigma, ecs, cim, ocsf). When provided and the
                                 source declares views, view DDLs are included
@@ -384,7 +385,7 @@ class SchemaBuilderV2:
         columns: list[SchemaColumn] = []
 
         if schema_cfg.meta_schema:
-            meta_path = self._resolve_path(schema_cfg.meta_schema)
+            meta_path = self.resolve_meta_path(schema_cfg.meta_schema)
             try:
                 columns = SchemaLoader.load_columns(
                     meta_path, version=schema_cfg.meta_schema_version
@@ -406,11 +407,62 @@ class SchemaBuilderV2:
 
         return columns
 
+    def effective_meta_schema_version(self, snap: SourceVersion) -> str | None:
+        """The meta-schema version a snapshot's table is built from.
+
+        The snapshot's pin, else the meta-schema file's ``current``: the same choice
+        :meth:`_load_source_columns_for_snapshot` makes. None when the snapshot names
+        no meta schema or the file is unversioned.
+
+        Raises:
+            SchemaLoadError: The meta-schema file does not load.
+        """
+        schema_cfg = snap.effective_schema()
+        if not schema_cfg.meta_schema:
+            return None
+        if schema_cfg.meta_schema_version:
+            return schema_cfg.meta_schema_version
+        meta_path = self.resolve_meta_path(schema_cfg.meta_schema)
+        current = SchemaLoader.load_version_metadata(meta_path).get("current")
+        return str(current) if current else None
+
+    def effective_derived_schema_version(self, snap: SourceVersion) -> str | None:
+        """The derived-schema version a snapshot's table is built from.
+
+        The snapshot's pin, else the derived schema's ``current``: the same choice
+        :meth:`_load_source_columns_for_snapshot` makes. None when the snapshot names
+        no derived schema or the file declares no ``current``.
+
+        Raises:
+            SchemaLoadError: The derived-schema file does not load.
+        """
+        schema_cfg = snap.effective_schema()
+        if not schema_cfg.derived_schema:
+            return None
+        if schema_cfg.derived_schema_version:
+            return schema_cfg.derived_schema_version
+        derived_path = self.resolve_derived_path(schema_cfg.derived_schema)
+        current = SchemaLoader.load_version_metadata(derived_path).get("current")
+        return str(current) if current else None
+
     def _resolve_path(self, path_str: str) -> Path:
         """Resolve a schema file path (relative to schemas_base_dir or absolute)."""
         if self._schemas_base_dir:
             return resolve_schema_yaml_path(self._schemas_base_dir, path_str)
         return Path(path_str)
+
+    def resolve_meta_path(self, path_str: str) -> Path:
+        """Resolve a meta-schema reference in the deploy repo, then the schemas tree.
+
+        With gitops on, the schemas an operator writes sit beside the derived ones
+        under ``derived_base_dir``. The schemas tree holds the shipped ones.
+        """
+        from dfe_engine.schema.registry import meta_deploy_root, resolve_meta_reference
+
+        if not self._schemas_base_dir:
+            return Path(path_str)
+        deploy_root = meta_deploy_root(self._derived_base_dir, self._schemas_base_dir)
+        return resolve_meta_reference(path_str, self._schemas_base_dir, deploy_root)
 
     def resolve_derived_path(self, path_str: str) -> Path:
         """Resolve a ``derived/...`` reference under its own root, then the schemas tree.
