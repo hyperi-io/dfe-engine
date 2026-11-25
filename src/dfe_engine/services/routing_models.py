@@ -279,6 +279,22 @@ class LoaderExternalTopic(BaseModel):
     allowed_sources: list[str] = Field(default_factory=list)
 
 
+class LoaderTableColumn(BaseModel):
+    """One column of a deployed table, as its deploy's CREATE TABLE renders it.
+
+    The loader's ``TableColumn``. ``default_kind`` is ``DEFAULT``, ``MATERIALIZED`` or
+    ``ALIAS`` for a column with a default, and ``comment`` carries the column's
+    directives, both left out when empty.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    default_kind: str | None = None
+    comment: str | None = None
+
+
 class LoaderRoutingConfig(BaseModel):
     """Database/table routing configuration for the loader.
 
@@ -316,6 +332,10 @@ class LoaderRoutingConfig(BaseModel):
     table_schema_versions: dict[str, str] = Field(
         default_factory=dict,
         description="Each table's schema version. A change makes the loader re-read that table",
+    )
+    table_schemas: dict[str, list[LoaderTableColumn]] = Field(
+        default_factory=dict,
+        description="Each deployed table's columns, so the loader writes to it before reading it",
     )
     topic_suffixes: list[str] = Field(default_factory=lambda: ["_land", "_load"])
     dlq: LoaderDlqConfig = Field(default_factory=LoaderDlqConfig)

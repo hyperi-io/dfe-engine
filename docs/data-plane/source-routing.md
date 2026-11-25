@@ -113,6 +113,7 @@ with no lookup at all:
 3. `source_to_table` maps every ACTIVE source to its table
 4. The table's columns come from ClickHouse `system.columns`, which the engine created from the source definition ([schema-sync.md](schema-sync.md))
 5. `table_schema_versions` maps each deployed source's table to `<deployed version>+<meta-schema version>+<derived-schema version>`, so a deploy that adds columns changes the block and the loader re-reads that table. The last two parts are the versions the table was built from: the source's pin, else the schema's `current`, so a new version changes the string for a source that pins none. A part is left out when the source has no such schema
+6. `table_schemas` lists each deployed source's table columns as its DDL created them: `name` and `type`, plus `default_kind` (`MATERIALIZED`, `ALIAS` or `DEFAULT`) and `comment` where the column has one. The engine builds them from the same schema files as the DDL, with no ClickHouse read, so the loader takes a newly deployed table's first records without waiting on `system.columns`. ClickHouse's own read still replaces them
 
 ```yaml
 # The compiled loader block (dfe-loader RoutingConfig):
@@ -121,6 +122,7 @@ routing:
   default_org_id: unassigned      # Tenant for a record with no _org_id
   source_to_table: {}             # Every ACTIVE source: its table
   table_schema_versions: {}       # Each deployed source's table: <deployed version>+<meta version>+<derived version>
+  table_schemas: {}               # Each deployed source's table: [{name, type, default_kind, comment}]
 ```
 
 A fetched source's fetcher is compiled with `org_id`, the first tenant id of the org its `fetcher.org` names (`unassigned` when unset), and `default_org_id`.

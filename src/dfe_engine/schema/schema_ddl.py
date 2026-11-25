@@ -481,6 +481,31 @@ class DDLGenerator:
         resolved = self._tables.resolve(self._column(col))
         return resolved.ch_type, resolved.codec
 
+    def column_shape(self, col: SchemaColumn) -> tuple[str, str | None, str | None]:
+        """The type, default kind and comment ClickHouse lists for *col* once created.
+
+        The same rules dfe-schemas renders the column definition by, so the three
+        match ``system.columns`` for a table this generator created.
+
+        Raises:
+            TypeRegistryError: The column's type, attribute or override is not in the registry.
+        """
+        column = self._column(col)
+        ch_type = self._tables.resolve(column).ch_type
+        default_kind = None
+        if column.default:
+            if "materialized" in column.attribute:
+                default_kind = "MATERIALIZED"
+            elif "alias" in column.attribute:
+                default_kind = "ALIAS"
+            else:
+                default_kind = "DEFAULT"
+        if column.expr and column.comment:
+            comment = f"{column.expr} - {column.comment}"
+        else:
+            comment = column.expr or column.comment or None
+        return ch_type, default_kind, comment
+
     def json_settings(self, columns: list[SchemaColumn]) -> dict[str, int]:
         """The table SETTINGS dfe-schemas declares for a table with a JSON column on this platform.
 
