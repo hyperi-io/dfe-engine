@@ -38,6 +38,8 @@ from scalo.rules import RuleSet as ScaloRuleSet
 from dfe_engine.ingest.models import ALIASES_TABLE, IngestRules
 from dfe_engine.orgs.models import UNASSIGNED_ORG_ID
 from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError
+from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.services.routing_models import (
     BUS_DESTINATION,
     LOADER_DESTINATION,
@@ -782,6 +784,8 @@ def compile_loader_routing(
     *,
     db: str = "dfe",
     tenancy: Tenancy | None = None,
+    derived_base_dir: Any = None,
+    schemas_base_dir: Any = None,
 ) -> LoaderRoutingConfig:
     """Compile Source definitions into a LoaderRoutingConfig.
 
@@ -803,22 +807,31 @@ def compile_loader_routing(
     source's org and name, which only ``tenancy`` can resolve to a tenant id.
 
     ``table_schema_versions`` maps each deployed source's table to its deployed
-    version. A deploy that adds columns moves that version, the one change the loader
-    sees. Its reload then re-reads the table, so the new columns fill from the next
+    version, then ``+`` and the meta-schema and derived-schema versions its table was
+    built from. A deploy that adds columns moves the first part. A source that pins no
+    meta or derived version takes that schema's ``current`` at deploy time, so a new one
+    moves its part and the same deploy still changes the string. The loader sees that
+    change, and its reload re-reads the table, so the new columns fill from the next
     record rather than once the cached schema expires.
 
     Args:
         registry: Where the Source definitions are read from.
         db: Default database for the loader.
         tenancy: The registered orgs, to resolve an external source's org.
+        derived_base_dir: Root a deployment's own meta-schemas resolve under.
+        schemas_base_dir: The schemas tree, where a meta schema the release ships
+            resolves when the deployment's own store has no copy.
     """
+    builder = SchemaBuilderV2(schemas_base_dir=schemas_base_dir, derived_base_dir=derived_base_dir)
     source_to_table: dict[str, str] = {}
     schema_versions: dict[str, str] = {}
     external: list[LoaderExternalTopic] = []
     for source in registry.get_all_sources(states=("active",)):
         source_to_table[source.source] = source.table_name
         if source.deployed_version is not None:
-            schema_versions[source.table_name] = source.deployed_version
+            schema_versions[source.table_name] = _loader_schema_version(
+                source, source.deployed_version, builder
+            )
         entry = _external_topic(source, tenancy)
         if entry is not None:
             external.append(entry)
@@ -834,6 +847,29 @@ def compile_loader_routing(
     if external:
         config.external_topics = external
     return config
+
+
+def _loader_schema_version(source: Source, deployed: str, builder: SchemaBuilderV2) -> str:
+    """A deployed source's schema version as the loader compares it.
+
+    ``<deployed version>+<meta-schema version>+<derived-schema version>``, each of the
+    last two left out when the source has no such schema. A schema that does not
+    read leaves the deployed version alone, with a warning.
+    """
+    snapshot = source.versions[deployed]
+    try:
+        parts = [
+            deployed,
+            builder.effective_meta_schema_version(snapshot),
+            builder.effective_derived_schema_version(snapshot),
+        ]
+    except SchemaLoadError as exc:
+        logger.warning(
+            f"Source {source.source!r} names a schema that does not read ({exc}) - "
+            f"its schema version carries the deployed version alone"
+        )
+        return deployed
+    return "+".join(part for part in parts if part)
 
 
 def _external_topic(source: Source, tenancy: Tenancy | None) -> LoaderExternalTopic | None:

@@ -238,7 +238,13 @@ def _loader(
     db = settings.clickhouse.effective_data_database
     # Only the keys the sources derive: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
-    compiled = compile_loader_routing(registry, db=db, tenancy=tenancy)
+    compiled = compile_loader_routing(
+        registry,
+        db=db,
+        tenancy=tenancy,
+        derived_base_dir=derived_reference_root(settings),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
     blocks: dict[str, Any] = {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
     capture = compile_loader_capture(
         registry,

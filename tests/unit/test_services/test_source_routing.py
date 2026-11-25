@@ -578,6 +578,102 @@ class TestCompileLoaderRouting:
         config = compile_loader_routing(FakeSourceRegistry([fw, never_deployed]))
         assert config.table_schema_versions == {"fw": deployed}
 
+    @pytest.mark.parametrize(
+        ("meta_pin", "meta_current", "derived_pin", "derived_current", "expected"),
+        [
+            pytest.param(
+                None, "1.0.0", None, "1.0.0", "2.0.0+1.0.0+1.0.0", id="both-follow-current"
+            ),
+            pytest.param(None, "1.1.0", None, "1.0.0", "2.0.0+1.1.0+1.0.0", id="meta-moves"),
+            pytest.param(None, "1.0.0", None, "1.1.0", "2.0.0+1.0.0+1.1.0", id="derived-moves"),
+            pytest.param("1.0.0", "1.1.0", None, "1.0.0", "2.0.0+1.0.0+1.0.0", id="meta-pin-holds"),
+            pytest.param(
+                None, "1.1.0", "1.0.0", "1.1.0", "2.0.0+1.1.0+1.0.0", id="derived-pin-holds"
+            ),
+            pytest.param("1.1.0", "1.1.0", "1.1.0", "1.1.0", "2.0.0+1.1.0+1.1.0", id="both-pinned"),
+            pytest.param(None, "1.0.0", False, None, "2.0.0+1.0.0", id="no-derived-schema"),
+            pytest.param(False, None, False, None, "2.0.0", id="no-schemas"),
+        ],
+    )
+    def test_the_schema_versions_the_table_was_built_from_are_in_the_string(
+        self, tmp_path, meta_pin, meta_current, derived_pin, derived_current, expected
+    ):
+        """An unpinned schema builds from ``current``, so a new one adds columns on a redeploy.
+
+        ``False`` for a pin leaves that schema off the source.
+        """
+        column = "{ name: %s, type: string }"
+        (tmp_path / "meta").mkdir()
+        (tmp_path / "derived").mkdir()
+        (tmp_path / "meta" / "fw.yaml").write_text(
+            f"current: '{meta_current or '1.0.0'}'\n"
+            "versions:\n"
+            f"  '1.0.0': {{columns: [{column % 'a'}, {column % 'b'}]}}\n"
+            f"  '1.1.0': {{columns: [{column % 'a'}, {column % 'b'}, {column % 'c'}]}}\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "derived" / "fw.yaml").write_text(
+            f"current: '{derived_current or '1.0.0'}'\n"
+            "versions:\n"
+            "  '1.0.0': {select: [{name: a}]}\n"
+            "  '1.1.0': {select: [{name: a}, {name: b}]}\n",
+            encoding="utf-8",
+        )
+        schema: dict = {}
+        if meta_pin is not False:
+            schema["meta_schema"] = "meta/fw"
+            if meta_pin:
+                schema["meta_schema_version"] = meta_pin
+        if derived_pin is not False:
+            schema["derived_schema"] = "derived/fw"
+            if derived_pin:
+                schema["derived_schema_version"] = derived_pin
+        fw = Source.model_validate(
+            {
+                "source": "fw",
+                "current": "2.0.0",
+                "deployed_version": "2.0.0",
+                "versions": {
+                    "2.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "agent.type", "operator": "equals", "value": "fw"},
+                        "schema": schema,
+                    }
+                },
+            }
+        )
+        config = compile_loader_routing(
+            FakeSourceRegistry([fw]), schemas_base_dir=tmp_path, derived_base_dir=tmp_path
+        )
+        assert config.table_schema_versions == {"fw": expected}
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            pytest.param({"meta_schema": "meta/missing"}, id="meta"),
+            pytest.param({"derived_schema": "derived/missing"}, id="derived"),
+        ],
+    )
+    def test_an_unreadable_schema_leaves_the_deployed_version_alone(self, tmp_path, schema):
+        fw = Source.model_validate(
+            {
+                "source": "fw",
+                "current": "1.0.0",
+                "deployed_version": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "agent.type", "operator": "equals", "value": "fw"},
+                        "schema": schema,
+                    }
+                },
+            }
+        )
+        config = compile_loader_routing(
+            FakeSourceRegistry([fw]), schemas_base_dir=tmp_path, derived_base_dir=tmp_path
+        )
+        assert config.table_schema_versions == {"fw": "1.0.0"}
+
 
 # ---------------------------------------------------------------------------
 # Tests: LoaderRoutingConfig against the dfe-loader serde contract
