@@ -30,7 +30,8 @@ _.authorization_url, _.availability, _.availability_reason, _.average, _.awaitin
 _.bucket_epoch, _.clickhouse_data_database, _.clickhouse_database, _.clickhouse_default_ttl_days
 _.clickhouse_host, _.config_schema, _.consumer_group, _.copy_directives, _.core_tables_altered
 _.create_table, _.deploy_target, _.desired_partitions, _.desired_replication_factor
-_.directory_setting, _.editable, _.expires_in, _.explain_queries, _.field_count, _.groups_skipped
+_.directory_setting, _.editable, _.expires_in, _.execution_id, _.explain_queries
+_.field_count, _.groups_skipped
 _.has_schema, _.header_fields, _.highest, _.highest_7d, _.highest_7d_label, _.hunt_count
 _.json_column, _.json_derived_count, _.landed_in_default, _.mapping_count, _.member_count
 _.min_interval_seconds, _.oidc_type, _.org_display_name, _.orphaned_groups, _.peak_memory
