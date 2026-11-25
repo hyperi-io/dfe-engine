@@ -578,6 +578,67 @@ class TestCompileLoaderRouting:
         config = compile_loader_routing(FakeSourceRegistry([fw, never_deployed]))
         assert config.table_schema_versions == {"fw": deployed}
 
+    @pytest.mark.parametrize(
+        ("pin", "current", "expected"),
+        [
+            pytest.param(None, "1.0.0", "2.0.0+1.0.0", id="unpinned-follows-current"),
+            pytest.param(None, "1.1.0", "2.0.0+1.1.0", id="unpinned-new-current-moves"),
+            pytest.param("1.0.0", "1.1.0", "2.0.0+1.0.0", id="pinned-holds-through-new-current"),
+            pytest.param("1.1.0", "1.1.0", "2.0.0+1.1.0", id="pinned-to-current"),
+        ],
+    )
+    def test_the_meta_schema_version_the_table_was_built_from_is_in_the_string(
+        self, tmp_path, pin, current, expected
+    ):
+        """An unpinned source builds from ``current``, so a new one adds columns on a redeploy."""
+        meta_dir = tmp_path / "meta"
+        meta_dir.mkdir()
+        column = "{ name: %s, type: string }"
+        (meta_dir / "fw.yaml").write_text(
+            f"current: '{current}'\n"
+            "versions:\n"
+            f"  '1.0.0': {{columns: [{column % 'a'}]}}\n"
+            f"  '1.1.0': {{columns: [{column % 'a'}, {column % 'b'}]}}\n",
+            encoding="utf-8",
+        )
+        schema = {"meta_schema": "meta/fw"}
+        if pin:
+            schema["meta_schema_version"] = pin
+        fw = Source.model_validate(
+            {
+                "source": "fw",
+                "current": "2.0.0",
+                "deployed_version": "2.0.0",
+                "versions": {
+                    "2.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "agent.type", "operator": "equals", "value": "fw"},
+                        "schema": schema,
+                    }
+                },
+            }
+        )
+        config = compile_loader_routing(FakeSourceRegistry([fw]), schemas_base_dir=tmp_path)
+        assert config.table_schema_versions == {"fw": expected}
+
+    def test_an_unreadable_meta_schema_leaves_the_deployed_version_alone(self, tmp_path):
+        fw = Source.model_validate(
+            {
+                "source": "fw",
+                "current": "1.0.0",
+                "deployed_version": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "agent.type", "operator": "equals", "value": "fw"},
+                        "schema": {"meta_schema": "meta/missing"},
+                    }
+                },
+            }
+        )
+        config = compile_loader_routing(FakeSourceRegistry([fw]), schemas_base_dir=tmp_path)
+        assert config.table_schema_versions == {"fw": "1.0.0"}
+
 
 # ---------------------------------------------------------------------------
 # Tests: LoaderRoutingConfig against the dfe-loader serde contract
