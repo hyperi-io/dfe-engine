@@ -767,7 +767,8 @@ class ExternalPipeline(BaseModel):
         default=None,
         pattern=ORG_NAME_PATTERN,
         description=(
-            "The registered org the pipeline's records belong to. Unset is the unassigned tenant. "
+            "The registered org the pipeline's records belong to. Unset is your org, or the "
+            "unassigned tenant while none is named. "
             "A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
         ),
     )
@@ -1222,7 +1223,8 @@ class SourceFetcher(BaseModel):
         pattern=ORG_NAME_PATTERN,
         description=(
             "The registered org every fetched record belongs to: the fetcher stamps its "
-            "first tenant id as _org_id. Unset is the unassigned tenant"
+            "first tenant id as _org_id. Unset is your org, or the unassigned tenant while "
+            "none is named"
         ),
     )
 

@@ -20,7 +20,8 @@ stops working whichever writer made the change.
 
 The receiver authenticates a listener only while an accepted credential lists it.
 :func:`compile_listener_auth` compiles ``mode: bearer`` on that listener's secret then,
-and ``mode: none`` otherwise, under which a record lands under ``unassigned``.
+and ``mode: none`` otherwise, under which a record takes ``default_org_id``: your org's
+first tenant id, ``unassigned`` with none named.
 
 On Kubernetes the ``file`` backend writes under the engine's own volume, which no
 receiver pod can mount. With ``DFE_ENGINE_INGEST_BEARER_SECRET`` set, :func:`sync_bearer_tokens`
@@ -122,7 +123,7 @@ def compile_listener_auth(
 
     ``mode: bearer`` on the listener's secret while an accepted credential other than
     :data:`SYNTHETIC_DATA_CREDENTIAL` lists the listener, else ``mode: none``, under which the receiver lands a record under
-    ``unassigned``. :func:`sync_bearer_tokens` writes the secret from the same accepted
+    ``default_org_id``. :func:`sync_bearer_tokens` writes the secret from the same accepted
     credentials, so the mode and the secret agree on which ones a listener takes. The
     receiver re-reads it every :data:`BEARER_REFRESH_SECONDS`.
 

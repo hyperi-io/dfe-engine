@@ -15682,7 +15682,7 @@
           "System"
         ],
         "summary": "Put Organisation",
-        "description": "Name a registered, enabled org as yours, the organisation running this deployment.\n\n``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this\nis a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,\nelse that file under the config directory.",
+        "description": "Name a registered, enabled org as yours, the organisation running this deployment.\n\n``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this\nis a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,\nelse that file under the config directory. The apps then recompile, stamping its\nfirst tenant id on every record that names no org.",
         "operationId": "system.organisation.apply",
         "parameters": [
           {
@@ -42209,7 +42209,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the records belong to; null is the unassigned tenant"
+            "description": "The registered org the records belong to. Null is your org, or the unassigned tenant while none is named"
           },
           "allowed_org_ids": {
             "items": {
@@ -55200,7 +55200,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the pipeline's records belong to. Unset is the unassigned tenant. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+            "description": "The registered org the pipeline's records belong to. Unset is your org, or the unassigned tenant while none is named. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
           },
           "allowed_org_ids": {
             "items": {
@@ -55265,7 +55265,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is the unassigned tenant"
+            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is your org, or the unassigned tenant while none is named"
           }
         },
         "type": "object",
@@ -56216,7 +56216,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the pipeline's records belong to. Unset is the unassigned tenant. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+            "description": "The registered org the pipeline's records belong to. Unset is your org, or the unassigned tenant while none is named. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
           },
           "allowed_org_ids": {
             "items": {

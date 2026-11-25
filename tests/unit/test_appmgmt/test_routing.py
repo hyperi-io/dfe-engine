@@ -18,6 +18,7 @@ asserted the same way, because a wrong one lands a record in another org.
 """
 
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -25,9 +26,15 @@ from typing import Any
 import pytest
 
 from dfe_engine.appmgmt import catalogue, contract, instances, routing
+from dfe_engine.hunts.customers import hunt_tenant_ids
+from dfe_engine.hunts.hunt_output import tenant_condition
+from dfe_engine.hunts.rule_compiler import compile_hunt_queries
+from dfe_engine.hunts.rule_model import Rule
+from dfe_engine.hunts.rule_registry import RuleRegistry
 from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.tenancy import Tenancy
+from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
 from dfe_engine.services.registry import judge_config
 from dfe_engine.source.alignment import MixedConnectorTypesError
 
@@ -688,6 +695,65 @@ class TestLoaderStack:
         # With no tenancy a record naming no org is held unassigned, so a caller holding no orgs still compiles it.
         compiled = routing.compile_for(catalogue.descriptor(LOADER), source_registry, settings)
         assert compiled["routing"]["default_org_id"] == "unassigned"
+
+
+class TestTheDefaultTenantIsYourOrg:
+    """Every first hop and the loader stamp a record naming no org with one tenant id."""
+
+    @pytest.mark.parametrize(
+        ("home", "expected"),
+        [("acme", "acme-prod"), (None, "unassigned"), ("ghost", "unassigned")],
+        ids=["your-org", "none-named", "named-org-not-registered"],
+    )
+    def test_receiver_loader_and_fetcher_agree(self, fetched_registry, settings, home, expected):
+        tenancy = replace(TENANCY, home=home)
+
+        def compiled(app: str, **kwargs: Any) -> dict[str, Any]:
+            return routing.compile_for(
+                catalogue.descriptor(app), fetched_registry, settings, tenancy=tenancy, **kwargs
+            )
+
+        fetcher = compiled(FETCHER, instance="okta-audit")
+        assert {
+            "receiver": compiled(RECEIVER)["routing"]["default_org_id"],
+            "loader": compiled(LOADER)["routing"]["default_org_id"],
+            "fetcher": fetcher["default_org_id"],
+            # A fetched source naming no org is your org's too.
+            "fetched-source": fetcher["org_id"],
+        } == dict.fromkeys(("receiver", "loader", "fetcher", "fetched-source"), expected)
+
+    @pytest.mark.parametrize(
+        ("home", "selected"), [("acme", True), (None, False)], ids=["your-org", "none-named"]
+    )
+    def test_a_hunt_for_your_org_selects_a_record_naming_no_org(
+        self, source_registry, settings, tmp_path, home, selected
+    ):
+        """The receiver's compiled default, a hunt saved for your org, and the hunt's own read."""
+        tenancy = replace(TENANCY, home=home)
+        stamped = _receiver(source_registry, settings, tenancy)["routing"]["default_org_id"]
+        rules = RuleRegistry(rules_directory=tmp_path, writable=True, refresh_interval=0)
+        try:
+            rules.save(Rule(rule_id="any", name="any", where_clause="1 = 1"))
+        finally:
+            rules.close()
+        hunt = {
+            "rules": [{"rule_name": "any"}],
+            "global_source_table_name": "dfe.main",
+            "global_target_table_name": "dfe.detection",
+            "customers": ["acme"],
+            # As the engine stores them when it saves the hunt.
+            "customer_tenant_ids": tenant_ids_by_org(["acme"], tenancy.orgs),
+        }
+
+        (statement,) = compile_hunt_queries(hunt, "your_org_hunt", rules_dir=tmp_path)
+        held = tenant_condition(hunt_tenant_ids(hunt)[0])
+        assert held in statement.sql
+
+        with sqlite3.connect(":memory:") as db:
+            db.execute("CREATE TABLE main (_org_id TEXT)")
+            db.execute("INSERT INTO main VALUES (?)", (stamped,))
+            rows = db.execute(f"SELECT _org_id FROM main WHERE {held}").fetchall()
+        assert rows == ([(stamped,)] if selected else [])
 
 
 class TestLoaderCapture:

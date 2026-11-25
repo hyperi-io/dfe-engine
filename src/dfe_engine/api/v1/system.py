@@ -52,6 +52,7 @@ from dfe_engine.api.review import (
     set_review_headers,
 )
 from dfe_engine.api.v1.backing_services import BackingFacts, backing_facts
+from dfe_engine.api.v1.orgs import reconcile_tenancy
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.audit import audit_org_change, audit_resource_change
@@ -727,7 +728,8 @@ def put_organisation(
 
     ``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this
     is a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,
-    else that file under the config directory.
+    else that file under the config directory. The apps then recompile, stamping its
+    first tenant id on every record that names no org.
     """
     store = _home_store(request)
     preconditions.check(_home_etag(_replaceable_home(request, store)))
@@ -740,6 +742,8 @@ def put_organisation(
     store.set(actor=user.user_id, name=body.name)
     audit_org_change(admin_id=user.user_id, change="home", org_name=body.name)
     logger.info("your organisation set via API", actor=user.user_id, org=body.name)
+    # The apps stamp your org's tenant id on a record naming no org, so they recompile now.
+    reconcile_tenancy(request, user)
     return _your_organisation(name=body.name, request=request)
 
 
