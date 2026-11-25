@@ -807,10 +807,10 @@ def compile_loader_routing(
     source's org and name, which only ``tenancy`` can resolve to a tenant id.
 
     ``table_schema_versions`` maps each deployed source's table to its deployed
-    version plus ``+`` and the meta-schema version its table was built from. A deploy
-    that adds columns moves the first part. A source that pins no meta-schema version
-    takes the schema's ``current`` at deploy time, so a new meta-schema version moves
-    the second part and the same deploy still changes the string. The loader sees that
+    version, then ``+`` and the meta-schema and derived-schema versions its table was
+    built from. A deploy that adds columns moves the first part. A source that pins no
+    meta or derived version takes that schema's ``current`` at deploy time, so a new one
+    moves its part and the same deploy still changes the string. The loader sees that
     change, and its reload re-reads the table, so the new columns fill from the next
     record rather than once the cached schema expires.
 
@@ -852,18 +852,24 @@ def compile_loader_routing(
 def _loader_schema_version(source: Source, deployed: str, builder: SchemaBuilderV2) -> str:
     """A deployed source's schema version as the loader compares it.
 
-    ``<deployed_version>+<meta-schema version>`` when the source has a meta schema.
-    An unreadable meta schema leaves the deployed version alone, with a warning.
+    ``<deployed version>+<meta-schema version>+<derived-schema version>``, each of the
+    last two left out when the source has no such schema. A schema that does not
+    read leaves the deployed version alone, with a warning.
     """
+    snapshot = source.versions[deployed]
     try:
-        meta_version = builder.effective_meta_schema_version(source.versions[deployed])
+        parts = [
+            deployed,
+            builder.effective_meta_schema_version(snapshot),
+            builder.effective_derived_schema_version(snapshot),
+        ]
     except SchemaLoadError as exc:
         logger.warning(
-            f"Source {source.source!r} names a meta schema that does not read ({exc}) - "
+            f"Source {source.source!r} names a schema that does not read ({exc}) - "
             f"its schema version carries the deployed version alone"
         )
         return deployed
-    return f"{deployed}+{meta_version}" if meta_version else deployed
+    return "+".join(part for part in parts if part)
 
 
 def _external_topic(source: Source, tenancy: Tenancy | None) -> LoaderExternalTopic | None:
