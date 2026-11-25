@@ -802,15 +802,23 @@ def compile_loader_routing(
     ``external_topics`` holds each topic a customer's own pipeline writes to the
     source's org and name, which only ``tenancy`` can resolve to a tenant id.
 
+    ``table_schema_versions`` maps each deployed source's table to its deployed
+    version. A deploy that adds columns moves that version, the one change the loader
+    sees. Its reload then re-reads the table, so the new columns fill from the next
+    record rather than once the cached schema expires.
+
     Args:
         registry: Where the Source definitions are read from.
         db: Default database for the loader.
         tenancy: The registered orgs, to resolve an external source's org.
     """
     source_to_table: dict[str, str] = {}
+    schema_versions: dict[str, str] = {}
     external: list[LoaderExternalTopic] = []
     for source in registry.get_all_sources(states=("active",)):
         source_to_table[source.source] = source.table_name
+        if source.deployed_version is not None:
+            schema_versions[source.table_name] = source.deployed_version
         entry = _external_topic(source, tenancy)
         if entry is not None:
             external.append(entry)
@@ -820,7 +828,9 @@ def compile_loader_routing(
         default_org_id=UNASSIGNED_ORG_ID,
         source_to_table=source_to_table,
     )
-    # Set only when there is one, so an emitted block with no external source is unchanged.
+    # Each is set only when non-empty, so a block with nothing to carry is unchanged.
+    if schema_versions:
+        config.table_schema_versions = schema_versions
     if external:
         config.external_topics = external
     return config

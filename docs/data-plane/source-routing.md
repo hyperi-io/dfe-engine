@@ -110,15 +110,17 @@ with no lookup at all:
 
 1. The loader reads `_source` from the payload
 2. `_source` is the target table: `{default_db}.{_source}`
-3. `source_to_table` lists just the sources whose table name differs
+3. `source_to_table` maps every ACTIVE source to its table
 4. The table's columns come from ClickHouse `system.columns`, which the engine created from the source definition ([schema-sync.md](schema-sync.md))
+5. `table_schema_versions` maps each deployed source's table to its deployed version, so a deploy that adds columns changes the block and the loader re-reads that table
 
 ```yaml
 # The compiled loader block (dfe-loader RoutingConfig):
 routing:
   default_db: dfe                 # Database (or per-org via org_routes)
   default_org_id: unassigned      # Tenant for a record with no _org_id
-  source_to_table: {}             # ACTIVE sources whose table name differs
+  source_to_table: {}             # Every ACTIVE source: its table
+  table_schema_versions: {}       # Each deployed source's table: its deployed version
 ```
 
 A fetched source's fetcher is compiled with `org_id`, the first tenant id of the org its `fetcher.org` names (`unassigned` when unset), and `default_org_id`.
