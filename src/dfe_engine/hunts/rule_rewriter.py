@@ -35,6 +35,11 @@ from dataclasses import dataclass, field
 from .hdx_sanitizer import HdxSanitizeError, split_time_window
 
 TIME_PLACEHOLDER = "{timestamp_condition}"
+
+SELECT_STAR_WARNING = (
+    "SELECT * detected. Hunt output will use lean columns "
+    "(matched_uuid + rule metadata + _json) instead."
+)
 """Time-bound placeholder a rule stored before #683 may still carry. The hunt window replaces it."""
 
 # The lookbehind starts the second form only at the first character of a whitespace
@@ -129,10 +134,7 @@ class RuleRewriter:
         result.ignored_clauses = list(split.ignored_clauses)
 
         if result.had_select_star:
-            result.warnings.append(
-                "SELECT * detected. Hunt output will use lean columns "
-                "(matched_uuid + rule metadata + _json) instead."
-            )
+            result.warnings.append(SELECT_STAR_WARNING)
         if result.source_table is None:
             result.warnings.append("Could not extract source table from SQL.")
         if split.filter is None and not split.removed:
