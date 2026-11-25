@@ -69,7 +69,10 @@ class TestCreateOrg:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
-        assert "acme" in resp.json()["detail"]
+        assert [(e["field"], e["code"]) for e in resp.json()["errors"]] == [
+            ("org_ids", "org_id_taken")
+        ]
+        assert resp.json()["detail"].startswith("Organisation ID 't-acme-1' already belongs to")
 
     def test_create_org_tenant_id_equal_to_another_orgs_name_returns_409(
         self, client, admin_headers
@@ -98,6 +101,7 @@ class TestCreateOrg:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
+        assert [e["field"] for e in resp.json()["errors"]] == ["name"]
 
     def test_create_org_may_keep_its_own_name_among_its_tenant_ids(self, client, admin_headers):
         resp = client.post(
@@ -235,6 +239,16 @@ class TestUpdateOrg:
         assert resp.status_code == 200
         assert resp.json()["org_ids"] == ["acme", "acme-new"]
 
+    def test_update_with_no_org_ids_keeps_the_name_as_its_id(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["t-acme-1"]},
+            headers=admin_headers,
+        )
+        resp = client.put("/api/v1/orgs/acme", json={"org_ids": []}, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["org_ids"] == ["acme"]
+
     def test_update_disable_org(self, client, admin_headers):
         client.post(
             "/api/v1/orgs",
@@ -248,6 +262,31 @@ class TestUpdateOrg:
         )
         assert resp.status_code == 200
         assert resp.json()["enabled"] is False
+
+    @pytest.mark.parametrize(
+        ("body", "expected_details"),
+        [
+            (
+                {"org_ids": ["acme", "acme-new"]},
+                {"org_ids": {"after": ["acme", "acme-new"], "before": ["acme"]}},
+            ),
+            ({"enabled": False}, {"enabled": {"after": False, "before": True}}),
+            ({"org_ids": ["acme"]}, None),
+        ],
+        ids=["org_ids", "disabled", "unchanged"],
+    )
+    def test_update_is_audited_with_what_changed(
+        self, admin_headers, audit_events, client, body, expected_details
+    ):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["acme"]},
+            headers=admin_headers,
+        )
+        resp = client.put("/api/v1/orgs/acme", json=body, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        updates = [e["details"] for e in audit_events if e["event"] == "org.updated"]
+        assert updates == ([] if expected_details is None else [expected_details])
 
     def test_update_tenant_id_already_declared_returns_409(self, client, admin_headers):
         client.post(
@@ -267,7 +306,8 @@ class TestUpdateOrg:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
-        assert "acme" in resp.json()["detail"]
+        assert [e["field"] for e in resp.json()["errors"]] == ["org_ids"]
+        assert "'t-acme-1' already belongs to" in resp.json()["detail"]
         assert client.get("/api/v1/orgs/beta", headers=admin_headers).json()["org_ids"] == [
             "t-beta-1"
         ]

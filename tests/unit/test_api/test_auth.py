@@ -82,6 +82,38 @@ class TestLogin:
         assert "admin" in data["roles"]
         assert data["expires_in"] == 30 * 60
 
+    def test_a_sign_in_records_its_time_and_leaves_the_account_unchanged(
+        self, app, client: TestClient
+    ):
+        before = app.state.account_store.get("admin")
+        assert before.last_login_at == ""
+
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "test-admin-pw"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        after = app.state.account_store.get("admin")
+        assert after.last_login_at != ""
+        assert after.updated_at == before.updated_at
+        # The token minted before the stamp still answers, and reads the stamp back.
+        token = resp.json()["access_token"]
+        read = client.get(
+            "/api/v1/auth/accounts/admin", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert read.status_code == 200, read.text
+        assert read.json()["last_login_at"] == after.last_login_at
+
+    def test_a_refused_sign_in_records_nothing(self, app, client: TestClient):
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "not-the-password"},
+        )
+
+        assert resp.status_code == 401, resp.text
+        assert app.state.account_store.get("admin").last_login_at == ""
+
     def test_a_local_account_signs_in_with_its_email(self, app, client: TestClient):
         app.state.account_store.create("emailuser", "email-user-pw-1", email="Email.User@corp.com")
         resp = client.post(
@@ -473,16 +505,13 @@ class TestMe:
     def test_me_ignores_stale_jwt_when_account_has_no_groups(
         self, client: TestClient, admin_headers: dict, api_settings
     ):
-        client.post(
-            "/api/v1/auth/accounts",
-            json={
-                "name": "Test User",
-                "username": "nogrp",
-                "password": secrets.token_urlsafe(16),
-                "email": "nogrp@example.com",
-                "groups": [],
-            },
-            headers=admin_headers,
+        # The API refuses an account with no group, and one is left that way when its last group is deleted.
+        client.app.state.account_store.create(
+            "nogrp",
+            secrets.token_urlsafe(16),
+            email="nogrp@example.com",
+            groups=[],
+            name="Test User",
         )
         token = session_token(
             client.app,
@@ -633,16 +662,13 @@ class TestTheHyperdxSessionFields:
     def test_a_session_with_no_groups_has_no_identity(
         self, client: TestClient, admin_headers: dict, api_settings
     ):
-        client.post(
-            "/api/v1/auth/accounts",
-            json={
-                "name": "Test User",
-                "username": "hdx-nogrp",
-                "password": secrets.token_urlsafe(16),
-                "email": "hdx-nogrp@example.com",
-                "groups": [],
-            },
-            headers=admin_headers,
+        # The API refuses an account with no group, and one is left that way when its last group is deleted.
+        client.app.state.account_store.create(
+            "hdx-nogrp",
+            secrets.token_urlsafe(16),
+            email="hdx-nogrp@example.com",
+            groups=[],
+            name="Test User",
         )
 
         me = client.get("/api/v1/auth/me", headers=_bearer(client.app, api_settings, "hdx-nogrp"))

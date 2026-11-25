@@ -81,7 +81,7 @@ class OrgRoleCase(TypedDict):
     """A write while hyperi is your org, with the accounts and groups the fixture stores."""
 
     id: str
-    body: dict[str, Any]
+    body: dict[str, Any] | None
     expected_status: int
     method: str
     path: str
@@ -602,10 +602,10 @@ ORG_ADMIN_ROLE_CASES: list[OrgAdminRoleCase] = [
         "path": f"{GROUPS}/sys-analysts",
     },
     {
-        "id": "an_org_group_may_grant_org_admin",
-        "body": {"name": "acme-leads", "roles": ["org_admin"], "scope": "org:acme"},
-        "expected_code": None,
-        "expected_status": 201,
+        "id": "a_created_group_may_not_grant_org_admin",
+        "body": {"name": "acme-leads", "roles": ["org_admin"]},
+        "expected_code": "org_admin_org_only",
+        "expected_status": 422,
         "method": "POST",
         "path": GROUPS,
     },
@@ -683,29 +683,57 @@ ORG_ROLE_CASES: list[OrgRoleCase] = [
         "path": f"{ACCOUNTS}/kim",
     },
     {
-        "id": "adding_an_org_account_to_another_orgs_group_is_refused",
+        "id": "adding_an_org_account_to_a_system_group_is_refused",
         "body": {"username": "kim"},
         "expected_status": 422,
         "method": "POST",
-        "path": f"{GROUPS}/globex-viewers/members",
+        "path": f"{GROUPS}/sys-analysts/members",
     },
     {
-        "id": "giving_an_org_accounts_group_another_role_is_refused",
+        "id": "giving_an_orgs_role_group_another_role_is_refused",
         "body": {"roles": ["data_analyst"]},
-        "expected_status": 422,
+        "expected_status": 409,
         "method": "PUT",
         "path": f"{GROUPS}/acme-viewers",
     },
     {
-        "id": "creating_a_system_group_holding_an_org_account_is_refused",
-        "body": {"members": ["kim"], "name": "sys-kim", "roles": ["data_viewer"]},
-        "expected_status": 422,
-        "method": "POST",
-        "path": GROUPS,
+        "id": "renaming_the_description_of_an_orgs_role_group_is_refused",
+        "body": {"description": "renamed"},
+        "expected_status": 409,
+        "method": "PUT",
+        "path": f"{GROUPS}/acme-admins",
     },
     {
-        "id": "creating_a_roleless_group_of_another_org_holding_an_org_account_is_refused",
-        "body": {"members": ["kim"], "name": "globex-misc", "roles": [], "scope": "org:globex"},
+        "id": "adding_a_member_to_an_orgs_role_group_through_the_group_is_refused",
+        "body": {"username": "kim"},
+        "expected_status": 409,
+        "method": "POST",
+        "path": f"{GROUPS}/globex-viewers/members",
+    },
+    {
+        "id": "removing_a_member_from_an_orgs_role_group_through_the_group_is_refused",
+        "body": None,
+        "expected_status": 409,
+        "method": "DELETE",
+        "path": f"{GROUPS}/acme-viewers/members/kim",
+    },
+    {
+        "id": "deleting_an_orgs_role_group_is_refused",
+        "body": None,
+        "expected_status": 409,
+        "method": "DELETE",
+        "path": f"{GROUPS}/acme-viewers",
+    },
+    {
+        "id": "describing_a_group_that_is_no_orgs_role_group_passes",
+        "body": {"description": "analysts"},
+        "expected_status": 200,
+        "method": "PUT",
+        "path": f"{GROUPS}/sys-analysts",
+    },
+    {
+        "id": "creating_a_system_group_holding_an_org_account_is_refused",
+        "body": {"members": ["kim"], "name": "sys-kim", "roles": ["data_viewer"]},
         "expected_status": 422,
         "method": "POST",
         "path": GROUPS,

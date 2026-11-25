@@ -94,7 +94,7 @@ async def test_create_org_defaults(manager, registry):
     org = await manager.create_org("minimal", admin_id="admin")
 
     assert org.name == "minimal"
-    assert org.org_ids == []
+    assert org.org_ids == ["minimal"]
     assert org.display_name == ""
 
 

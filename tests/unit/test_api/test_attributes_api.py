@@ -30,6 +30,7 @@ class TestAccountAttributes:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": username,
                 "password": secrets.token_urlsafe(16),
@@ -171,6 +172,7 @@ class TestAttributeNestingIsCapped:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "deepuser",
                 "password": secrets.token_urlsafe(16),

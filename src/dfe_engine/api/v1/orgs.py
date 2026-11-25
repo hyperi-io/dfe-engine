@@ -37,7 +37,15 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
-from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
+from scalo.api import (
+    FieldError,
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    sort_by_order,
+)
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
@@ -46,19 +54,26 @@ from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
     OptionalHuntConfigReg,
+    ReauthGrant,
     Settings,
     check_action,
     get_source_registry_optional,
     is_action_allowed,
     reads_every_org,
+    refuse_without_grant,
     require_action,
+    require_org_reauth,
 )
 from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
+from dfe_engine.api.v1.accounts import delete_org_accounts
+from dfe_engine.api.v1.api_keys import revoke_org_keys
+from dfe_engine.api.v1.oidc_providers import delete_org_providers
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import Scope
-from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.audit import audit_org_change, audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import grant_target
 from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.orgs.available_ids import OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
@@ -76,7 +91,7 @@ from dfe_engine.orgs.registry import (
     OrgRegistry,
     refuse_bound_delete,
 )
-from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
+from dfe_engine.orgs.tenant_scope import colliding_org, collision_refusal, org_tenant_ids
 
 if TYPE_CHECKING:
     from dfe_engine.api.v1.sources import AppsSync
@@ -152,7 +167,9 @@ class AvailableOrgIdsResponse(BaseModel):
     "",
     response_model=OrgResponse,
     status_code=201,
-    dependencies=[Depends(require_action(scopes_dict["org_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["org_write"])),
+    ],
 )
 async def create_org(
     body: CreateOrgRequest,
@@ -186,6 +203,17 @@ async def create_org(
     return _org_response(org)
 
 
+def _collision(*, name: str, org_ids: list[str], other: Any) -> ProblemError:
+    """409 ``conflict`` naming what a write shares with *other*, on the request field it came from."""
+    detail, field = collision_refusal(name=name, org_ids=org_ids, other=other)
+    return ProblemError(
+        409,
+        detail,
+        code="conflict",
+        errors=[FieldError(code="org_id_taken", detail=detail, field=field, location="body")],
+    )
+
+
 def _create_hunts_first(
     registry: OrgRegistry, hunts: Any, body: CreateOrgRequest, actor: str
 ) -> WriteOutcome | None:
@@ -199,11 +227,7 @@ def _create_hunts_first(
         raise ProblemError(409, f"Org '{body.name}' already exists", code="conflict")
     other = colliding_org(body.name, body.org_ids, registry.list())
     if other is not None:
-        raise ProblemError(
-            409,
-            f"Org '{body.name}' collides with tenant-fenced org '{other.name}'",
-            code="conflict",
-        )
+        raise _collision(name=body.name, org_ids=body.org_ids, other=other)
     tenant_ids = org_tenant_ids(body)
     refuse_held_tenant_ids(hunts, body.name, tenant_ids)
     return store_hunt_tenant_ids(hunts, body.name, tenant_ids, actor)
@@ -310,10 +334,42 @@ async def get_org(
     return _org_response(org)
 
 
+async def refuse_org_id_clash(body: UpdateOrgRequest, name: str, request: Request) -> None:
+    """FastAPI dependency: refuse an org ID another org holds before the change's re-auth grant is asked for. The write checks again under its lock."""
+    if body.org_ids is None:
+        return
+    registry = request.app.state.org_registry
+    if registry.get(name) is None:
+        return
+    other = colliding_org(name, body.org_ids, registry.list())
+    if other is not None:
+        raise _collision(name=name, org_ids=body.org_ids, other=other)
+
+
+async def require_org_change_reauth(
+    body: UpdateOrgRequest, name: str, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant when an update changes the org's IDs or whether it is enabled, the changes that move who reads what."""
+    existing = request.app.state.org_registry.get(name)
+    if existing is None:
+        return
+    ids_change = (body.org_ids is not None) and (
+        (body.org_ids or [name]) != org_tenant_ids(existing)
+    )
+    enabled_change = (body.enabled is not None) and (body.enabled != existing.enabled)
+    if (ids_change) or (enabled_change):
+        target = grant_target(kind="org", name=name)
+        refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
 @router.put(
     "/{name}",
     response_model=OrgResponse,
-    dependencies=[Depends(require_action(scopes_dict["org_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["org_write"])),
+        Depends(refuse_org_id_clash),
+        Depends(require_org_change_reauth),
+    ],
 )
 async def update_org(
     name: str,
@@ -363,9 +419,7 @@ def _update_org(
     if body.org_ids is not None:
         other = colliding_org(name, body.org_ids, registry.list())
         if other is not None:
-            raise ProblemError(
-                409, f"Org '{name}' collides with tenant-fenced org '{other.name}'", code="conflict"
-            )
+            raise _collision(name=name, org_ids=body.org_ids, other=other)
 
     # Apply field updates
     update_fields: dict[str, object] = {}
@@ -382,13 +436,24 @@ def _update_org(
         refuse_held_tenant_ids(hunts, name, tenant_ids)
     outcome = store_hunt_tenant_ids(hunts, name, tenant_ids, actor)
     org = registry.update(name, **update_fields) if update_fields else existing
+    # An org ID change moves which rows the org's users read, so every change is on record.
+    changes = {
+        field: {"after": value, "before": getattr(existing, field)}
+        for field, value in update_fields.items()
+        if getattr(existing, field) != value
+    }
+    if changes:
+        audit_org_change(admin_id=actor, change="updated", details=changes, org_name=name)
     return org, outcome
 
 
 @router.delete(
     "/{name}",
     status_code=204,
-    dependencies=[Depends(require_action(scopes_dict["org_delete"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["org_delete"])),
+        Depends(require_org_reauth),
+    ],
 )
 async def delete_org(
     name: str,
@@ -410,6 +475,14 @@ async def delete_org(
     registry: OrgRegistry = request.app.state.org_registry
     outcome = await run_blocking(
         functools.partial(_delete_hunts_first, registry, hunts, name, user.user_id)
+    )
+    # Everything bound to the org goes with it, and only after every refusal above.
+    await delete_org_providers(actor=user.user_id, org=name, request=request)
+    await run_blocking(
+        functools.partial(delete_org_accounts, actor=user.user_id, org=name, request=request)
+    )
+    await run_blocking(
+        functools.partial(revoke_org_keys, actor=user.user_id, org=name, request=request)
     )
 
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
@@ -556,7 +629,8 @@ def _org_response(org: Org) -> OrgResponse:
     return OrgResponse(
         name=org.name,
         display_name=org.display_name,
-        org_ids=org.org_ids,
+        # A record stored with no IDs answers with its name, the ID its rows carry.
+        org_ids=org_tenant_ids(org),
         enabled=org.enabled,
         created_at=org.created_at,
         updated_at=org.updated_at,

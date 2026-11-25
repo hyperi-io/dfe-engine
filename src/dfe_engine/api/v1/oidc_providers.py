@@ -28,7 +28,7 @@ import functools
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -865,32 +865,8 @@ async def _refresh_rp(request: Request) -> None:
 # -- Endpoints ------------------------------------------------
 
 
-async def require_new_provider_reauth(
-    body: CreateProviderRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
-) -> None:
-    """FastAPI dependency: the caller's re-auth grant for the sign-in provider the body creates."""
-    target = grant_target(kind="provider", name=body.name)
-    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
-
-
-@router.post(
-    "",
-    response_model=ProviderResponse,
-    status_code=201,
-    dependencies=[
-        Depends(require_own_org_action(scopes_dict["oidc_write"])),
-        Depends(require_new_provider_reauth),
-    ],
-)
-async def create_provider(
-    body: CreateProviderRequest,
-    user: CurrentUser,
-    request: Request,
-):
-    """Create a new OIDC provider configuration (admin only).
-
-    Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).
-    """
+def _refuse_new_provider(*, body: CreateProviderRequest, request: Request, user) -> OIDCProvider:
+    """Raise every refusal a provider create answers before it writes, and return the provider it would store."""
     from dfe_engine.auth.oidc.models import OIDCProvider
 
     refuse_unreachable_org(
@@ -955,6 +931,45 @@ async def create_provider(
         )
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
     provider = OIDCProvider(**fields)
+    return provider
+
+
+async def refuse_new_provider(
+    body: CreateProviderRequest, request: Request, user: CurrentUser
+) -> None:
+    """FastAPI dependency: answer a create's own refusals before its re-auth grant is asked for."""
+    _refuse_new_provider(body=body, request=request, user=user)
+
+
+async def require_new_provider_reauth(
+    body: CreateProviderRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the sign-in provider the body creates."""
+    target = grant_target(kind="provider", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
+@router.post(
+    "",
+    response_model=ProviderResponse,
+    status_code=201,
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["oidc_write"])),
+        Depends(refuse_new_provider),
+        Depends(require_new_provider_reauth),
+    ],
+)
+async def create_provider(
+    body: CreateProviderRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Create a new OIDC provider configuration (admin only).
+
+    Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).
+    """
+    registry = _get_registry(request)
+    provider = _refuse_new_provider(body=body, request=request, user=user)
 
     await run_blocking(
         lambda: _store_group_secrets(groups=body.groups, name=body.name, request=request)
@@ -1024,24 +1039,18 @@ async def get_provider(
     return _provider_to_response(name, provider)
 
 
-@router.put(
-    "/{name}",
-    response_model=ProviderResponse,
-    dependencies=[
-        Depends(require_own_org_action(scopes_dict["oidc_write"])),
-        Depends(require_provider_reauth),
-    ],
-)
-async def update_provider(
-    name: str,
-    body: UpdateProviderRequest,
-    user: CurrentUser,
-    request: Request,
-):
-    """Update an OIDC provider configuration (admin only).
+class _ProviderUpdate(NamedTuple):
+    """A provider update that passed its refusals: the stored provider, the fields to write and the secret paths to drop once it is saved."""
 
-    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
-    """
+    current: OIDCProvider
+    stale_paths: list[str]
+    update_fields: dict[str, object]
+
+
+def _refuse_provider_update(
+    *, body: UpdateProviderRequest, name: str, request: Request, user
+) -> _ProviderUpdate:
+    """Raise every refusal a provider update answers before it writes a secret or the config, and return what it writes."""
     action = scopes_dict["oidc_write"]
     registry = _get_registry(request)
     current = _require_reachable_provider(action=action, name=name, request=request, user=user)
@@ -1153,6 +1162,38 @@ async def update_provider(
             problem for problem in problems if problem.field != "issuer" or body.issuer is not None
         ]
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
+    return _ProviderUpdate(current=current, stale_paths=stale_paths, update_fields=update_fields)
+
+
+async def refuse_provider_update(
+    body: UpdateProviderRequest, name: str, request: Request, user: CurrentUser
+) -> None:
+    """FastAPI dependency: answer an update's own refusals before its re-auth grant is asked for."""
+    _refuse_provider_update(body=body, name=name, request=request, user=user)
+
+
+@router.put(
+    "/{name}",
+    response_model=ProviderResponse,
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["oidc_write"])),
+        Depends(refuse_provider_update),
+        Depends(require_provider_reauth),
+    ],
+)
+async def update_provider(
+    name: str,
+    body: UpdateProviderRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Update an OIDC provider configuration (admin only).
+
+    A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
+    """
+    registry = _get_registry(request)
+    plan = _refuse_provider_update(body=body, name=name, request=request, user=user)
+    stale_paths, update_fields = plan.stale_paths, plan.update_fields
 
     if body.client_secret:
         secret = body.client_secret
@@ -1272,6 +1313,22 @@ async def delete_provider(
         orphaned_groups=orphaned,
         disabled_accounts=disabled_accounts,
     )
+
+
+async def delete_org_providers(*, actor: str, org: str, request: Request) -> list[str]:
+    """Delete every sign-in provider bound to *org*, with its stored secrets, once the org itself goes."""
+    registry = _get_registry(request)
+    bound = [(name, provider) for name, provider in registry.list() if provider.org == org]
+    store = request.app.state.account_store
+    for name, provider in bound:
+        unlink_provider(org=org, provider=name, store=store)
+        registry.delete(name)
+        await run_blocking(functools.partial(_delete_stored_secrets, request, provider))
+        audit_resource_change(actor, "oidc_provider", name, "deleted")
+    if bound:
+        # A deleted provider must stop serving sign-ins now, not at restart.
+        await _refresh_rp(request)
+    return [name for name, _ in bound]
 
 
 @router.post(

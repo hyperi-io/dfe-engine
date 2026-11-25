@@ -29,6 +29,7 @@ from dfe_engine.api.deps import (
     create_access_token,
     get_role_config,
     jwt_authority_for,
+    org_session_denied,
     refuse_denied_account,
     refuse_without_grant,
     resolve_live_grants_for_user,
@@ -352,6 +353,11 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo.",
             code="breakglass_disabled",
         )
+    # After the password passed, as above, so only its holder learns the org is disabled.
+    org_denied = org_session_denied(org=auth_ctx.org_id or "", request=request)
+    if org_denied is not None:
+        audit_login_denied(username, "jwt", client_ip, org_denied[0])
+        raise ProblemError(401, org_denied[1], code=org_denied[0])
     throttle.succeeded(username)
 
     # The bound account's groups decide, as on every request: the provider sees members only, never linked sign-ins or the org-role rule.
@@ -383,6 +389,8 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         now=now,
         marker=auth_ctx.session_marker or "",
     )
+    # After minting, so the token is stamped from the record the password was checked against.
+    request.app.state.account_store.record_sign_in(auth_ctx.user_id)
 
     return TokenResponse(
         access_token=token,
@@ -426,7 +434,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
                 code="session_ended",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-    refuse_denied_account(named)
+    refuse_denied_account(account=named, request=request)
     # Each refresh issues a new expiry, so only a session an account backs may renew.
     if account is None and settings.auth.enabled:
         raise ProblemError(

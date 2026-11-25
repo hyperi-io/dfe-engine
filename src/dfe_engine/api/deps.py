@@ -629,7 +629,7 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
         The session's store account, or None when it has none.
     """
     bound, named = session_accounts(request, user_id)
-    refuse_denied_account(named)
+    refuse_denied_account(account=named, request=request)
     return bound
 
 
@@ -646,9 +646,23 @@ def session_accounts(request: Request, user_id: str) -> tuple[Any, Any]:
     return bound, bound or account_store.get(user_id)
 
 
-def refuse_denied_account(account: Any) -> None:
-    """Raise the 401 naming why *account* may not hold a session, when it may not."""
-    denied = account.session_denied() if account is not None else None
+def org_session_denied(*, org: str, request: Request) -> tuple[str, str] | None:
+    """``(code, message)`` when *org* is a registered org that is disabled, else None."""
+    registry = getattr(request.app.state, "org_registry", None)
+    if (not (org)) or (registry is None):
+        return None
+    record = registry.get(org)
+    if (record is None) or (record.enabled):
+        return None
+    return "org_disabled", "Your organisation is disabled"
+
+
+def refuse_denied_account(*, account: Any, request: Request) -> None:
+    """Raise the 401 naming why *account* may not hold a session, its own state first, then its org's."""
+    if account is None:
+        return
+    # A disabled org blocks its accounts without touching their own flags, so enabling it restores them as they were.
+    denied = account.session_denied() or org_session_denied(org=account.org, request=request)
     if denied is None:
         return
     code, message = denied
@@ -792,6 +806,10 @@ async def get_current_user(request: Request) -> AuthContext:
                 "disabled_key": "API key disabled",
             }.get(reason, "Invalid API key")
             raise ProblemError(status.HTTP_401_UNAUTHORIZED, message, code="unauthorized")
+        org_denied = org_session_denied(org=key_meta.org, request=request)
+        if org_denied is not None:
+            audit_login_denied(key_meta.name, "api_key", client_ip, org_denied[0])
+            raise ProblemError(status.HTTP_401_UNAUTHORIZED, org_denied[1], code=org_denied[0])
         group_store = request.app.state.group_store
         key_groups = key_meta.groups
         home = bound_org(account_org="", request=request)
@@ -863,7 +881,7 @@ async def get_current_user(request: Request) -> AuthContext:
                 code="session_ended",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        refuse_denied_account(named)
+        refuse_denied_account(account=named, request=request)
         # The refresh route carries the session's sign-in time forward from these.
         request.state.token_claims = payload
         refuse_until_password_changed(request, account)
@@ -1344,8 +1362,25 @@ def require_reauth(*, kind: ReauthKind, param: str):
     return _check
 
 
+def require_setting_reauth(*, setting: str):
+    """FastAPI dependency factory: the caller's re-auth grant for changing the system setting *setting*."""
+
+    async def _check(
+        request: Request,
+        reauth: ReauthGrant = "",
+        user: AuthContext = Depends(get_current_user),
+    ) -> None:
+        target = grant_target(kind="setting", name=setting)
+        refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+    return _check
+
+
 require_account_reauth = require_reauth(kind="account", param="username")
 require_api_key_reauth = require_reauth(kind="api_key", param="short_token")
+require_credential_reauth = require_reauth(kind="credential", param="credential")
+require_org_reauth = require_reauth(kind="org", param="name")
+require_retention_setting_reauth = require_setting_reauth(setting="retention")
 require_group_reauth = require_reauth(kind="group", param="name")
 require_provider_reauth = require_reauth(kind="provider", param="name")
 require_role_reauth = require_reauth(kind="role", param="name")

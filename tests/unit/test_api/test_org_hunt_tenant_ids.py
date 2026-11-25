@@ -335,7 +335,7 @@ class TestATenantIdAHuntStillReadsForAnotherOrg:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "tenant_id_held"
-        assert client.get(f"{ORGS}/globex", headers=admin_headers).json()["org_ids"] == []
+        assert client.get(f"{ORGS}/globex", headers=admin_headers).json()["org_ids"] == ["globex"]
 
     def test_an_id_only_a_pending_review_adds_is_refused(
         self, client, admin_headers, deploy_repo, orgs

@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, LinkedIdentity
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
 from tests.support.accounts import session_token
 from tests.support.racing_stores import RacingAccountStore
@@ -70,6 +70,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "username": "with-contact",
                 "password": _PASSWORD,
                 "email": "with-contact@example.com",
@@ -93,7 +94,12 @@ class TestCreateAccount:
     def test_create_without_an_email(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"name": "Test User", "username": "no-email", "password": _PASSWORD},
+            json={
+                "groups": ["dfe-viewers"],
+                "name": "Test User",
+                "username": "no-email",
+                "password": _PASSWORD,
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 201
@@ -105,6 +111,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "empty-email",
                 "password": _PASSWORD,
@@ -119,6 +126,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "email-only",
                 "password": _PASSWORD,
@@ -140,16 +148,27 @@ class TestCreateAccount:
     def test_a_missing_or_blank_name_is_refused(self, app, client, admin_headers, body):
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"password": _PASSWORD, "username": "nameless", **body},
+            json={"groups": ["dfe-viewers"], "password": _PASSWORD, "username": "nameless", **body},
             headers=admin_headers,
         )
         assert (resp.status_code, [e["field"] for e in resp.json()["errors"]]) == (422, ["name"])
         assert app.state.account_store.get("nameless") is None
 
+    @pytest.mark.parametrize("body", [{}, {"groups": []}], ids=["missing", "empty"])
+    def test_an_account_without_a_group_is_refused(self, app, client, admin_headers, body):
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"name": "Test User", "password": _PASSWORD, "username": "groupless", **body},
+            headers=admin_headers,
+        )
+        assert (resp.status_code, [e["field"] for e in resp.json()["errors"]]) == (422, ["groups"])
+        assert app.state.account_store.get("groupless") is None
+
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "dupuser",
                 "password": _PASSWORD,
@@ -160,6 +179,7 @@ class TestCreateAccount:
         resp = client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "dupuser",
                 "password": secrets.token_urlsafe(16),
@@ -218,7 +238,12 @@ class TestCreateAccount:
 
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"name": "Test User", "username": "long-pw", "password": password},
+            json={
+                "groups": ["dfe-viewers"],
+                "name": "Test User",
+                "username": "long-pw",
+                "password": password,
+            },
             headers=admin_headers,
         )
 
@@ -232,7 +257,12 @@ class TestCreateAccount:
 
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"name": "Test User", "username": "fine-name", "password": _PASSWORD},
+            json={
+                "groups": ["dfe-viewers"],
+                "name": "Test User",
+                "username": "fine-name",
+                "password": _PASSWORD,
+            },
             headers=admin_headers,
         )
 
@@ -250,7 +280,12 @@ class TestCreateAccount:
         short = _short_password()
         resp = client.post(
             "/api/v1/auth/accounts",
-            json={"name": "Test User", "username": "short-pw", "password": short, "groups": []},
+            json={
+                "name": "Test User",
+                "username": "short-pw",
+                "password": short,
+                "groups": ["dfe-viewers"],
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 422, resp.text
@@ -280,7 +315,7 @@ class TestConsoleCreatePayload:
                 "name": "Test User",
                 "username": "wizard-first-user",
                 "password": _PASSWORD,
-                "groups": [],
+                "groups": ["dfe-admins"],
             },
             headers=admin_headers,
         )
@@ -317,6 +352,7 @@ class TestListAccounts:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "username": "search-me",
                 "password": _PASSWORD,
                 "email": "needle@example.com",
@@ -346,6 +382,12 @@ class TestListAccounts:
         store.update("oidc-alice", oidc_id="entra", email="alice@corp.com")
         store.create("oidc-bob", "")
         store.update("oidc-bob", oidc_id="okta", email="bob@corp.com")
+        # A local account signing in through entra only by a linked sign-in.
+        store.create("linked-carol", "")
+        store.update(
+            "linked-carol",
+            identities=[LinkedIdentity(key="carol-entra", provider="entra", subject="carol")],
+        )
 
         exact = client.get(
             "/api/v1/auth/accounts",
@@ -353,9 +395,9 @@ class TestListAccounts:
             headers=admin_headers,
         )
         assert exact.status_code == 200
-        names = {a["username"] for a in exact.json()["items"]}
-        assert names == {"oidc-alice"}
-        assert exact.json()["items"][0]["oidc_id"] == "entra"
+        rows = {a["username"]: a for a in exact.json()["items"]}
+        assert set(rows) == {"linked-carol", "oidc-alice"}
+        assert rows["oidc-alice"]["oidc_id"] == "entra"
 
         # Free-text search stays on username/name/email only.
         searched = client.get(
@@ -453,6 +495,7 @@ class TestListAccounts:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "listed-blocked",
                 "password": _PASSWORD,
@@ -476,6 +519,7 @@ class TestListAccounts:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "only-blocked",
                 "password": _PASSWORD,
@@ -504,6 +548,7 @@ class TestListAccounts:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "now-blocked",
                 "password": _PASSWORD,
@@ -639,6 +684,7 @@ class TestAccountExternalFlag:
         created = client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "local-user",
                 "password": _PASSWORD,
@@ -657,11 +703,22 @@ class TestAccountExternalFlag:
 class TestUpdateAccount:
     """PUT /api/v1/auth/accounts/{username}"""
 
+    def test_emptying_the_groups_is_refused(self, client, app, admin_headers):
+        app.state.account_store.create("kept", _PASSWORD, groups=["dfe-viewers"])
+        app.state.group_store.add_member("dfe-viewers", "kept")
+
+        resp = client.put("/api/v1/auth/accounts/kept", json={"groups": []}, headers=admin_headers)
+
+        assert (resp.status_code, [e["field"] for e in resp.json()["errors"]]) == (422, ["groups"])
+        assert app.state.account_store.get("kept").groups == ["dfe-viewers"]
+        assert "kept" in app.state.group_store.get("dfe-viewers").members
+
     def test_update_groups(self, client, admin_headers):
         # Create account first
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "updatable",
                 "password": _PASSWORD,
@@ -716,18 +773,18 @@ class TestUpdateAccount:
         assert "drift" in app.state.group_store.get("dfe-analysts").members
         assert resp.json()["groups"] == ["dfe-analysts"]
 
-    def test_clearing_the_groups_removes_a_membership_its_own_list_lost(
-        self, client, app, admin_headers
-    ):
+    def test_a_new_list_removes_a_membership_its_own_list_lost(self, client, app, admin_headers):
         """drift is listed in dfe-viewers while its own list is empty."""
         app.state.account_store.create("drift", _PASSWORD, groups=[])
         app.state.group_store.add_member("dfe-viewers", "drift")
 
-        resp = client.put("/api/v1/auth/accounts/drift", json={"groups": []}, headers=admin_headers)
+        resp = client.put(
+            "/api/v1/auth/accounts/drift", json={"groups": ["dfe-analysts"]}, headers=admin_headers
+        )
 
         assert resp.status_code == 200, resp.text
         assert "drift" not in app.state.group_store.get("dfe-viewers").members
-        assert resp.json()["groups"] == []
+        assert resp.json()["groups"] == ["dfe-analysts"]
 
 
 class TestTheGroupsAnAccountShows:
@@ -771,11 +828,41 @@ class TestTheGroupsAnAccountShows:
         # dfe-admins is only a name the IdP sent, so it links nothing.
         assert resp.status_code == 200, resp.text
         assert resp.json()["groups"] == ["dfe-analysts"]
+        assert resp.json()["linked_groups"] == [
+            {"name": "dfe-analysts", "provider": "entra", "provider_type": ""}
+        ]
+
+    def test_a_group_held_only_through_a_sign_in_is_named_with_its_provider(
+        self, client, app, admin_headers
+    ):
+        """A stored membership is not a link, even where a sign-in also links the group."""
+        app.state.group_store.update("dfe-analysts", source_provider="okta", source_id="00g-an")
+        app.state.group_store.update("dfe-viewers", source_provider="okta", source_id="00g-vw")
+        app.state.account_store.create("lin", _PASSWORD)
+        app.state.account_store.update(
+            "lin",
+            identities=[
+                LinkedIdentity(
+                    groups=["00g-an", "00g-vw"], key="s-1", provider="okta", subject="s-1"
+                )
+            ],
+        )
+        for group in ("dfe-infra", "dfe-viewers"):
+            app.state.group_store.add_member(group, "lin")
+
+        resp = client.get("/api/v1/auth/accounts/lin", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["groups"] == ["dfe-analysts", "dfe-infra", "dfe-viewers"]
+        assert resp.json()["linked_groups"] == [
+            {"name": "dfe-analysts", "provider": "okta", "provider_type": ""}
+        ]
 
     def test_update_contact_fields(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "username": "contact-upd",
                 "password": _PASSWORD,
                 "email": "old@example.com",
@@ -807,6 +894,7 @@ class TestTheGroupsAnAccountShows:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "username": "contact-omit",
                 "password": _PASSWORD,
                 "email": "keep@example.com",
@@ -831,6 +919,7 @@ class TestTheGroupsAnAccountShows:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "username": "contact-clear",
                 "password": _PASSWORD,
                 "email": "gone@example.com",
@@ -853,7 +942,12 @@ class TestTheGroupsAnAccountShows:
     def test_a_set_name_cannot_be_cleared(self, app, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
-            json={"name": "Named", "password": _PASSWORD, "username": "named"},
+            json={
+                "groups": ["dfe-viewers"],
+                "name": "Named",
+                "password": _PASSWORD,
+                "username": "named",
+            },
             headers=admin_headers,
         )
         resp = client.put("/api/v1/auth/accounts/named", json={"name": " "}, headers=admin_headers)
@@ -880,6 +974,7 @@ class TestTheGroupsAnAccountShows:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "email-required",
                 "password": _PASSWORD,
@@ -898,6 +993,7 @@ class TestTheGroupsAnAccountShows:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "disableme",
                 "password": _PASSWORD,
@@ -1082,6 +1178,7 @@ class TestTheGroupsAnAccountShows:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "blockme",
                 "password": _PASSWORD,
@@ -1421,6 +1518,7 @@ class TestResetPassword:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "pwreset",
                 "password": _PASSWORD,
@@ -1440,6 +1538,7 @@ class TestResetPassword:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "pwsame",
                 "password": _PASSWORD,
@@ -1620,6 +1719,7 @@ class TestDeleteAccount:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "deleteme",
                 "password": _PASSWORD,
@@ -1742,7 +1842,7 @@ class TestProtectedAccounts:
                 "name": "Test User",
                 "username": f"{username}-renamed",
                 "password": _PASSWORD,
-                "groups": [],
+                "groups": ["dfe-viewers"],
             },
             headers=admin_headers,
         )

@@ -91,7 +91,12 @@ from dfe_engine.auth.bootstrap import (
 from dfe_engine.auth.groups import Group
 from dfe_engine.auth.identity_links import link_candidates, linked_identity, without_identity
 from dfe_engine.auth.login_throttle import LoginThrottle
-from dfe_engine.auth.membership import forget_member, groups_held, groups_held_after
+from dfe_engine.auth.membership import (
+    forget_member,
+    groups_held,
+    groups_held_after,
+    groups_held_by_link,
+)
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.names import VALID_NAME, InvalidNameError, StoreName
 from dfe_engine.orgs.role_groups import usable_org_admins
@@ -230,7 +235,10 @@ class CreateAccountRequest(BaseModel):
         ),
     )
     email: str = Field(default="", description="Contact email")
-    groups: list[str] = Field(default_factory=list, description="Group memberships")
+    groups: list[str] = Field(
+        description="Group memberships, at least one: an account holds its roles only through its groups",
+        min_length=1,
+    )
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(min_length=1, description="Display name")
     org: str = Field(default="", description=_ORG_DESCRIPTION)
@@ -251,7 +259,9 @@ class CreateAccountRequest(BaseModel):
 class UpdateAccountRequest(BaseModel):
     """Body for updating an account, where an omitted field keeps its value."""
 
-    groups: list[str] | None = Field(None, description="Replace group memberships")
+    groups: list[str] | None = Field(
+        None, description="Replace group memberships, with at least one", min_length=1
+    )
     enabled: bool | None = Field(None, description="Enable or disable the account")
     blocked: bool | None = Field(None, description="Block the account from holding a session")
     email: str | None = Field(None, min_length=1, description="Contact email")
@@ -362,6 +372,18 @@ class LinkedIdentityResponse(BaseModel):
     last_login_at: str = ""
 
 
+class LinkedGroupResponse(BaseModel):
+    """A group an account holds only through an IdP sign-in."""
+
+    name: str
+    provider: str = Field(description="The provider whose assertion links the group")
+    provider_type: str = Field(
+        default="",
+        description="The provider's type (google, entra_id, okta or generic), empty once it "
+        "is no longer registered",
+    )
+
+
 class AccountResponse(BaseModel):
     """Account detail -- password_hash is NEVER included."""
 
@@ -384,6 +406,11 @@ class AccountResponse(BaseModel):
         description="The display name of the org the account is bound to, which for a root "
         "account is your org, else that org's name when it has none. Empty while it is "
         "bound to none.",
+    )
+    org_enabled: bool = Field(
+        default=True,
+        description="False while the account's org is disabled, which refuses its sign-in "
+        "whatever the account's own state",
     )
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
@@ -419,8 +446,19 @@ class AccountResponse(BaseModel):
         description="True until the account replaces an issued password. The account's "
         "own read reports no groups while it is set, as its session holds none.",
     )
+    linked_groups: list[LinkedGroupResponse] = Field(
+        default_factory=list,
+        description="The groups in groups held only through an IdP sign-in, each with its "
+        "provider, so they change with what the IdP asserts rather than with a membership "
+        "write",
+    )
     created_at: str
     updated_at: str
+    last_login_at: str = Field(
+        default="",
+        description="When the account last signed in, by password or through an identity "
+        "provider, empty if it never has",
+    )
 
 
 class AccountAvailabilityResponse(BaseModel):
@@ -448,8 +486,9 @@ class AttributesRequest(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class _Lookups:
-    """The registered orgs' display names and OIDC providers' types, each by name."""
+    """The registered orgs' display names and OIDC providers' types, each by name, and the disabled orgs."""
 
+    disabled_orgs: frozenset[str]
     org_display_names: Mapping[str, str]
     provider_types: Mapping[str, str]
 
@@ -458,8 +497,10 @@ def _lookups(request: Request) -> _Lookups:
     """The org display names and OIDC provider types as registered now."""
     registry = getattr(request.app.state, "oidc_provider_registry", None)
     providers = registry.list() if registry is not None else []
+    orgs = registered_orgs(request)
     return _Lookups(
-        org_display_names={org.name: org.display_name for org in registered_orgs(request)},
+        disabled_orgs=frozenset(org.name for org in orgs if not (org.enabled)),
+        org_display_names={org.name: org.display_name for org in orgs},
         provider_types={name: provider.type for name, provider in providers},
     )
 
@@ -488,6 +529,7 @@ def _account_response(
         name=account.name,
         org=account.org,
         org_display_name=(lookups.org_display_names.get(bound)) or (bound),
+        org_enabled=account.org not in lookups.disabled_orgs,
         external=account.external,
         admin=account_holds_system_admin(
             account=account, bindings=provider_bindings(request), groups=groups
@@ -505,8 +547,19 @@ def _account_response(
             for identity in account.identities
         ],
         password_change_required=account.password_change_required,
+        linked_groups=[
+            LinkedGroupResponse(
+                name=name,
+                provider=provider,
+                provider_type=lookups.provider_types.get(provider, ""),
+            )
+            for name, provider in groups_held_by_link(
+                account, groups, bindings=provider_bindings(request)
+            ).items()
+        ],
         created_at=account.created_at,
         updated_at=account.updated_at,
+        last_login_at=account.last_login_at,
     )
 
 
@@ -693,32 +746,8 @@ async def _reset_stored_password(
 # -- Endpoints ------------------------------------------------
 
 
-async def require_new_account_reauth(
-    body: CreateAccountRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
-) -> None:
-    """FastAPI dependency: the caller's re-auth grant for the account the body creates."""
-    refuse_without_grant(reauth=reauth, request=request, target=body.username, user=user)
-
-
-@router.post(
-    "",
-    response_model=AccountResponse,
-    status_code=201,
-    dependencies=[
-        Depends(require_own_org_action(scopes_dict["account_write"])),
-        Depends(require_new_account_reauth),
-    ],
-)
-async def create_account(
-    body: CreateAccountRequest,
-    user: CurrentUser,
-    request: Request,
-    settings: Settings,
-):
-    """Create a new local user account: an admin of an org other than yours creates it in that org only."""
-    from dfe_engine.auth.accounts import AccountStore
-    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
-
+def _refuse_new_account(*, body: CreateAccountRequest, request: Request, user) -> None:
+    """Raise every refusal an account create answers before it writes."""
     refuse_unreachable_org(
         action=scopes_dict["account_write"],
         noun="accounts",
@@ -726,11 +755,10 @@ async def create_account(
         request=request,
         user=user,
     )
-    store: AccountStore = request.app.state.account_store
+    store = request.app.state.account_store
     group_store = request.app.state.group_store
-    conflict = ProblemError(409, f"Account '{body.username}' already exists", code="conflict")
     if store.get(body.username) is not None:
-        raise conflict
+        raise ProblemError(409, f"Account '{body.username}' already exists", code="conflict")
     if body.email.strip():
         _refuse_taken_email(email=body.email, request=request, username=body.username)
     refuse_unknown_orgs(request, [body.org])
@@ -750,6 +778,45 @@ async def create_account(
         request=request,
         username=body.username,
     )
+
+
+async def refuse_new_account(
+    body: CreateAccountRequest, request: Request, user: CurrentUser
+) -> None:
+    """FastAPI dependency: answer a create's own refusals before its re-auth grant is asked for."""
+    _refuse_new_account(body=body, request=request, user=user)
+
+
+async def require_new_account_reauth(
+    body: CreateAccountRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the account the body creates."""
+    refuse_without_grant(reauth=reauth, request=request, target=body.username, user=user)
+
+
+@router.post(
+    "",
+    response_model=AccountResponse,
+    status_code=201,
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["account_write"])),
+        Depends(refuse_new_account),
+        Depends(require_new_account_reauth),
+    ],
+)
+async def create_account(
+    body: CreateAccountRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+):
+    """Create a new local user account: an admin of an org other than yours creates it in that org only."""
+    from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
+
+    store: AccountStore = request.app.state.account_store
+    group_store = request.app.state.group_store
+    conflict = ProblemError(409, f"Account '{body.username}' already exists", code="conflict")
     # The create decides: another replica can take the name after the lookup above.
     # It hashes the password, so it runs off the event loop.
     try:
@@ -814,7 +881,8 @@ async def list_accounts(
     search: str | None = Query(None, description="Search in username, name, or email"),
     oidc_id: str | None = Query(
         None,
-        description="Exact match on the OIDC provider name last used to log the account in",
+        description="Exact match on an OIDC provider the account signs in through: its own, "
+        "or one with a sign-in linked to it",
     ),
     org: str | None = Query(
         None,
@@ -849,7 +917,12 @@ async def list_accounts(
     if blocked is not None:
         accounts = [account for account in accounts if account.blocked is blocked]
     if oidc_id is not None:
-        accounts = [account for account in accounts if account.oidc_id == oidc_id]
+        accounts = [
+            account
+            for account in accounts
+            if (account.oidc_id == oidc_id)
+            or (any(identity.provider == oidc_id for identity in account.identities))
+        ]
     if org is not None:
         home = bound_org(account_org="", request=request)
         accounts = [
@@ -992,43 +1065,13 @@ async def get_account(
     )
 
 
-@router.put(
-    "/{username}",
-    response_model=AccountResponse,
-    dependencies=[
-        Depends(require_own_org_action(scopes_dict["account_write"])),
-        Depends(require_account_reauth),
-    ],
-    responses={
-        403: {
-            "description": "self_deactivate: an account cannot disable or block itself",
-        },
-        409: {
-            "description": (
-                "last_admin: disabling, blocking, or stripping the system admin "
-                "group from this account would leave no usable system admin"
-            ),
-        },
-    },
-)
-async def update_account(
-    username: str,
-    body: UpdateAccountRequest,
-    user: CurrentUser,
-    request: Request,
-    settings: Settings,
-):
-    """Update account groups, enabled/blocked status, or contact fields (admin only).
-
-    Refused when the caller disables or blocks their own account, or when that
-    (or stripping every system-scope admin group) would leave no usable
-    system-admin account.
-    """
+def _refuse_account_update(
+    *, body: UpdateAccountRequest, request: Request, user, username: str
+) -> tuple[Account, list[str] | None]:
+    """Raise every refusal an account update answers before it writes, and return the stored account and the groups it will hold, or None when its groups do not change."""
     from dfe_engine.auth import admin_retirement
-    from dfe_engine.auth.accounts import AccountStore
-    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
-    store: AccountStore = request.app.state.account_store
+    store = request.app.state.account_store
     group_store = request.app.state.group_store
     action = scopes_dict["account_write"]
     existing = _require_reachable(action=action, request=request, user=user, username=username)
@@ -1113,9 +1156,62 @@ async def update_account(
     _refuse_last_org_admin(
         after=after, before=existing, held_after=held_after, request=request, user=user
     )
-    update_fields: dict[str, object] = _contact_updates(body, existing, vouched=True)
-    if "email_verified" in update_fields:
+    if "email_verified" in _contact_updates(body, existing, vouched=True):
         _refuse_taken_email(email=body.email or "", request=request, username=username)
+    if body.org is not None:
+        refuse_unknown_orgs(request, [body.org])
+    return existing, held_after
+
+
+async def refuse_account_update(
+    body: UpdateAccountRequest, request: Request, user: CurrentUser, username: str
+) -> None:
+    """FastAPI dependency: answer an update's own refusals before its re-auth grant is asked for."""
+    _refuse_account_update(body=body, request=request, user=user, username=username)
+
+
+@router.put(
+    "/{username}",
+    response_model=AccountResponse,
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["account_write"])),
+        Depends(refuse_account_update),
+        Depends(require_account_reauth),
+    ],
+    responses={
+        403: {
+            "description": "self_deactivate: an account cannot disable or block itself",
+        },
+        409: {
+            "description": (
+                "last_admin: disabling, blocking, or stripping the system admin "
+                "group from this account would leave no usable system admin"
+            ),
+        },
+    },
+)
+async def update_account(
+    username: str,
+    body: UpdateAccountRequest,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+):
+    """Update account groups, enabled/blocked status, or contact fields (admin only).
+
+    Refused when the caller disables or blocks their own account, or when that
+    (or stripping every system-scope admin group) would leave no usable
+    system-admin account.
+    """
+    from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
+
+    store: AccountStore = request.app.state.account_store
+    group_store = request.app.state.group_store
+    existing, held_after = _refuse_account_update(
+        body=body, request=request, user=user, username=username
+    )
+    update_fields: dict[str, object] = _contact_updates(body, existing, vouched=True)
     if body.groups is not None:
         update_fields["groups"] = body.groups
     if body.enabled is not None:
@@ -1123,7 +1219,6 @@ async def update_account(
     if body.blocked is not None:
         update_fields["blocked"] = body.blocked
     if body.org is not None:
-        refuse_unknown_orgs(request, [body.org])
         update_fields["org"] = body.org
     if body.groups is not None:
         # The group files decide membership, so diff against them: re-sending a list repairs drift.
@@ -1438,6 +1533,25 @@ async def delete_account(
     delete_link_records(store, existing)
     forget_member(group_store, username)
     audit_account_change(user.user_id, username, "deleted")
+
+
+def delete_org_accounts(*, actor: str, org: str, request: Request) -> list[str]:
+    """Delete every account bound to *org*, as a single account delete does, once the org itself goes."""
+    store = request.app.state.account_store
+    group_store = request.app.state.group_store
+    doomed = [
+        account
+        for account in store.list()
+        if (account.org == org)
+        and (not (account.is_link_record))
+        and (not (account.is_soft_deleted))
+    ]
+    for account in doomed:
+        store.delete(account.username)
+        delete_link_records(store, account)
+        forget_member(group_store, account.username)
+        audit_account_change(actor, account.username, "deleted")
+    return [account.username for account in doomed]
 
 
 @router.delete(

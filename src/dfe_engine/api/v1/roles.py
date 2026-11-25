@@ -29,9 +29,7 @@ from scalo.api import ListParams, Page, ProblemError, paginate
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
-    ReauthGrant,
     live_role_config,
-    refuse_without_grant,
     require_action,
     require_role_reauth,
 )
@@ -39,7 +37,6 @@ from dfe_engine.auth import AuthContext, AuthorizationError, RoleConfig, Scope
 from dfe_engine.auth.audit import audit_permission_denied, audit_role_change
 from dfe_engine.auth.models import ungrantable_permissions
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
-from dfe_engine.auth.reauth import grant_target
 from dfe_engine.auth.role_store import Role, RoleStore
 from dfe_engine.auth.roles import scoped_role_refusal
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -194,21 +191,12 @@ async def list_casbin_scopes(
     )
 
 
-async def require_new_role_reauth(
-    body: CreateRoleRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
-) -> None:
-    """FastAPI dependency: the caller's re-auth grant for the role the body creates."""
-    target = grant_target(kind="role", name=body.name)
-    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
-
-
 @router.post(
     "",
     response_model=RoleResponse,
     status_code=201,
     dependencies=[
         Depends(require_action(scopes_dict["role_write"])),
-        Depends(require_new_role_reauth),
     ],
 )
 async def create_role(
@@ -282,21 +270,10 @@ async def get_role(
     return _role_response(role)
 
 
-@router.put(
-    "/{name}",
-    response_model=RoleResponse,
-    dependencies=[
-        Depends(require_action(scopes_dict["role_write"])),
-        Depends(require_role_reauth),
-    ],
-)
-async def update_role(
-    name: str,
-    body: UpdateRoleRequest,
-    user: CurrentUser,
-    request: Request,
-) -> RoleResponse:
-    """Update a role. A change to what it grants needs the caller to hold it before and after."""
+async def refuse_role_update(
+    body: UpdateRoleRequest, name: str, request: Request, user: CurrentUser
+) -> None:
+    """FastAPI dependency: answer a role update's own refusals before its re-auth grant is asked for."""
     store: RoleStore = request.app.state.role_store
     stored = store.get(name)
     if stored is None:
@@ -308,6 +285,25 @@ async def update_role(
         # Every holder of the role keeps, gains or loses what it grants before and after.
         _refuse_ungrantable(request, user, permissions=stored.permissions, scoped=stored.scoped)
         _refuse_ungrantable(request, user, permissions=permissions, scoped=scoped)
+
+
+@router.put(
+    "/{name}",
+    response_model=RoleResponse,
+    dependencies=[
+        Depends(require_action(scopes_dict["role_write"])),
+        Depends(refuse_role_update),
+        Depends(require_role_reauth),
+    ],
+)
+async def update_role(
+    name: str,
+    body: UpdateRoleRequest,
+    user: CurrentUser,
+    request: Request,
+) -> RoleResponse:
+    """Update a role. A change to what it grants needs the caller to hold it before and after."""
+    store: RoleStore = request.app.state.role_store
     try:
         role = store.update(
             name,
