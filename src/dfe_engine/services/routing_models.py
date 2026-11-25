@@ -313,6 +313,10 @@ class LoaderRoutingConfig(BaseModel):
         description="Per-org database routing {org_id, database?}; unlisted orgs use default_db",
     )
     source_to_table: dict[str, str] = Field(default_factory=dict)
+    table_schema_versions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each table's schema version. A change makes the loader re-read that table",
+    )
     topic_suffixes: list[str] = Field(default_factory=lambda: ["_land", "_load"])
     dlq: LoaderDlqConfig = Field(default_factory=LoaderDlqConfig)
     external_topics: list[LoaderExternalTopic] = Field(
