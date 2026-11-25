@@ -559,6 +559,25 @@ class TestCompileLoaderRouting:
         assert config.source_to_table == {}
         assert config.table_fields == ["_source"]
 
+    @pytest.mark.parametrize("deployed", ["1.0.0", "2.0.0"])
+    def test_a_deploy_moves_its_table_s_schema_version(self, deployed):
+        """The version is what changes the overlay, so the loader re-reads the altered table."""
+        snapshot = {
+            "date_time": "2026-01-01",
+            "match": {"field": "agent.type", "operator": "equals", "value": "fw"},
+        }
+        fw = Source.model_validate(
+            {
+                "source": "fw",
+                "current": deployed,
+                "deployed_version": deployed,
+                "versions": {deployed: snapshot},
+            }
+        )
+        never_deployed = _make_source("draft", match_field="x", match_value="y")
+        config = compile_loader_routing(FakeSourceRegistry([fw, never_deployed]))
+        assert config.table_schema_versions == {"fw": deployed}
+
 
 # ---------------------------------------------------------------------------
 # Tests: LoaderRoutingConfig against the dfe-loader serde contract

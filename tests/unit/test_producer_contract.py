@@ -156,8 +156,9 @@ def test_a_file_the_producer_does_not_declare_is_refused():
 
 @pytest.mark.parametrize("producer", PRODUCERS, ids=lambda producer: producer.repo)
 def test_every_pin_is_a_release_tag(producer: Producer):
-    # A branch compares against whatever merged last, which is no pin at all.
-    assert re.fullmatch(r"v\d+\.\d+\.\d+", producer.ref), (
+    # A branch compares against whatever merged last, which is no pin at all. A
+    # candidate tag is immutable, so a lockstep change can pin the producer's rc.
+    assert re.fullmatch(r"v\d+\.\d+\.\d+(-rc\.\d+)?", producer.ref), (
         f"{producer.repo} is pinned to {producer.ref!r}, not a release tag"
     )
 

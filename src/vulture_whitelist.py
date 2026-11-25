@@ -20,7 +20,7 @@ _ = _Names()
 
 # Routing blocks the source compile emits: dumped into the YAML each app reads.
 _.default_db, _.default_org_id, _.default_table, _.dlq, _.from_field, _.org_id_field
-_.org_routes, _.table_fields, _.topic_suffixes
+_.org_routes, _.table_fields, _.table_schema_versions, _.topic_suffixes
 
 # API request and response bodies: pydantic fills or emits these fields for clients.
 _.brokers
