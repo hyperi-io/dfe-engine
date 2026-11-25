@@ -311,6 +311,7 @@ def run(
         overlap_seconds=settings.hunts.window_overlap_seconds,
         safe_horizon=settings.hunts.safe_horizon,
         max_deferral_seconds=settings.hunts.safe_horizon_max_deferral_seconds,
+        guard=settings.hunts.detection_guard,
     )
     hunt_dir = settings.hunts.hunt_dir
     sources = spec_sources(settings, db)

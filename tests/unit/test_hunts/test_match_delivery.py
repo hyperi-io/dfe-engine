@@ -104,7 +104,7 @@ class _Coordinator:
     def set_safe_horizon_mark(self, hunt_id: str, mark: str, value: int) -> None:
         pass
 
-    def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
+    def record_run(self, hunt_id: str, fire: int, rows_written: int, **_extra: object) -> None:
         pass
 
     def heartbeat(self, now: int, poll_seconds: float) -> None:

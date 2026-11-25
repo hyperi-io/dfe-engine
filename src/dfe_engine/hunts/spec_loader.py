@@ -149,7 +149,8 @@ def _build_spec(
         )
         queries = [HuntStatement(sql=query)]
         customers = None
-        unresolved: list[str] = []
+        unresolved = []
+        tenant_ids: list[str] = []
     else:
         queries = compile_hunt_queries(
             definition,
@@ -161,13 +162,14 @@ def _build_spec(
             lookup_databases=lookup_databases,
         )
         customers = hunt_customers(definition)
-        _, unresolved = hunt_tenant_ids(definition)
+        tenant_ids, unresolved = hunt_tenant_ids(definition)
 
     return HuntSpec(
         hunt_id=stem,
         interval_seconds=interval_seconds,
         queries=queries,
         customers=customers,
+        tenant_ids=tenant_ids,
         unresolved_customers=unresolved,
         target_table=str(definition.get("global_target_table_name", definition.get("target", ""))),
         timestamp_field=_timestamp_field(definition),

@@ -12,15 +12,19 @@ from dfe_engine.api.v1.rulesV2 import (
     RuleV2CreateRequest,
     RuleV2FromHyperdxRequest,
     RuleV2Response,
+    RuleV2RunRequest,
+    RuleV2RunRule,
     RuleV2Summary,
     SqlValidationRequest,
     _refuse_detection,
     _rule_from_write,
     _rule_to_response,
+    _run_rule_request,
     _run_stored_rule,
     _with_source_table,
     validate_rule_sql,
 )
+from dfe_engine.hunts.rule_condition import RuleCondition
 from dfe_engine.hunts.rule_creation_service import RuleCreationService
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
@@ -490,6 +494,135 @@ def test_an_on_demand_run_does_not_query_a_rule_the_runner_would_refuse(monkeypa
     assert result.execution_time_ms == 0
     assert result.sql_errors
     assert client.ran == []
+
+
+class _UnusedRules:
+    def get(self, name: str):
+        raise AssertionError(f"an unsaved detection must not load {name}")
+
+
+def _draft_run(body, **overrides):
+    overrides.pop("client", None)
+    return _run_rule_request(
+        body=body,
+        tenant_ids=overrides.pop("tenant_ids", None),
+        settings=_settings(),
+        registry=overrides.pop("registry", _UnusedRules()),
+        sources=overrides.pop("sources", _Sources()),
+        schemas=None,
+    )
+
+
+def test_an_unsaved_where_clause_runs_without_a_stored_rule(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result = _draft_run(
+        RuleV2RunRequest(source="filebeat", rule=RuleV2RunRule(where_clause="severity = 'high'")),
+        client=client,
+    )
+
+    assert result.sql_errors == []
+    assert result.results == [{"severity": "high"}]
+    assert any("severity = 'high'" in sql for sql, _kwargs in client.ran)
+
+
+def test_an_unsaved_match_runs_as_its_compiled_where(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result = _draft_run(
+        RuleV2RunRequest(
+            source="filebeat",
+            rule=RuleV2RunRule(match=RuleCondition(field="severity", value="high")),
+        ),
+        client=client,
+    )
+
+    assert result.sql_errors == []
+    assert result.results == [{"severity": "high"}]
+    assert any("severity" in sql and "high" in sql for sql, _kwargs in client.ran)
+
+
+def test_an_unsaved_cel_filter_runs_without_being_saved(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result = _draft_run(
+        RuleV2RunRequest(
+            source="filebeat", rule=RuleV2RunRule(cel_filter='severity == "critical"')
+        ),
+        client=client,
+    )
+
+    assert result.sql_errors == []
+    assert result.results == [{"severity": "high"}]
+    assert client.ran
+
+
+def test_a_named_rule_runs_without_a_detection_in_the_body(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result = _draft_run(
+        RuleV2RunRequest(source="filebeat", rule=RuleV2RunRule(name="high")),
+        client=client,
+        registry=_Rules(),
+    )
+
+    assert result.sql_errors == []
+    assert any("severity = 'high'" in sql for sql, _kwargs in client.ran)
+
+
+def test_an_unsaved_user_sql_runs_without_a_stored_rule(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result = _draft_run(
+        RuleV2RunRequest(
+            source="filebeat",
+            rule=RuleV2RunRule(user_sql="SELECT severity FROM {{source}} WHERE severity = 'high'"),
+        ),
+        client=client,
+    )
+
+    assert result.sql_errors == []
+    assert any("severity = 'high'" in sql for sql, _kwargs in client.ran)
+
+
+def test_a_where_run_ignores_source_type(monkeypatch):
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result = _draft_run(
+        RuleV2RunRequest(
+            source="filebeat",
+            rule=RuleV2RunRule(where_clause="severity = 'high'", source_type="hyperdx"),
+        ),
+        client=client,
+    )
+
+    assert result.sql_errors == []
+    assert result.results == [{"severity": "high"}]
+    RuleV2RunRequest(source="filebeat", rule=RuleV2RunRule(name="high", source_type=None))
+
+
+def test_a_run_needs_a_name_or_one_detection():
+    with pytest.raises(ValidationError, match="give 'name'"):
+        RuleV2RunRequest(source="filebeat", rule=RuleV2RunRule())
+    with pytest.raises(ValidationError, match="not both"):
+        RuleV2RunRequest(
+            source="filebeat",
+            rule=RuleV2RunRule(name="high", where_clause="severity = 'high'"),
+        )
+    with pytest.raises(ValidationError, match="one of them"):
+        RuleV2RunRequest(
+            source="filebeat",
+            rule=RuleV2RunRule(
+                where_clause="severity = 'high'",
+                match=RuleCondition(field="severity", value="high"),
+            ),
+        )
 
 
 def test_an_on_demand_run_reports_a_missing_source():

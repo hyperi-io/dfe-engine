@@ -361,6 +361,35 @@ class HuntRunner:
             )
         return self._stopped
 
+    def _record_failure(
+        self, hunt_id: str, fire: int, exc: BaseException, duration_s: float
+    ) -> None:
+        """Store a fire that raised, unless the worker already stored the completed one.
+
+        A notifier that fails after the statements committed must not replace that
+        completed row with a failure. Recording itself must not escape the tick.
+        """
+        recorded = getattr(self._worker, "fire_recorded", None)
+        if recorded is not None and recorded(hunt_id, fire):
+            return
+        record = getattr(self._coord, "record_run", None)
+        if record is None:
+            return
+        text = str(exc).strip() or type(exc).__name__
+        try:
+            record(
+                hunt_id,
+                fire,
+                0,
+                status="failed",
+                error=text[:2000],
+                duration_ms=duration_s * 1000,
+            )
+        except Exception as record_exc:
+            logger.warning(
+                "hunt execution was not recorded", hunt_id=hunt_id, error=str(record_exc)
+            )
+
     def _auto_disable(self, spec: HuntSpec, reason: str, now: int) -> None:
         """Stop a hunt that kept tripping a resource limit: record, count, alert.
 
@@ -492,6 +521,7 @@ class HuntRunner:
                 self._failures.failed(
                     spec.hunt_id, fire, now, exc, requested=requested.get(spec.hunt_id)
                 )
+                self._record_failure(spec.hunt_id, fire, exc, time.monotonic() - run_began)
                 reason = self._failures.limit_tripped(spec.hunt_id, now, exc)
                 if reason is not None:
                     self._auto_disable(spec, reason, now)

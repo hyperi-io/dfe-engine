@@ -29,8 +29,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from scalo.logger import logger
+
 from dfe_engine.clickhouse.quoting import quote_identifier
-from dfe_engine.hunts.ch_coordinator import STOP_MARK
+from dfe_engine.hunts.ch_coordinator import (
+    STOP_MARK,
+    ensure_execution_columns,
+    execution_columns_present,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,3 +177,88 @@ def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
         ],
         database=database,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class HuntExecutionRow:
+    """One finished hunt fire, newest facts after the replacing merge."""
+
+    fire: int
+    status: str
+    rows_returned: int
+    error: str
+    execution_time_ms: float
+    cost_window_minutes: int
+    cost_estimate: str
+
+
+def _execution_sql(database: str, *, wide: bool) -> str:
+    """Fires whose latest status is a finished run, newest fire first."""
+    db = quote_identifier(database)
+    if wide:
+        extras = (
+            "argMax(error, updated) AS error, "
+            "argMax(duration_ms, updated) AS duration_ms, "
+            "argMax(cost_window_minutes, updated) AS cost_window_minutes, "
+            "argMax(cost_estimate, updated) AS cost_estimate"
+        )
+    else:
+        extras = (
+            "'' AS error, toFloat64(0) AS duration_ms, "
+            "toUInt32(0) AS cost_window_minutes, '' AS cost_estimate"
+        )
+    return (
+        "SELECT fire, status, rows_written, error, duration_ms, "  # noqa: S608 - quoted database, bound hunt id
+        "cost_window_minutes, cost_estimate FROM ("
+        "SELECT fire, argMax(status, updated) AS status, "
+        "argMax(rows_written, updated) AS rows_written, "
+        f"{extras} FROM {db}.hunt_run WHERE hunt_id = {{hunt:String}} GROUP BY fire"
+        ") WHERE status != 'requested' ORDER BY fire DESC"
+    )
+
+
+def read_hunt_executions(
+    ch: Any, database: str, hunt_id: str, *, limit: int, offset: int
+) -> tuple[list[HuntExecutionRow], int]:
+    """One page of a hunt's finished fires, and how many there are.
+
+    A ``requested`` row is a run-now that has not executed, so it is not a fire
+    here. The page is newest fire first. A table that predates the execution
+    columns still lists the fires, with no error, duration or cost.
+
+    Args:
+        ch: a ClickHouse client exposing ``query``.
+        database: the data database the coordination tables live in.
+        hunt_id: the hunt whose fires to list.
+        limit: rows in this page.
+        offset: finished fires to skip.
+    """
+    try:
+        ensure_execution_columns(ch, database)
+    except Exception as exc:
+        logger.warning("hunt execution columns were not added", hunt=hunt_id, error=str(exc))
+    wide = execution_columns_present(ch, database)
+    sql = _execution_sql(database, wide=wide)
+    parameters = {"hunt": hunt_id}
+    total_rows = ch.query(
+        "SELECT count() FROM (" + sql + ") AS fires",  # noqa: S608 - the statement is built above
+        parameters=parameters,
+    ).result_rows
+    total = int(total_rows[0][0]) if total_rows else 0
+    rows = ch.query(
+        sql + " LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
+        parameters={**parameters, "limit": limit, "offset": offset},
+    ).result_rows
+    executions = [
+        HuntExecutionRow(
+            fire=int(row[0]),
+            status=str(row[1]),
+            rows_returned=int(row[2]),
+            error=str(row[3] or ""),
+            execution_time_ms=float(row[4] or 0),
+            cost_window_minutes=int(row[5] or 0),
+            cost_estimate=str(row[6] or ""),
+        )
+        for row in rows
+    ]
+    return executions, total

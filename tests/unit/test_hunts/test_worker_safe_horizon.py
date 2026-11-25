@@ -87,7 +87,7 @@ class _Coordinator:
             raise DatabaseError("Code: 210. NETWORK_ERROR")
         self.marks[mark] = value
 
-    def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
+    def record_run(self, hunt_id: str, fire: int, rows_written: int, **_extra: object) -> None:
         pass
 
 
