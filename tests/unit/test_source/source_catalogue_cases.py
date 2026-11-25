@@ -44,7 +44,12 @@ CISCO_ASA_BODY: dict[str, Any] = {
 
 CISCO_ASA_BEATS_BODY: dict[str, Any] = {
     **CISCO_ASA_BODY,
-    "match": {"field": "data_stream.dataset", "operator": "equals", "value": "cisco_asa.log"},
+    "match": {
+        "any": [
+            {"field": "data_stream.dataset", "operator": "equals", "value": "cisco_asa.log"},
+            {"field": "event.dataset", "operator": "equals", "value": "cisco_asa.log"},
+        ]
+    },
     "from_catalogue_intake": "beats",
 }
 
@@ -65,7 +70,12 @@ COREDNS_LOG_BODY: dict[str, Any] = {
     "source": "coredns-log",
     "display_name": "coredns.log",
     "description": "The log data stream of the Elastic coredns integration.",
-    "match": {"field": "data_stream.dataset", "operator": "equals", "value": "coredns.log"},
+    "match": {
+        "any": [
+            {"field": "data_stream.dataset", "operator": "equals", "value": "coredns.log"},
+            {"field": "event.dataset", "operator": "equals", "value": "coredns.log"},
+        ]
+    },
     "schema": {
         "meta_schema": "meta/elastic/ecs",
         "derived_schema": "derived/coredns/log",
@@ -433,7 +443,12 @@ WRITE_REQUEST_FOR_CASES: list[WriteRequestForCase] = [
             "source": "okta",
             "display_name": "okta.system",
             "description": "The system data stream of the Elastic okta integration.",
-            "match": {"field": "data_stream.dataset", "operator": "equals", "value": "okta.system"},
+            "match": {
+                "any": [
+                    {"field": "data_stream.dataset", "operator": "equals", "value": "okta.system"},
+                    {"field": "event.dataset", "operator": "equals", "value": "okta.system"},
+                ]
+            },
             "schema": {
                 "meta_schema": "meta/elastic/ecs",
                 "derived_schema": "derived/okta/system",
