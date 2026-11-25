@@ -533,7 +533,7 @@ other word:
 | `@source: field` | Copy from source data, with an optional `\| fallback` | `@source: timestamp \| now()` |
 | `@source: first(a/b/c)` | First present field from a list | `@source: first(user_id/uid/id)` |
 | `@renamed: field` | Source field path(s), the hand-written form of `@source` | `@renamed: logoriginal` |
-| `@computed: expr` | A CEL expression producing the value | `@computed: risk_score > 80` |
+| `@computed: expr` | A [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) expression producing the value | `@computed: risk_score > 80` |
 | `@default: value` | Substitute when the field is null or absent | `@default: unknown` |
 | `@skip` | Leave the column out of the insert | `@skip` |
 | `@coerce: category` | Override the type category for coercion | `@coerce: <category>` |

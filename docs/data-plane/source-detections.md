@@ -14,7 +14,7 @@ declared. The source itself is [source.md](source.md).
 
 ## Rules
 
-A rule is one detection condition on a source's table. `POST /api/v1/rules` takes it as a full `SELECT ... FROM <db>.<table> WHERE ...` in `user_sql` (the FROM names the source table), as a `where_clause` (the part after WHERE) on a `source`, or as a structured `condition` on a `source`, one of the three. A CEL filter may be ANDed in beside any of them. The engine stores the WHERE it extracts, the source table and the original SQL, which is the file the hunt runner reads.
+A rule is one detection condition on a source's table. `POST /api/v1/rules` takes it as a full `SELECT ... FROM <db>.<table> WHERE ...` in `user_sql` (the FROM names the source table), as a `where_clause` (the part after WHERE) on a `source`, or as a structured `condition` on a `source`, one of the three. A [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) filter may be ANDed in beside any of them. The engine stores the WHERE it extracts, the source table and the original SQL, which is the file the hunt runner reads.
 
 A save answers 422 `invalid_sql`, with each reason as `{message, position, suggestion}` in `sql_errors`, for a `source` no registered source carries, an empty `where_clause`, a `{...}` placeholder in it (the time window comes from the hunt schedule), a time bound the hunt window replaces, anything past a row filter, a call outside the row, or a condition ClickHouse cannot plan against the source's table. A `_json` path that recent rows of the source never carried comes back as a warning, never a refusal.
 
