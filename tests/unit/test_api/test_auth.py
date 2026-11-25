@@ -503,10 +503,10 @@ class TestMe:
         assert "*" not in data["permissions"]
 
     def test_me_ignores_stale_jwt_when_account_has_no_groups(
-        self, client: TestClient, admin_headers: dict, api_settings
+        self, admin_headers: dict, api_settings, app, client: TestClient
     ):
         # The API refuses an account with no group, and one is left that way when its last group is deleted.
-        client.app.state.account_store.create(
+        app.state.account_store.create(
             "nogrp",
             secrets.token_urlsafe(16),
             email="nogrp@example.com",
@@ -660,10 +660,10 @@ class TestTheHyperdxSessionFields:
         assert me.json()["hyperdx_identity"] == "dfe_org_acme"
 
     def test_a_session_with_no_groups_has_no_identity(
-        self, client: TestClient, admin_headers: dict, api_settings
+        self, admin_headers: dict, api_settings, app, client: TestClient
     ):
         # The API refuses an account with no group, and one is left that way when its last group is deleted.
-        client.app.state.account_store.create(
+        app.state.account_store.create(
             "hdx-nogrp",
             secrets.token_urlsafe(16),
             email="hdx-nogrp@example.com",

@@ -317,7 +317,7 @@ ORG_ADMIN_ACCOUNTS_CASES: list[OrgAdminAccountsCase] = [
     },
     {
         "id": "creating_a_root_account_is_refused",
-        "body": _new_account(groups=[], org=""),
+        "body": _new_account(groups=["acme-viewers"], org=""),
         "expected_code": "forbidden",
         "expected_status": 403,
         "method": "POST",
