@@ -318,7 +318,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 |---|---|
 | `_source` label | unique, and `[a-z]([a-z0-9-]*[a-z0-9])?` up to 40 chars |
 | match rule | no conflict across non-disabled sources (an identical match or `when`). A dormant source HOLDS its match, only disabling releases it |
-| match and `when` | compile to rows scalo.rules accepts under the receiver's CEL Fast profile, at most 32 of them, else 422 `invalid_rule` with each problem's field and span. `always` only on the reserved `main` source |
+| match and `when` | compile to rows scalo.rules accepts under the receiver's [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) Fast profile, at most 32 of them, else 422 `invalid_rule` with each problem's field and span. `always` only on the reserved `main` source |
 | compatibility profiles | each binding names a stored profile, a version it publishes and only opt-in rows it offers, one version of a profile per deployment, and every alias is unique per profile across non-disabled sources (409 `alias_conflict`) |
 | fetcher route | must not name its own source, and compares one field with `equals` |
 | fetcher connector type | one type per source, however many connections it polls. The refusal names the source and the types |

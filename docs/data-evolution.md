@@ -251,7 +251,7 @@ table.
 
 Routing: a source declares the condition that selects its records, as a
 `match` (`key exists`, `key=value` and the other operators, grouped `all` or
-`any`) or as `when`, a CEL Fast condition the receiver evaluates. That condition
+`any`) or as `when`, a [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) Fast condition the receiver evaluates. That condition
 runs against EVERY inbound record, so the CEL Fast profile refuses regex,
 iteration and time functions there.
 

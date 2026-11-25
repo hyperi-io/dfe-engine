@@ -338,7 +338,7 @@ An instance's children sit 4 levels deep under the `deployment` root: drop `depl
 
 ### detection-rules
 
-Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
+Detection rules (hunt SQL and [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md)): `rules` is kept for routing rules under `sources` and `ingest`, so these need a place of their own.
 
 | Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
 |---|---|---|---|---|---|---|---|

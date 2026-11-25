@@ -27,7 +27,7 @@ The engine keeps a destination in two places:
 - The URL and the enabled flag, as JSON `{"url": ..., "enabled": ...}`, in the secrets backend (`settings.secrets`) at `alert-destinations/<name>`. With the `file` provider that is `<secrets.path>/alert-destinations/<name>`, with `aws` it is `<name_prefix>/alert-destinations/<name>`, and with `openbao` it is `alert-destinations/<name>` in the KV mount.
 - The description and owning hunt, one YAML file per destination in `hunts.alert_destinations_dir` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR`). The API lists destinations from this directory, and an empty value turns the API off.
 
-A hunt lists the destinations it wants under `alerts.destinations`, with CEL triggers over `result_count`, the rows the fire wrote:
+A hunt lists the destinations it wants under `alerts.destinations`, with [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) triggers over `result_count`, the rows the fire wrote:
 
 ```yaml
 alerts:

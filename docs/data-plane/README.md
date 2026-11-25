@@ -117,7 +117,7 @@ flowchart TB
 | [schema-sync.md](schema-sync.md) | engine<->loader runtime schema contract |
 | [field-mapping.md](field-mapping.md) | standards translation layer (Sigma / ECS / CIM views) |
 | [sigma.md](sigma.md) | Sigma rule-provider pipeline (feeds -> catalogue -> propagation -> source-views) + query cost leaderboard |
-| [expressions-cel.md](expressions-cel.md) | CEL profile, classifier tiers, SQL transpile |
+| [expressions-cel.md](expressions-cel.md) | [CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) profile, classifier tiers, SQL transpile |
 | [query-api.md](query-api.md) | query API surface, and the [in-image Python client](query-api-python.md) |
 | [hunt-runner-scaling.md](hunt-runner-scaling.md) | pull-based runner, deterministic-due scaling, keda-shim fail-safe |
 | [hunt-match-delivery.md](hunt-match-delivery.md) | where a hunt match is written, who sees it, alert destinations and what the runner sends |
