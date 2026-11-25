@@ -407,6 +407,44 @@ class SchemaBuilderV2:
 
         return columns
 
+    def effective_meta_schema_version(self, snap: SourceVersion) -> str | None:
+        """The meta-schema version a snapshot's table is built from.
+
+        The snapshot's pin, else the meta-schema file's ``current``: the same choice
+        :meth:`_load_source_columns_for_snapshot` makes. None when the snapshot names
+        no meta schema or the file is unversioned.
+
+        Raises:
+            SchemaLoadError: The meta-schema file does not load.
+        """
+        schema_cfg = snap.effective_schema()
+        if not schema_cfg.meta_schema:
+            return None
+        if schema_cfg.meta_schema_version:
+            return schema_cfg.meta_schema_version
+        meta_path = self.resolve_meta_path(schema_cfg.meta_schema)
+        current = SchemaLoader.load_version_metadata(meta_path).get("current")
+        return str(current) if current else None
+
+    def effective_derived_schema_version(self, snap: SourceVersion) -> str | None:
+        """The derived-schema version a snapshot's table is built from.
+
+        The snapshot's pin, else the derived schema's ``current``: the same choice
+        :meth:`_load_source_columns_for_snapshot` makes. None when the snapshot names
+        no derived schema or the file declares no ``current``.
+
+        Raises:
+            SchemaLoadError: The derived-schema file does not load.
+        """
+        schema_cfg = snap.effective_schema()
+        if not schema_cfg.derived_schema:
+            return None
+        if schema_cfg.derived_schema_version:
+            return schema_cfg.derived_schema_version
+        derived_path = self.resolve_derived_path(schema_cfg.derived_schema)
+        current = SchemaLoader.load_version_metadata(derived_path).get("current")
+        return str(current) if current else None
+
     def _resolve_path(self, path_str: str) -> Path:
         """Resolve a schema file path (relative to schemas_base_dir or absolute)."""
         if self._schemas_base_dir:
