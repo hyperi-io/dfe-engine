@@ -46,6 +46,13 @@ from scalo.logger import logger
 from scalo.resilience import ServiceUnavailable
 from sqlglot.errors import ParseError
 
+from dfe_engine.hunts.rule_rewriter import (
+    SELECT_STAR_WARNING,
+    TIMESTAMP_COLUMNS,
+    RuleRewriter,
+    strip_time_placeholder,
+)
+
 from ..clickhouse.errors import ErrorCategory, parse_code, wrap_ch_error
 from ..clickhouse.quoting import plain_source_name, quote_identifier
 from ..schema.applier import SchemaApplyError, live_columns
@@ -85,7 +92,6 @@ from .rule_json_paths import (
     unseen_warning,
 )
 from .rule_model import Rule, RuleCreate
-from .rule_rewriter import TIMESTAMP_COLUMNS, RuleRewriter, strip_time_placeholder
 from .validator import rule_source
 
 # -- Request / Response models ------------------------------
@@ -464,6 +470,7 @@ class RuleCreationService:
             RuleCreateResult with rule, validation errors, the match-everything
             verdict, cost estimate, and AI context.
         """
+        compiled = not request.user_sql
         try:
             request = self._with_rule_sql(request)
         except RuleConditionError as exc:
@@ -524,6 +531,11 @@ class RuleCreationService:
                 hunt_name=request.hunt_name,
                 source=request.source,
             )
+
+        if compiled:
+            # The engine wrote this SELECT *, so the author has nothing to change.
+            rule.had_select_star = False
+            rule.warnings = [w for w in rule.warnings if w != SELECT_STAR_WARNING]
 
         # The stored WHERE is what the preview and the hunt runner execute, which a
         # transpiled CEL filter reaches without passing through the SQL check above.

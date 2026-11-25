@@ -9,6 +9,7 @@ from dfe_engine.hunts.rule_creation_service import (
     RuleCreateRequest,
     RuleCreationService,
 )
+from dfe_engine.hunts.rule_rewriter import SELECT_STAR_WARNING
 from dfe_engine.hunts.rule_sources import resolved_source, unsourced_rules
 from dfe_engine.settings import DetectionGuardSettings, HuntsSettings
 
@@ -51,6 +52,21 @@ class TestTheStoredShape:
         result = _create(_service(), where_clause="a = 1", cel_filter="b > 2")
 
         assert result.rule.where_clause == "(a = 1) AND (b > 2)"
+
+    @pytest.mark.parametrize(
+        ("fields", "warned"),
+        [
+            ({"where_clause": "severity = 'high'"}, False),
+            ({"cel_filter": 'severity == "high"'}, False),
+            ({"user_sql": "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'"}, True),
+        ],
+        ids=["where", "cel-only", "written-select-star"],
+    )
+    def test_select_star_is_warned_only_when_the_author_wrote_it(self, fields, warned):
+        rule = _create(_service(), **fields).rule
+
+        assert (SELECT_STAR_WARNING in rule.warnings) is warned
+        assert rule.had_select_star is warned
 
     def test_the_where_is_kept_as_written_bar_its_edges(self):
         result = _create(_service(), where_clause="  toString(_json.`user`.name) IN ('A', 'b')  ")
