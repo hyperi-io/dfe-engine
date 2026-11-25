@@ -39348,7 +39348,7 @@
           "dataset": {
             "type": "string",
             "title": "Dataset",
-            "description": "package.data_stream - what a Beats event stamps"
+            "description": "package.data_stream, the dataset a Beats event carries in data_stream.dataset (Elastic Agent) or event.dataset (plain Filebeat)"
           },
           "intakes": {
             "items": {
@@ -45499,6 +45499,39 @@
         ],
         "title": "ManagedBy",
         "description": "Who runs a backing service."
+      },
+      "MatchTest": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "Field the branch reads, a dotted path into the record"
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator",
+            "description": "How the branch compares the field (equals, includes, ...)"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "Value the branch compares with, null for exists"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "operator"
+        ],
+        "title": "MatchTest",
+        "description": "One branch of an any group a sample was filtered on."
       },
       "MeshFacts": {
         "properties": {
@@ -52424,7 +52457,7 @@
               }
             ],
             "title": "Match Field",
-            "description": "Match field rows were filtered on, or null when the source owns its own table (whole-table sample)."
+            "description": "Match field rows were filtered on, or null when the source owns its own table (whole-table sample) or the match is an any group (see match_any)."
           },
           "match_value": {
             "anyOf": [
@@ -52449,6 +52482,14 @@
             ],
             "title": "Match Operator",
             "description": "Match operator used when filtering (equals, exists, includes, ...)."
+          },
+          "match_any": {
+            "items": {
+              "$ref": "#/components/schemas/MatchTest"
+            },
+            "type": "array",
+            "title": "Match Any",
+            "description": "The branches of an any group rows were filtered on: a row is kept when any one holds. Empty for a single test, a whole-table sample or a source that owns its table."
           },
           "columns": {
             "items": {

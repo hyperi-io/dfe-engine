@@ -389,6 +389,17 @@ class SampleRowsResponse(BaseModel):
             )
         )
 
+    class MatchTest(BaseModel):
+        """One branch of an any group a sample was filtered on."""
+
+        field: str = Field(description="Field the branch reads, a dotted path into the record")
+        operator: str = Field(
+            description="How the branch compares the field (equals, includes, ...)"
+        )
+        value: str | None = Field(
+            default=None, description="Value the branch compares with, null for exists"
+        )
+
     source_name: str = Field(description="The source these rows were sampled for.")
     table: str = Field(
         description=(
@@ -401,7 +412,7 @@ class SampleRowsResponse(BaseModel):
         default=None,
         description=(
             "Match field rows were filtered on, or null when the source owns its own table "
-            "(whole-table sample)."
+            "(whole-table sample) or the match is an any group (see match_any)."
         ),
     )
     match_value: str | None = Field(
@@ -411,6 +422,13 @@ class SampleRowsResponse(BaseModel):
     match_operator: str | None = Field(
         default=None,
         description="Match operator used when filtering (equals, exists, includes, ...).",
+    )
+    match_any: list[SampleRowsResponse.MatchTest] = Field(
+        default_factory=list,
+        description=(
+            "The branches of an any group rows were filtered on: a row is kept when any one "
+            "holds. Empty for a single test, a whole-table sample or a source that owns its table."
+        ),
     )
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(
@@ -1667,10 +1685,10 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
 
 
 MATCH_NOT_SAMPLEABLE_MESSAGE = (
-    "Preview is not available for grouped, negated or CEL matches until the source is "
-    "deployed and its own table can be read."
+    "Preview is not available for nested or mixed groups, negated matches or CEL matches "
+    "until the source is deployed and its own table can be read."
 )
-"""Shown as written: the landing-table filter expresses one plain field test only."""
+"""Shown as written: the landing-table filter takes one test or an any group of tests."""
 
 
 def _not_sampleable(source_name: str, match: Literal["group", "negated", "when"]) -> ProblemError:
@@ -1703,24 +1721,47 @@ def _held_read_refused(exc: Exception) -> ProblemError:
 def _match_query_kwargs(match_rule, source_name: str) -> dict[str, Any]:
     """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table).
 
+    A plain test gives ``match_field``, ``match_value`` and ``match_operator``. An any
+    group of plain tests, none negated, gives ``match_any``: one ``(field, value,
+    operator)`` per branch, which the filter ORs. Whole-table reads give no filter.
+
     Raises:
-        ProblemError: 422 ``match_not_sampleable`` for a group or a negated test,
-            which the one-field filter does not express.
+        ProblemError: 422 ``match_not_sampleable`` for a negated test or group, and
+            for a nested or mixed group, which no one-filter form expresses.
     """
     if match_rule is None:
         return {
             "match_field": None,
             "match_value": None,
             "match_operator": "equals",
+            "match_any": None,
         }
-    if not match_rule.is_test:
+    if match_rule.is_test:
+        if match_rule.negate:
+            raise _not_sampleable(source_name, "negated")
+        return {
+            "match_field": match_rule.field,
+            "match_value": match_rule.value if match_rule.operator != "exists" else None,
+            "match_operator": match_rule.operator,
+            "match_any": None,
+        }
+    if match_rule.all:
         raise _not_sampleable(source_name, "group")
     if match_rule.negate:
         raise _not_sampleable(source_name, "negated")
+    tests: list[tuple[str, str | None, str]] = []
+    for part in match_rule.any:
+        if not part.is_test:
+            raise _not_sampleable(source_name, "group")
+        if part.negate:
+            raise _not_sampleable(source_name, "negated")
+        value = part.value if part.operator != "exists" else None
+        tests.append((part.field or "", value, part.operator))
     return {
-        "match_field": match_rule.field,
-        "match_value": match_rule.value if match_rule.operator != "exists" else None,
-        "match_operator": match_rule.operator,
+        "match_field": None,
+        "match_value": None,
+        "match_operator": "equals",
+        "match_any": tests,
     }
 
 
@@ -1928,12 +1969,19 @@ async def sample_source_rows(
         for item in list_promoted_json_fields(schema_columns)
     ]
 
+    match_any = match_kw["match_any"]
     return SampleRowsResponse(
         source_name=source_name,
         table=f"{db}.{target_table}",
         match_field=match_kw["match_field"],
         match_value=match_kw["match_value"],
-        match_operator=match_kw["match_operator"] if match_rule is not None else None,
+        match_operator=(
+            match_kw["match_operator"] if match_rule is not None and match_any is None else None
+        ),
+        match_any=[
+            SampleRowsResponse.MatchTest(field=field, value=value, operator=operator)
+            for field, value, operator in match_any or []
+        ],
         columns=columns,
         rows=rows,
         promoted=promoted,

@@ -22,6 +22,7 @@ Two responsibilities, kept separate so the column maths is pure and testable:
 
 import functools
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -339,13 +340,17 @@ def _match_accessor(match_field: str) -> tuple[str, bool]:
 _NOT_TEXT = "'^(None|Array|JSON|Tuple|Map)'"
 
 # Each receiver test's SQL over the field's text, case-sensitive as the receiver compares.
+# ``{param}`` is the bound parameter the test's value is read from.
 _TEXT_TESTS = {
-    "equals": "{expr} = {{match_value:String}}",
-    "not_equals": "{expr} = {{match_value:String}}",
-    "includes": "position({expr}, {{match_value:String}}) > 0",
-    "starts_with": "startsWith({expr}, {{match_value:String}})",
-    "ends_with": "endsWith({expr}, {{match_value:String}})",
+    "equals": "{expr} = {{{param}:String}}",
+    "not_equals": "{expr} = {{{param}:String}}",
+    "includes": "position({expr}, {{{param}:String}}) > 0",
+    "starts_with": "startsWith({expr}, {{{param}:String}})",
+    "ends_with": "endsWith({expr}, {{{param}:String}})",
 }
+
+MatchTest = tuple[str, str | None, str]
+"""One receiver test as ``(field, value, operator)``, with a None value for exists."""
 
 
 def match_condition(
@@ -373,6 +378,40 @@ def match_condition(
     """
     if not match_field:
         return "", {}
+    return _test_condition(match_field, match_value, match_operator, param="match_value")
+
+
+def any_condition(tests: Sequence[MatchTest]) -> tuple[str, dict[str, Any]]:
+    """SQL condition + params holding where any of *tests* holds: the receiver's ``any`` group.
+
+    Each test follows :func:`match_condition` and binds its value under its own
+    parameter, ``match_value_<index>``, so no value reaches the SQL text. A test with
+    no value to compare is refused, because an empty branch would widen the read to
+    every row.
+
+    Raises:
+        JsonPromotionError: when *tests* is empty, a test names no field, or a test
+            has no value to compare.
+    """
+    if not tests:
+        raise JsonPromotionError("an any group holds no tests to match on")
+    branches: list[str] = []
+    params: dict[str, Any] = {}
+    for index, (test_field, value, operator) in enumerate(tests):
+        if not test_field:
+            raise JsonPromotionError("an any group test names no field")
+        sql, bound = _test_condition(test_field, value, operator, param=f"match_value_{index}")
+        if not sql:
+            raise JsonPromotionError(f"the any group test on {test_field!r} has no value to match")
+        branches.append(f"({sql})")
+        params.update(bound)
+    return " OR ".join(branches), params
+
+
+def _test_condition(
+    match_field: str, match_value: str | None, match_operator: str, *, param: str
+) -> tuple[str, dict[str, Any]]:
+    """One receiver test over *match_field*, its value bound as *param*."""
     sub, in_json = _match_accessor(match_field)
     op = match_operator or "equals"
 
@@ -384,11 +423,26 @@ def match_condition(
 
     if op not in _TEXT_TESTS:
         raise JsonPromotionError(f"Unsupported match operator: {op!r}")
-    test = _TEXT_TESTS[op].format(expr=f"toString({sub})")
+    test = _TEXT_TESTS[op].format(expr=f"toString({sub})", param=param)
     if in_json:
         test = f"{test} AND NOT match(dynamicType({sub}), {_NOT_TEXT})"
-    params = {"match_value": match_value}
+    params = {param: match_value}
     return (f"NOT ({test})" if op == "not_equals" else test), params
+
+
+def _match_sql(
+    *,
+    match_field: str | None,
+    match_value: str | None,
+    match_operator: str,
+    match_any: Sequence[MatchTest] | None,
+) -> tuple[str, dict[str, Any]]:
+    """The filter for a single test, or for an any group when *match_any* is given."""
+    if match_any is not None:
+        if match_field is not None:
+            raise JsonPromotionError("a match is one test or an any group, not both")
+        return any_condition(match_any)
+    return match_condition(match_field, match_value, match_operator=match_operator)
 
 
 def _has_org_id_column(client: Any, db: str, table: str) -> bool:
@@ -417,13 +471,16 @@ def row_filter(
     match_field: str | None = None,
     match_value: str | None = None,
     match_operator: str = "equals",
+    match_any: Sequence[MatchTest] | None = None,
     org_ids: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """SQL condition + params restricting a read of ``db.source`` to one source's rows.
 
-    ``org_ids`` None reads every org's rows. Otherwise the condition also binds
-    ``_org_id`` to those tenant ids, as the sampler does, and a read that cannot be
-    held to them is refused before any row is read.
+    The match is one test (``match_field``, ``match_value``, ``match_operator``) or an
+    any group (``match_any``, see :func:`any_condition`). ``org_ids`` None reads every
+    org's rows. Otherwise the condition also binds ``_org_id`` to those tenant ids, as
+    the sampler does, and a read that cannot be held to them is refused before any
+    row is read.
 
     Raises:
         JsonPromotionScopeError: if ``org_ids`` is empty, or ``db.source`` carries
@@ -431,7 +488,12 @@ def row_filter(
         JsonPromotionError: if the match cannot be expressed, or ClickHouse cannot
             describe the table.
     """
-    match_sql, params = match_condition(match_field, match_value, match_operator=match_operator)
+    match_sql, params = _match_sql(
+        match_field=match_field,
+        match_value=match_value,
+        match_operator=match_operator,
+        match_any=match_any,
+    )
     if org_ids is None:
         return match_sql, params
     if not org_ids:
@@ -460,6 +522,7 @@ def discover_paths(
     match_field: str | None = None,
     match_value: str | None = None,
     match_operator: str = "equals",
+    match_any: Sequence[MatchTest] | None = None,
     paths: list[str] | None = None,
     samples: int | None = None,
     stats: bool = False,
@@ -488,6 +551,7 @@ def discover_paths(
         match_field=match_field,
         match_value=match_value,
         match_operator=match_operator,
+        match_any=match_any,
         org_ids=org_ids,
     )
 
@@ -609,14 +673,15 @@ def sample_rows(
     match_field: str | None = None,
     match_value: str | None = None,
     match_operator: str = "equals",
+    match_any: Sequence[MatchTest] | None = None,
     limit: int = 10,
     org_ids: list[str] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """Random sample rows from ``db.source``, scoped to a source's match rule.
 
-    When ``match_field``/``match_value`` are supplied, rows are restricted to a
-    single source's match rule -- used to sample the shared catch-all landing
-    table where a source's rows are identified by its match. Without them, the
+    When ``match_field``/``match_value`` or ``match_any`` are supplied, rows are
+    restricted to a single source's match rule -- used to sample the shared catch-all
+    landing table where a source's rows are identified by its match. Without them, the
     whole table is sampled. Intended for inspecting real data while authoring a
     match condition or CEL before any path is promoted. ``org_ids`` holds the read
     to those tenant ids (:func:`row_filter`). None reads every org.
@@ -638,6 +703,7 @@ def sample_rows(
         match_field=match_field,
         match_value=match_value,
         match_operator=match_operator,
+        match_any=match_any,
         org_ids=org_ids,
     )
     sql = f"SELECT * FROM {table} "  # noqa: S608 - table quoted by qualified_table, values bound
