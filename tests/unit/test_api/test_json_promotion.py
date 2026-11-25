@@ -556,6 +556,58 @@ class TestSampleRows:
         )
         assert resp.status_code == 404
 
+    def test_a_beats_any_group_samples_rows_matching_either_field(self, app, client, admin_headers):
+        db = app.state.settings.clickhouse.effective_data_database
+        landing = landing_table_name()
+        _registries["source"].save_source(
+            Source.model_validate(
+                {
+                    "source": "cisco-asa-beats",
+                    "match": {
+                        "any": [
+                            {
+                                "field": "data_stream.dataset",
+                                "operator": "equals",
+                                "value": "cisco_asa.log",
+                            },
+                            {
+                                "field": "event.dataset",
+                                "operator": "equals",
+                                "value": "cisco_asa.log",
+                            },
+                        ]
+                    },
+                }
+            )
+        )
+        filebeat_row = {"event": {"dataset": "cisco_asa.log"}}
+        ch = _SampleClient(columns=["_json"], rows=[(filebeat_row,)])
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+
+        resp = client.get("/api/v1/schemas/cisco-asa-beats/sample-rows", headers=admin_headers)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["table"] == f"{db}.{landing}"
+        assert body["match_field"] is None
+        assert body["match_value"] is None
+        assert body["match_operator"] is None
+        assert body["match_any"] == [
+            {"field": "data_stream.dataset", "operator": "equals", "value": "cisco_asa.log"},
+            {"field": "event.dataset", "operator": "equals", "value": "cisco_asa.log"},
+        ]
+        assert body["rows"] == [{"_json": filebeat_row}]
+        sql, params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
+        # One OR of the two field tests, each value bound by its own parameter.
+        assert ") OR (" in sql
+        assert "`data_stream.dataset`" in sql
+        assert "`event.dataset`" in sql
+        assert "cisco_asa.log" not in sql
+        assert params["match_value_0"] == "cisco_asa.log"
+        assert params["match_value_1"] == "cisco_asa.log"
+
     @pytest.mark.parametrize(
         ("origin", "expected"),
         [
@@ -563,12 +615,50 @@ class TestSampleRows:
                 {
                     "match": {
                         "any": [
-                            {"field": "data_stream.dataset", "value": "cisco_ios.log"},
-                            {"field": "data_stream.dataset", "value": "cisco_ios.debug"},
+                            {"all": [{"field": "data_stream.dataset", "value": "cisco_ios.log"}]},
+                            {"all": [{"field": "data_stream.dataset", "value": "cisco_ios.debug"}]},
                         ]
                     }
                 },
                 "group",
+            ),
+            (
+                {
+                    "match": {
+                        "any": [
+                            {"field": "data_stream.dataset", "value": "cisco_ios.log"},
+                            {"all": [{"field": "agent.type", "value": "filebeat"}]},
+                        ]
+                    }
+                },
+                "group",
+            ),
+            (
+                {
+                    "match": {
+                        "any": [
+                            {"field": "data_stream.dataset", "value": "cisco_ios.log"},
+                            {"field": "data_stream.dataset", "value": "cisco_ios.debug"},
+                        ],
+                        "negate": True,
+                    }
+                },
+                "negated",
+            ),
+            (
+                {
+                    "match": {
+                        "any": [
+                            {
+                                "field": "data_stream.dataset",
+                                "value": "cisco_ios.log",
+                                "negate": True,
+                            },
+                            {"field": "data_stream.dataset", "value": "cisco_ios.debug"},
+                        ]
+                    }
+                },
+                "negated",
             ),
             (
                 {
@@ -583,7 +673,14 @@ class TestSampleRows:
             ),
             ({"when": "data_stream.dataset == 'cisco_ios.log'"}, "when"),
         ],
-        ids=["group", "negated", "when"],
+        ids=[
+            "nested-groups",
+            "mixed-test-and-group",
+            "negated-group",
+            "negated-branch",
+            "negated",
+            "when",
+        ],
     )
     def test_a_condition_no_table_filter_holds_is_refused_before_any_query(
         self, client: TestClient, admin_headers, origin, expected
@@ -598,8 +695,8 @@ class TestSampleRows:
         assert body["code"] == "match_not_sampleable"
         # The console shows the message as written.
         assert body["detail"] == (
-            "Preview is not available for grouped, negated or CEL matches until the source "
-            "is deployed and its own table can be read."
+            "Preview is not available for nested or mixed groups, negated matches or CEL "
+            "matches until the source is deployed and its own table can be read."
         )
         assert body.items() >= {"source": "cisco-ios", "match": expected}.items()
 

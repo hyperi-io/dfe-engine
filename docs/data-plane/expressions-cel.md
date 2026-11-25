@@ -1,6 +1,6 @@
 # DFE Expression Language -- CEL
 
-DFE uses **CEL (Common Expression Language)** for conditions across the Python engine, the Rust services and the CLI. CEL is not Turing-complete: no loops, no recursion, no side effects, so every expression terminates. An expression is compiled once and evaluated against every row.
+DFE uses **[CEL](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md) (Common Expression Language)** for conditions across the Python engine, the Rust services and the CLI. CEL is not Turing-complete: no loops, no recursion, no side effects, so every expression terminates. An expression is compiled once and evaluated against every row.
 
 | Language | Package | Notes |
 |----------|---------|-------|
@@ -11,7 +11,7 @@ scalo-rs's `Cargo.toml` and scalo-py's `pyproject.toml` carry the versions.
 
 References:
 
-- [CEL Specification](https://github.com/google/cel-spec)
+- [CEL Specification](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md)
 - [CEL Overview](https://cel.dev/overview/cel-overview)
 - [cel crate](https://crates.io/crates/cel)
 - [Python CEL package](https://pypi.org/project/common-expression-language/)
