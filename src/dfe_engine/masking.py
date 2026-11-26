@@ -72,9 +72,10 @@ variable holding the password. No name scalo lists ends in one of these.
 """
 
 SHOWN_ENDINGS: frozenset[tuple[str, ...]] = frozenset(
-    {("client", "auth"), ("private", "key", "id")}
+    {("client", "auth"), ("private", "key", "id"), ("pin", "sha", "256")}
 )
-"""Name endings that hold a setting: the TLS client-auth mode, and the public id of a key."""
+"""Name endings that hold a setting: the TLS client-auth mode, the public id of a key, and a
+TLS ``pin_sha256``, the hash of a peer's public key."""
 
 OVERMATCHED_WORDS = frozenset({"mapping", "mappings", "oauth", "unauthenticated"})
 """Words that hold a credential word and are not one, so a name is judged without them.

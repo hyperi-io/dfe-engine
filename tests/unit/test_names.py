@@ -80,7 +80,11 @@ def test_every_store_object_is_created_under_exactly_the_store_names(name, accep
     assert _accepted(lambda: CreateRoleRequest(name=name, permissions=[])) is accepted
     assert _accepted(lambda: CreateGroupRequest(name=name, roles=[])) is accepted
     assert (
-        _accepted(lambda: CreateAccountRequest(name="Test User", password=_PASSWORD, username=name))
+        _accepted(
+            lambda: CreateAccountRequest(
+                groups=["dfe-viewers"], name="Test User", password=_PASSWORD, username=name
+            )
+        )
         is accepted
     )
     assert _accepted(lambda: CreateAPIKeyRequest(name=name)) is accepted

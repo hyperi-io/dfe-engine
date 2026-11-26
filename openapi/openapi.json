@@ -1143,10 +1143,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Exact match on the OIDC provider name last used to log the account in",
+              "description": "Exact match on an OIDC provider the account signs in through: its own, or one with a sign-in linked to it",
               "title": "Oidc Id"
             },
-            "description": "Exact match on the OIDC provider name last used to log the account in"
+            "description": "Exact match on an OIDC provider the account signs in through: its own, or one with a sign-in linked to it"
           },
           {
             "name": "org",
@@ -2905,7 +2905,7 @@
           "Groups"
         ],
         "summary": "Create Group",
-        "description": "Create a new RBAC group at a scope.",
+        "description": "Create a new system-wide RBAC group.",
         "operationId": "auth.groups.create",
         "parameters": [
           {
@@ -3377,7 +3377,7 @@
           "Groups"
         ],
         "summary": "Delete Group",
-        "description": "Delete a group (checked at the group's scope).",
+        "description": "Delete a group and drop its members from it (checked at the group's scope).",
         "operationId": "auth.groups.delete",
         "parameters": [
           {
@@ -4654,20 +4654,6 @@
         "summary": "Create Role",
         "description": "Create a new RBAC role granting no more than the caller holds.",
         "operationId": "auth.roles.create",
-        "parameters": [
-          {
-            "name": "X-DFE-Reauth",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "The grant POST /auth/reauth returned for this change",
-              "default": "",
-              "title": "X-Dfe-Reauth"
-            },
-            "description": "The grant POST /auth/reauth returned for this change"
-          }
-        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -6565,6 +6551,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "requestBody": {
@@ -6666,6 +6664,18 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           }
         ],
         "responses": {
@@ -7022,6 +7032,18 @@
             "description": "Validate and report the change without committing it"
           },
           {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          },
+          {
             "name": "If-Match",
             "in": "header",
             "required": false,
@@ -7181,6 +7203,18 @@
             "description": "Validate and report the change without committing it"
           },
           {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          },
+          {
             "name": "If-Match",
             "in": "header",
             "required": false,
@@ -7323,6 +7357,18 @@
               "title": "Dry Run"
             },
             "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           },
           {
             "name": "If-Match",
@@ -15492,15 +15538,29 @@
         "summary": "Put Retention",
         "description": "Store the override in the deploy repo and return, leaving the tables to a background pass.\n\nThe pass brings the engine's own tables and every deployed source's table to the\nstored value with ``ALTER TABLE ... MODIFY TTL`` (or ``REMOVE TTL`` for 0). A table\nthat declares its own TTL is left alone. The pass runs again until every table\nhas it, so a ClickHouse that is down when the value is stored gets it once it is\nback, and a restart does not lose it.",
         "operationId": "system.retention.apply",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RetentionUpdate"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -15682,7 +15742,7 @@
           "System"
         ],
         "summary": "Put Organisation",
-        "description": "Name a registered, enabled org as yours, the organisation running this deployment.\n\n``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this\nis a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,\nelse that file under the config directory.",
+        "description": "Name a registered, enabled org as yours, the organisation running this deployment.\n\n``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this\nis a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,\nelse that file under the config directory. The apps then recompile, stamping its\nfirst tenant id on every record that names no org.",
         "operationId": "system.organisation.apply",
         "parameters": [
           {
@@ -15696,6 +15756,18 @@
               "title": "Dry Run"
             },
             "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
           },
           {
             "name": "If-Match",
@@ -15928,15 +16000,29 @@
         "summary": "Patch Defaults",
         "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed.\nThis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and returns, and the same background pass as PUT /retention\napplies it.",
         "operationId": "system.defaults.update",
+        "parameters": [
+          {
+            "name": "X-DFE-Reauth",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "The grant POST /auth/reauth returned for this change",
+              "default": "",
+              "title": "X-Dfe-Reauth"
+            },
+            "description": "The grant POST /auth/reauth returned for this change"
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SystemDefaultsPatch"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -37529,6 +37615,12 @@
             "description": "The display name of the org the account is bound to, which for a root account is your org, else that org's name when it has none. Empty while it is bound to none.",
             "default": ""
           },
+          "org_enabled": {
+            "type": "boolean",
+            "title": "Org Enabled",
+            "description": "False while the account's org is disabled, which refuses its sign-in whatever the account's own state",
+            "default": true
+          },
           "external": {
             "type": "boolean",
             "title": "External",
@@ -37578,6 +37670,14 @@
             "description": "True until the account replaces an issued password. The account's own read reports no groups while it is set, as its session holds none.",
             "default": false
           },
+          "linked_groups": {
+            "items": {
+              "$ref": "#/components/schemas/LinkedGroupResponse"
+            },
+            "type": "array",
+            "title": "Linked Groups",
+            "description": "The groups in groups held only through an IdP sign-in, each with its provider, so they change with what the IdP asserts rather than with a membership write"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -37585,6 +37685,12 @@
           "updated_at": {
             "type": "string",
             "title": "Updated At"
+          },
+          "last_login_at": {
+            "type": "string",
+            "title": "Last Login At",
+            "description": "When the account last signed in, by password or through an identity provider, empty if it never has",
+            "default": ""
           }
         },
         "type": "object",
@@ -39348,7 +39454,7 @@
           "dataset": {
             "type": "string",
             "title": "Dataset",
-            "description": "package.data_stream - what a Beats event stamps"
+            "description": "package.data_stream, the dataset a Beats event carries in data_stream.dataset (Elastic Agent) or event.dataset (plain Filebeat)"
           },
           "intakes": {
             "items": {
@@ -40965,8 +41071,9 @@
               "type": "string"
             },
             "type": "array",
+            "minItems": 1,
             "title": "Groups",
-            "description": "Group memberships"
+            "description": "Group memberships, at least one: an account holds its roles only through its groups"
           },
           "phone": {
             "type": "string",
@@ -40991,6 +41098,7 @@
         "required": [
           "username",
           "password",
+          "groups",
           "name"
         ],
         "title": "CreateAccountRequest",
@@ -41074,12 +41182,6 @@
             "description": "Human-readable description",
             "default": ""
           },
-          "scope": {
-            "type": "string",
-            "title": "Scope",
-            "description": "'system' (roles bind system-wide) or 'org:<name>' (group exists only inside that org; roles bind at that org's scope)",
-            "default": "system"
-          },
           "members": {
             "items": {
               "type": "string"
@@ -41101,13 +41203,14 @@
             "default": ""
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
           "roles"
         ],
         "title": "CreateGroupRequest",
-        "description": "Body for creating a group."
+        "description": "Body for creating a system-wide group."
       },
       "CreateInstanceRequest": {
         "properties": {
@@ -42209,7 +42312,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the records belong to; null is the unassigned tenant"
+            "description": "The registered org the records belong to. Null is your org, or the unassigned tenant while none is named"
           },
           "allowed_org_ids": {
             "items": {
@@ -45135,6 +45238,32 @@
         "title": "LinkStatusModel",
         "description": "A link, with how the content in the file set compares to the artefact."
       },
+      "LinkedGroupResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "The provider whose assertion links the group"
+          },
+          "provider_type": {
+            "type": "string",
+            "title": "Provider Type",
+            "description": "The provider's type (google, entra_id, okta or generic), empty once it is no longer registered",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "LinkedGroupResponse",
+        "description": "A group an account holds only through an IdP sign-in."
+      },
       "LinkedIdentityResponse": {
         "properties": {
           "key": {
@@ -45499,6 +45628,39 @@
         ],
         "title": "ManagedBy",
         "description": "Who runs a backing service."
+      },
+      "MatchTest": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "Field the branch reads, a dotted path into the record"
+          },
+          "operator": {
+            "type": "string",
+            "title": "Operator",
+            "description": "How the branch compares the field (equals, includes, ...)"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "Value the branch compares with, null for exists"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "operator"
+        ],
+        "title": "MatchTest",
+        "description": "One branch of an any group a sample was filtered on."
       },
       "MeshFacts": {
         "properties": {
@@ -50012,9 +50174,12 @@
         "enum": [
           "account",
           "api_key",
+          "credential",
           "group",
+          "org",
           "provider",
-          "role"
+          "role",
+          "setting"
         ]
       },
       "ReauthRequest": {
@@ -52424,7 +52589,7 @@
               }
             ],
             "title": "Match Field",
-            "description": "Match field rows were filtered on, or null when the source owns its own table (whole-table sample)."
+            "description": "Match field rows were filtered on, or null when the source owns its own table (whole-table sample) or the match is an any group (see match_any)."
           },
           "match_value": {
             "anyOf": [
@@ -52449,6 +52614,14 @@
             ],
             "title": "Match Operator",
             "description": "Match operator used when filtering (equals, exists, includes, ...)."
+          },
+          "match_any": {
+            "items": {
+              "$ref": "#/components/schemas/MatchTest"
+            },
+            "type": "array",
+            "title": "Match Any",
+            "description": "The branches of an any group rows were filtered on: a row is kept when any one holds. Empty for a single test, a whole-table sample or a source that owns its table."
           },
           "columns": {
             "items": {
@@ -55200,7 +55373,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the pipeline's records belong to. Unset is the unassigned tenant. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+            "description": "The registered org the pipeline's records belong to. Unset is your org, or the unassigned tenant while none is named. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
           },
           "allowed_org_ids": {
             "items": {
@@ -55265,7 +55438,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is the unassigned tenant"
+            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is your org, or the unassigned tenant while none is named"
           }
         },
         "type": "object",
@@ -56216,7 +56389,7 @@
               }
             ],
             "title": "Org",
-            "description": "The registered org the pipeline's records belong to. Unset is the unassigned tenant. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+            "description": "The registered org the pipeline's records belong to. Unset is your org, or the unassigned tenant while none is named. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
           },
           "allowed_org_ids": {
             "items": {
@@ -58111,14 +58284,15 @@
                 "items": {
                   "type": "string"
                 },
-                "type": "array"
+                "type": "array",
+                "minItems": 1
               },
               {
                 "type": "null"
               }
             ],
             "title": "Groups",
-            "description": "Replace group memberships"
+            "description": "Replace group memberships, with at least one"
           },
           "enabled": {
             "anyOf": [

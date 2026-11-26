@@ -40,7 +40,7 @@ from dfe_engine.orgs.models import (
     HomeOrgError,
     Org,
 )
-from dfe_engine.orgs.tenant_scope import colliding_org
+from dfe_engine.orgs.tenant_scope import colliding_org, collision_refusal
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump, yaml_load_cached
 
 if TYPE_CHECKING:
@@ -149,13 +149,14 @@ class OrgRegistry:
             raise ValueError(UNASSIGNED_REFUSAL)
         other = colliding_org(name, org_ids or [], self.list())
         if other is not None:
-            raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
+            raise ValueError(collision_refusal(name=name, org_ids=org_ids or [], other=other)[0])
 
         now = _now()
         org = Org(
             name=name,
             display_name=display_name,
-            org_ids=org_ids or [],
+            # An org always carries an ID: with none given, its name.
+            org_ids=org_ids or [name],
             enabled=True,
             created_at=now,
             updated_at=now,
@@ -221,13 +222,13 @@ class OrgRegistry:
         if isinstance(new_org_ids, list):
             other = colliding_org(name, new_org_ids, self.list())
             if other is not None:
-                raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
+                raise ValueError(collision_refusal(name=name, org_ids=new_org_ids, other=other)[0])
 
         update_dict: dict[str, object] = {}
         if "display_name" in fields:
             update_dict["display_name"] = fields["display_name"]
         if "org_ids" in fields:
-            update_dict["org_ids"] = fields["org_ids"]
+            update_dict["org_ids"] = fields["org_ids"] or [name]
         if "enabled" in fields:
             update_dict["enabled"] = fields["enabled"]
         if "hyperdx_team_id" in fields:

@@ -16,12 +16,7 @@ POST   /api/v1/auth/groups/{name}/members            -> Add member
 DELETE /api/v1/auth/groups/{name}/members/{username}  -> Remove member
 DELETE /api/v1/auth/groups/{name}                    -> Delete group
 
-Groups carry a scope: ``system`` (spans orgs) or ``org:<name>``
-(exists only inside that org). Checks run at the group's scope, so a
-system-scope group:write holder manages everything, while an org-scope
-group:write holder manages only that org's groups. Visibility follows
-the same rule, plus members always see the groups they belong to --
-org-local groups are never listed outside their org.
+A group made here is system-wide. Only each org's admin and viewer pair, which the org registry makes, is scoped to an org. Checks run at the group's scope, and a caller sees a group it may read at that scope plus every group it belongs to, so an org's pair is never listed outside that org.
 
 A group's ``source_id`` and ``source_provider`` link it to an IdP group: a login asserting that id takes the group's roles, so setting or moving the link needs the role rights adding a member does. No two groups may carry one id, and no group's name may be another group's id either, since an API key resolves a group identifier by name first, then by id. A provider id therefore names one group across every org, so setting or changing a link needs group:write system-wide.
 
@@ -32,10 +27,10 @@ A membership change is mirrored onto a local account's ``groups`` list, never on
 
 import unicodedata
 from collections.abc import Iterable
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.logger import logger
 
@@ -63,7 +58,6 @@ from dfe_engine.auth.groups import (
     GroupExistsError,
     identifier_holder,
     source_id_holder,
-    validate_group_scope,
 )
 from dfe_engine.auth.membership import groups_held_by
 from dfe_engine.auth.models import ORG_ADMIN_ROLE, ungrantable_roles
@@ -72,7 +66,7 @@ from dfe_engine.auth.reauth import grant_target
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 from dfe_engine.names import StoreName
-from dfe_engine.orgs.role_groups import org_role_breach
+from dfe_engine.orgs.role_groups import is_org_role_group, org_role_breach
 from dfe_engine.yaml_utils import YAMLError
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
@@ -97,16 +91,14 @@ _SOURCE_PROVIDER_DESCRIPTION = (
 
 
 class CreateGroupRequest(BaseModel):
-    """Body for creating a group."""
+    """Body for creating a system-wide group."""
+
+    # A body naming a scope is refused rather than stored system-wide, which would widen what it grants.
+    model_config = ConfigDict(extra="forbid")
 
     name: StoreName = Field(description="Unique group name")
     roles: list[str] = Field(description="Roles assigned to all group members")
     description: str = Field("", description="Human-readable description")
-    scope: str = Field(
-        "system",
-        description="'system' (roles bind system-wide) or 'org:<name>' "
-        "(group exists only inside that org; roles bind at that org's scope)",
-    )
     members: list[str] = Field(
         default_factory=list,
         description="Account usernames in this group (local login resolves roles from this list)",
@@ -219,6 +211,17 @@ def _visible_group(request: Request, user, name: str) -> Group:
     ):
         raise _not_found(name)
     return group
+
+
+def _refuse_org_role_group_change(*, group: Group) -> None:
+    """Refuse 409 ``org_role_group`` on a change to an org's admin or viewer group, which changes only with the org and its accounts' roles."""
+    if is_org_role_group(group=group):
+        raise ProblemError(
+            409,
+            f"Group {group.name!r} belongs to org {group.scope_org!r}: it changes only with "
+            "the org and its accounts' roles",
+            code="org_role_group",
+        )
 
 
 def _refuse_org_admin_at_system_scope(*, name: str, roles: Iterable[str], scope: str) -> None:
@@ -526,47 +529,17 @@ def _refuse_last_admin_member_removals(
 # -- Endpoints ------------------------------------------------
 
 
-async def require_new_group_reauth(
-    body: CreateGroupRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
-) -> None:
-    """FastAPI dependency: the caller's re-auth grant for the group the body creates."""
-    target = grant_target(kind="group", name=body.name)
-    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
-
-
-@router.post(
-    "",
-    response_model=GroupResponse,
-    status_code=201,
-    dependencies=[Depends(require_new_group_reauth)],
-)
-async def create_group(
-    body: CreateGroupRequest,
-    user: CurrentUser,
-    request: Request,
-):
-    """Create a new RBAC group at a scope."""
-    from dfe_engine.auth.accounts import AccountStore
+def _refuse_new_group(*, body: CreateGroupRequest, request: Request, user) -> bool:
+    """Raise every refusal a group create answers before it writes, and return whether the caller sees every group."""
     from dfe_engine.auth.groups import GroupStore
-    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
-    try:
-        validate_group_scope(body.scope)
-    except ValueError as exc:
-        raise ProblemError(422, str(exc), code="invalid_scope") from exc
-
-    target = Group(name=body.name, scope=body.scope)
+    target = Group(name=body.name)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(target))
-    _refuse_org_admin_at_system_scope(name=body.name, roles=body.roles, scope=body.scope)
+    _refuse_org_admin_at_system_scope(name=body.name, roles=body.roles, scope=target.scope)
     if body.source_id or body.source_provider:
         _refuse_link_below_system_scope(request, user)
     check_role_assignment(request, user, body.roles, scope_of(target))
 
-    org = target.scope_org
-    org_registry = getattr(request.app.state, "org_registry", None)
-    # With no registry to check against, no org is known to exist.
-    if org and (org_registry is None or org_registry.get(org) is None):
-        raise ProblemError(422, f"Org '{org}' not found", code="invalid_scope")
     changes_source_id, changes_source_provider = _link_changes(
         before=None, source_id=body.source_id, source_provider=body.source_provider
     )
@@ -582,7 +555,6 @@ async def create_group(
     stored = Group(
         name=body.name,
         roles=body.roles,
-        scope=body.scope,
         source_id=body.source_id,
         source_provider=body.source_provider,
     )
@@ -592,7 +564,6 @@ async def create_group(
         request=request,
     )
     store: GroupStore = request.app.state.group_store
-    account_store: AccountStore = request.app.state.account_store
     # Names are unique across every org, so a caller that cannot see every group learns only this.
     unavailable = ProblemError(409, f"Group name '{body.name}' is not available", code="conflict")
     sees_every_group = reads_every_org(request, user, scopes_dict["group_read"])
@@ -604,6 +575,47 @@ async def create_group(
         if sees_every_group:
             raise
         raise unavailable from exc
+    # A taken name is caught here too, though create() still decides a race.
+    if store.get(body.name) is not None:
+        if not sees_every_group:
+            raise unavailable
+        raise ProblemError(409, f"Group '{body.name}' already exists", code="conflict")
+    return sees_every_group
+
+
+async def refuse_new_group(body: CreateGroupRequest, request: Request, user: CurrentUser) -> None:
+    """FastAPI dependency: answer a create's own refusals before its re-auth grant is asked for."""
+    _refuse_new_group(body=body, request=request, user=user)
+
+
+async def require_new_group_reauth(
+    body: CreateGroupRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the group the body creates."""
+    target = grant_target(kind="group", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
+@router.post(
+    "",
+    response_model=GroupResponse,
+    status_code=201,
+    dependencies=[Depends(refuse_new_group), Depends(require_new_group_reauth)],
+)
+async def create_group(
+    body: CreateGroupRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Create a new system-wide RBAC group."""
+    from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+
+    sees_every_group = _refuse_new_group(body=body, request=request, user=user)
+    store: GroupStore = request.app.state.group_store
+    account_store: AccountStore = request.app.state.account_store
+    unavailable = ProblemError(409, f"Group name '{body.name}' is not available", code="conflict")
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(
@@ -611,7 +623,6 @@ async def create_group(
             members=body.members,
             name=body.name,
             roles=body.roles,
-            scope=body.scope,
             source_id=body.source_id,
             source_provider=body.source_provider,
         )
@@ -677,25 +688,35 @@ async def get_group(
     return _response(group, linked_members=linked.get(group.name, []))
 
 
-@router.put("/{name}", response_model=GroupResponse, dependencies=[Depends(require_group_reauth)])
-async def update_group(
-    name: str,
-    body: UpdateGroupRequest,
-    user: CurrentUser,
-    request: Request,
-):
-    """Update group roles, description, members or IdP link (group:write at the group's scope)."""
-    from dfe_engine.auth.accounts import AccountStore
+class _GroupChange(NamedTuple):
+    """A group update that passed its refusals: the stored group and the IdP link it will carry."""
+
+    existing: Group
+    source_id: str
+    source_provider: str
+    changes_source_id: bool
+    changes_source_provider: bool
+
+
+def _refuse_group_update(
+    *, body: UpdateGroupRequest, name: str, request: Request, user
+) -> _GroupChange:
+    """Raise every refusal a group update answers before it writes."""
     from dfe_engine.auth.groups import GroupStore
-    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
-    account_store: AccountStore = request.app.state.account_store
     existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(existing))
     if body.roles is not None:
         _refuse_org_admin_at_system_scope(name=name, roles=body.roles, scope=existing.scope)
     changes_members = body.members is not None and set(body.members) != set(existing.members)
+    changes_roles = (body.roles is not None) and (set(body.roles) != set(existing.roles))
+    changes_description = (body.description is not None) and (
+        body.description != existing.description
+    )
+    # Its IdP link stays writable, so an org's own IdP group can decide who holds the role.
+    if (changes_roles) or (changes_description) or (changes_members):
+        _refuse_org_role_group_change(group=existing)
     source_id = existing.source_id if body.source_id is None else body.source_id
     source_provider = (
         existing.source_provider if body.source_provider is None else body.source_provider
@@ -736,6 +757,53 @@ async def update_group(
         )
         members = body.members if body.members is not None else existing.members
         refuse_org_role_members(group=stored, members=[*members, *linked], request=request)
+    if body.members is not None:
+        kept = list(dict.fromkeys(body.members))
+        # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+        store.protected.check_members_replaced(name, existing.members, kept)
+        _refuse_last_admin_member_removals(
+            request, group_name=name, removed=set(existing.members) - set(kept)
+        )
+    return _GroupChange(
+        changes_source_id=changes_source_id,
+        changes_source_provider=changes_source_provider,
+        existing=existing,
+        source_id=source_id,
+        source_provider=source_provider,
+    )
+
+
+async def refuse_group_update(
+    body: UpdateGroupRequest, name: str, request: Request, user: CurrentUser
+) -> None:
+    """FastAPI dependency: answer an update's own refusals before its re-auth grant is asked for."""
+    _refuse_group_update(body=body, name=name, request=request, user=user)
+
+
+@router.put(
+    "/{name}",
+    response_model=GroupResponse,
+    dependencies=[Depends(refuse_group_update), Depends(require_group_reauth)],
+)
+async def update_group(
+    name: str,
+    body: UpdateGroupRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Update group roles, description, members or IdP link (group:write at the group's scope)."""
+    from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+
+    store: GroupStore = request.app.state.group_store
+    account_store: AccountStore = request.app.state.account_store
+    change = _refuse_group_update(body=body, name=name, request=request, user=user)
+    existing = change.existing
+    source_id, source_provider = change.source_id, change.source_provider
+    changes_source_id = change.changes_source_id
+    changes_source_provider = change.changes_source_provider
+    changes_link = (changes_source_id) or (changes_source_provider)
     update_fields: dict[str, object] = {}
     details: dict[str, object] = {}
     if body.roles is not None:
@@ -766,11 +834,6 @@ async def update_group(
         new_members = set(deduped)
         details["members_added"] = sorted(new_members - old_members)
         details["members_removed"] = sorted(old_members - new_members)
-        # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
-        store.protected.check_members_replaced(name, existing.members, deduped)
-        _refuse_last_admin_member_removals(
-            request, group_name=name, removed=old_members - new_members
-        )
         group = store.update(name, allow_protected=False, **update_fields)
         sync_account_groups_for_membership_change(
             account_store,
@@ -808,6 +871,7 @@ async def add_member(
     account_store: AccountStore = request.app.state.account_store
     existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_add_member"], scope=scope_of(existing))
+    _refuse_org_role_group_change(group=existing)
     if body.username not in existing.members:
         # The new member takes every role the group carries.
         check_role_assignment(request, user, existing.roles, scope_of(existing))
@@ -846,6 +910,7 @@ async def remove_member(
     account_store: AccountStore = request.app.state.account_store
     existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_remove_member"], scope=scope_of(existing))
+    _refuse_org_role_group_change(group=existing)
     if username in existing.members:
         # The member loses every role the group carries.
         check_role_assignment(request, user, existing.roles, scope_of(existing))
@@ -871,16 +936,27 @@ async def delete_group(
     user: CurrentUser,
     request: Request,
 ):
-    """Delete a group (checked at the group's scope)."""
+    """Delete a group and drop its members from it (checked at the group's scope)."""
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
     existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_delete"], scope=scope_of(existing))
+    _refuse_org_role_group_change(group=existing)
     if (existing.members) or (existing.source_id):
         # Its members and every login its source ID answers lose the roles it carries.
         check_role_assignment(
             request=request, roles=existing.roles, scope=scope_of(group=existing), user=user
+        )
+    members = list(existing.members)
+    if members:
+        # The whole removal is checked before any of it is applied, as a member removal is.
+        store.protected.check_member_removal(name, members)
+        _refuse_last_admin_member_removals(request, group_name=name, removed=members)
+        store.update(name, members=[])
+        sync_account_groups_for_membership_change(
+            request.app.state.account_store, name, removed=members
         )
     try:
         store.delete(name)
@@ -890,7 +966,11 @@ async def delete_group(
     audit_group_change(
         admin_id=user.user_id,
         change="deleted",
-        details={"source_id": existing.source_id, "source_provider": existing.source_provider},
+        details={
+            "members": members,
+            "source_id": existing.source_id,
+            "source_provider": existing.source_provider,
+        },
         group_name=name,
     )
 

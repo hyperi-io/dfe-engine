@@ -144,8 +144,8 @@ class TestOrgRoleRule:
         resp = client.request(
             case["method"], case["path"], headers=admin_headers, json=case["body"]
         )
-        code = resp.json().get("code") if resp.status_code == 422 else None
-        expected_code = "org_role_only" if case["expected_status"] == 422 else None
+        code = resp.json().get("code") if resp.status_code in (409, 422) else None
+        expected_code = {409: "org_role_group", 422: "org_role_only"}.get(case["expected_status"])
         assert (resp.status_code, code) == (case["expected_status"], expected_code), resp.text
 
     def test_scim_adds_an_org_account_to_a_group_granting_nothing(

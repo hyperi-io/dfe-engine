@@ -818,7 +818,12 @@ class CatalogueEntryObject(BaseModel):
     description: str | None = Field(default=None, description="What the source carries")
     package: str = Field(description="Vendor integration package it came from")
     data_stream: str = Field(description="Data stream within that package")
-    dataset: str = Field(description="package.data_stream - what a Beats event stamps")
+    dataset: str = Field(
+        description=(
+            "package.data_stream, the dataset a Beats event carries in data_stream.dataset "
+            "(Elastic Agent) or event.dataset (plain Filebeat)"
+        )
+    )
     intakes: list[str] = Field(description="Ways this source's data can reach the platform")
     default_intake: source_catalogue_module.CatalogueIntake = Field(
         description="The intake a create takes when it names none: the first of fetcher, "
@@ -1053,7 +1058,10 @@ class ExternalConnectionModel(BaseModel):
     )
     org: str | None = Field(
         default=None,
-        description="The registered org the records belong to; null is the unassigned tenant",
+        description=(
+            "The registered org the records belong to. Null is your org, or the unassigned "
+            "tenant while none is named"
+        ),
     )
     allowed_org_ids: list[str] = Field(
         description="Further tenant ids a record may keep in _org_id; any other is replaced"
@@ -1321,8 +1329,8 @@ def source_is_readable(fetcher_org: str | None, has_fetcher: bool, held: set[str
     """Whether a source is readable by a caller held to ``held`` (None reads every org).
 
     A source definition is shared by every org, so only a fetcher source, which is
-    bound to one org, belongs to an org. One naming none lands under ``unassigned``, which no org holds,
-    so only a caller reading every org reads it.
+    bound to one org, belongs to an org. One naming none belongs to no org, so only a
+    caller reading every org reads it.
     """
     if held is None or not has_fetcher:
         return True

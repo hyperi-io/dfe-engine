@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from dfe_engine.api.deps import get_clickhouse_client
 from dfe_engine.repository.store import RepositoryStore
 from tests.support.held_callers import caller_in_group, define_role
+from tests.support.org_groups import seed_org_group
 
 ORGS = "/api/v1/orgs"
 GROUPS = "/api/v1/auth/groups"
@@ -77,12 +78,7 @@ def orgs(client: TestClient, app, admin_headers, fake_ch) -> None:
         resp = client.post(ORGS, json=body, headers=admin_headers)
         assert resp.status_code == 201, resp.text
     for org in ("acme", "beta"):
-        resp = client.post(
-            GROUPS,
-            json={"name": f"{org}-team", "roles": ["tenant"], "scope": f"org:{org}"},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 201, resp.text
+        seed_org_group(app=app, name=f"{org}-team", roles=["tenant"], scope=f"org:{org}")
 
 
 def _tenant(app, api_settings, name: str, marker: str = "acme") -> TestClient:
@@ -148,20 +144,6 @@ class TestIngestCredentials:
 
 
 class TestGroups:
-    def test_a_group_cannot_be_created_in_another_org(self, tenant):
-        resp = tenant.post(
-            GROUPS, json={"name": "sneaky", "roles": ["tenant"], "scope": "org:beta"}
-        )
-
-        _refused(resp)
-
-    def test_a_group_in_the_named_org_is_still_created(self, tenant):
-        resp = tenant.post(
-            GROUPS, json={"name": "acme-extra", "roles": ["tenant"], "scope": "org:acme"}
-        )
-
-        assert resp.status_code == 201, resp.text
-
     def test_members_of_another_orgs_group_cannot_be_added_or_removed(self, tenant):
         added = tenant.post(f"{GROUPS}/beta-team/members", json={"username": "someone"})
         removed = tenant.delete(f"{GROUPS}/beta-team/members/someone")
@@ -326,9 +308,7 @@ class TestSystemGroupWrite:
         self, tenant, app, client, admin_headers
     ):
         """The scope check passes at system scope, and the group names no org to join."""
-        created = tenant.post(
-            GROUPS, json={"name": "sys-grp", "roles": ["tenant"], "scope": "system"}
-        )
+        created = tenant.post(GROUPS, json={"name": "sys-grp", "roles": ["tenant"]})
 
         assert created.status_code == 201, created.text
         group = app.state.group_store.get("sys-grp")
@@ -341,7 +321,7 @@ class TestSystemGroupWrite:
 
 
 class TestGroupNameOracle:
-    body = {"name": "beta-team", "roles": ["tenant"], "scope": "org:acme"}
+    body = {"name": "beta-team", "roles": ["tenant"]}
 
     def test_a_fenced_writer_is_not_told_another_orgs_group_exists(self, tenant):
         resp = tenant.post(GROUPS, json=self.body)

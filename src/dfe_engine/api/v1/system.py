@@ -38,11 +38,14 @@ from dfe_engine import __version__
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
+    ReauthGrant,
     Settings,
     SourceReg,
     get_clickhouse_client,
     get_interactive_clickhouse_client,
+    refuse_without_grant,
     require_action,
+    require_retention_setting_reauth,
 )
 from dfe_engine.api.errors import backend_failure, engine_message
 from dfe_engine.api.review import (
@@ -52,10 +55,12 @@ from dfe_engine.api.review import (
     set_review_headers,
 )
 from dfe_engine.api.v1.backing_services import BackingFacts, backing_facts
+from dfe_engine.api.v1.orgs import reconcile_tenancy
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.audit import audit_org_change, audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.reauth import grant_target
 from dfe_engine.git_identity import git_author
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.retention import (
@@ -588,7 +593,11 @@ def get_retention(user: CurrentUser, request: Request, settings: Settings) -> Re
 @router.put(
     "/retention",
     response_model=RetentionStatus,
-    dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
+    dependencies=[
+        Depends(require_action(scopes_dict["system_write"])),
+        WRITE_TURN,
+        Depends(require_retention_setting_reauth),
+    ],
     responses={
         503: {
             "description": "not_configured: gitops is off, so there is nowhere to store the value",
@@ -704,10 +713,25 @@ def get_organisation(user: CurrentUser, request: Request, response: Response) ->
     return _your_organisation(name=name, request=request)
 
 
+async def require_your_org_change_reauth(
+    request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant to change your organisation once one is named, so setup names the first freely."""
+    registry = getattr(request.app.state, "org_registry", None)
+    if (registry is None) or (registry.home_name() is None):
+        return
+    target = grant_target(kind="setting", name="organisation")
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
 @router.put(
     "/organisation",
     response_model=YourOrganisation,
-    dependencies=[Depends(require_action(scopes_dict["org_write"])), WRITE_TURN],
+    dependencies=[
+        Depends(require_action(scopes_dict["org_write"])),
+        WRITE_TURN,
+        Depends(require_your_org_change_reauth),
+    ],
     responses={
         412: {"description": "A precondition failed: your org changed, or one is already named"},
         422: {"description": "unknown_org: no enabled org of that name is registered"},
@@ -727,7 +751,8 @@ def put_organisation(
 
     ``If-None-Match: *`` names the first, or replaces a doc that cannot be read or names an org no longer registered, and ``If-Match`` changes it. With gitops on this
     is a direct commit to the deploy repo's ``governance/settings/organisation.yaml``,
-    else that file under the config directory.
+    else that file under the config directory. The apps then recompile, stamping its
+    first tenant id on every record that names no org.
     """
     store = _home_store(request)
     preconditions.check(_home_etag(_replaceable_home(request, store)))
@@ -740,6 +765,8 @@ def put_organisation(
     store.set(actor=user.user_id, name=body.name)
     audit_org_change(admin_id=user.user_id, change="home", org_name=body.name)
     logger.info("your organisation set via API", actor=user.user_id, org=body.name)
+    # The apps stamp your org's tenant id on a record naming no org, so they recompile now.
+    reconcile_tenancy(request, user)
     return _your_organisation(name=body.name, request=request)
 
 
@@ -859,10 +886,30 @@ def get_defaults(user: CurrentUser, request: Request, settings: Settings) -> Sys
     return _system_defaults(request, settings)
 
 
+async def require_retention_change_reauth(
+    body: SystemDefaultsPatch,
+    request: Request,
+    settings: Settings,
+    user: CurrentUser,
+    reauth: ReauthGrant = "",
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant when the patch changes retention, which can delete rows for good."""
+    if "ttl_days" not in body.model_fields_set:
+        return
+    if body.ttl_days == resolve_state(_optional_gitcrud(request), settings).stored:
+        return
+    target = grant_target(kind="setting", name="retention")
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
 @router.patch(
     "/defaults",
     response_model=SystemDefaults,
-    dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
+    dependencies=[
+        Depends(require_action(scopes_dict["system_write"])),
+        WRITE_TURN,
+        Depends(require_retention_change_reauth),
+    ],
     responses={
         422: {
             "description": "validation_error: a named value cannot be stored",

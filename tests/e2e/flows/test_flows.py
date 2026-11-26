@@ -47,6 +47,7 @@ import pytest
 from tests.e2e.conftest import (
     count_rows,
     drop_table,
+    marker_rows_per_replica,
     poll_until,
     post_batch,
     post_events,
@@ -339,11 +340,15 @@ class TestFlows:
         post_events(e2e, _bodies(shape, marker))
         for expectation in shape.expect:
             table = f"{e2e.ch_db}.{expectation.table}"
-            landed = poll_until(
-                lambda t=table: count_rows(ch_client, t, marker=marker),
-                timeout=LANDING_DEADLINE,
-                desc=f"the marked records in {table}",
-            )
+            try:
+                landed = poll_until(
+                    lambda t=table: count_rows(ch_client, t, marker=marker),
+                    timeout=LANDING_DEADLINE,
+                    desc=f"the marked records in {table}",
+                )
+            except AssertionError as exc:
+                per_replica = marker_rows_per_replica(ch_client, table, marker)
+                raise AssertionError(f"{exc}; marked rows per replica: {per_replica}") from exc
             assert landed > 0
             if expectation.marker:
                 assert (

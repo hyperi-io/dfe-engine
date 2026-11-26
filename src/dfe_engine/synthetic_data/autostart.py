@@ -65,7 +65,7 @@ def start_autostart(
     """Launch a standing stream task per configured pack (none when unset).
 
     A credential *credential* mints here reaches the receiver's bindings at the next
-    apps reconcile, and until then its records land under ``unassigned``.
+    apps reconcile, and until then its records land under the receiver's ``default_org_id``.
     """
     refs = [ref.strip() for ref in settings.autostart_schemas.split(",") if ref.strip()]
     if not refs:

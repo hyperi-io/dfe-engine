@@ -251,6 +251,7 @@ class TestAccountGroupWorkflow:
         resp = e2e_client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "e2e_user",
                 "password": user_password,

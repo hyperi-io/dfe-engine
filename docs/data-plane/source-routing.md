@@ -27,7 +27,7 @@ The engine emits four receiver blocks, plus an `auth` block per bearer listener,
 ```yaml
 routing:
   default_source: main            # _source when no rule matches
-  default_org_id: unassigned      # _org_id an unbound sender's records take
+  default_org_id: acme-prod       # _org_id an unbound sender's records take: your org's first tenant id
   topic_suffix: _land             # Topic derives as {_source}{topic_suffix}
   source_to_topic: {}             # Per-source topic overrides (rarely needed)
   source_org_id: disallow         # ingest.source_org_id: whether a sender's _org_id is kept
@@ -96,9 +96,9 @@ A compatibility profile is versioned data in the dfe-schemas wheel, copied into 
 
 ## Ingest credentials and bearer listeners
 
-`ingest_bindings` holds each ingest credential's orgs as the tenant ids they own, and its default as its default org's first tenant id. Every record's `_org_id` is held to the binding of the credential that sent it, and a credential with no entry may land records under `unassigned` alone. A credential naming an org that is no longer registered is left out for that reason.
+`ingest_bindings` holds each ingest credential's orgs as the tenant ids they own, and its default as its default org's first tenant id. Every record's `_org_id` is held to the binding of the credential that sent it, and a credential with no entry may land records under `default_org_id` alone. A credential naming an org that is no longer registered is left out for that reason.
 
-Each bearer listener runs `mode: bearer` while a credential whose owning org is registered and enabled lists it, other than the engine's own `dfe-engine-synthetic-data` (see `docs/control-plane/synthetic-data.md`), reading the `<id>:<token>` lines the engine writes to `ingest/bearer-tokens/<listener>`. With none it runs `mode: none`, and every record it takes lands under `unassigned`. `secret_source` follows `DFE_ENGINE_SECRETS_PROVIDER`: `vault:<mount>/...:value` for openbao, `aws:<DFE_ENGINE_SECRETS_NAME_PREFIX>/...` for aws, and `file:/var/run/secrets/dfe/ingest-bearer-tokens/<listener>` for file, where the deployment mounts that one directory read-only into the receiver. On Kubernetes that directory is the Secret `DFE_ENGINE_INGEST_BEARER_SECRET` names, which the engine writes one key per listener into. A credential on any other backend fails the compile, naming the setting to change. The receiver re-reads each listener's secret every 60 seconds (`refresh_interval_secs`), so a deleted, disabled or rotated credential's token stops within about a minute, plus the kubelet's sync of a mounted Secret.
+Each bearer listener runs `mode: bearer` while a credential whose owning org is registered and enabled lists it, other than the engine's own `dfe-engine-synthetic-data` (see `docs/control-plane/synthetic-data.md`), reading the `<id>:<token>` lines the engine writes to `ingest/bearer-tokens/<listener>`. With none it runs `mode: none`, and every record it takes lands under `default_org_id`. `secret_source` follows `DFE_ENGINE_SECRETS_PROVIDER`: `vault:<mount>/...:value` for openbao, `aws:<DFE_ENGINE_SECRETS_NAME_PREFIX>/...` for aws, and `file:/var/run/secrets/dfe/ingest-bearer-tokens/<listener>` for file, where the deployment mounts that one directory read-only into the receiver. On Kubernetes that directory is the Secret `DFE_ENGINE_INGEST_BEARER_SECRET` names, which the engine writes one key per listener into. A credential on any other backend fails the compile, naming the setting to change. The receiver re-reads each listener's secret every 60 seconds (`refresh_interval_secs`), so a deleted, disabled or rotated credential's token stops within about a minute, plus the kubelet's sync of a mounted Secret.
 
 On the direct transport there is no topic between stages, so `destinations.sources` keys each source's landing label to a named endpoint -- the loader, because a source with a transform is refused on direct -- and every name it uses is listed beside it as `<name>: {grpc: {endpoint: <uri>}}`. The key is the `_source` the row set, so the one rule evaluation that labels a record also picks where it goes.
 
@@ -119,15 +119,15 @@ with no lookup at all:
 # The compiled loader block (dfe-loader RoutingConfig):
 routing:
   default_db: dfe                 # Database (or per-org via org_routes)
-  default_org_id: unassigned      # Tenant for a record with no _org_id
+  default_org_id: acme-prod       # Tenant for a record with no _org_id
   source_to_table: {}             # Every ACTIVE source: its table
   table_schema_versions: {}       # Each deployed source's table: <deployed version>+<meta version>+<derived version>
   table_schemas: {}               # Each deployed source's table: [{name, type, default_kind, comment}]
 ```
 
-A fetched source's fetcher is compiled with `org_id`, the first tenant id of the org its `fetcher.org` names (`unassigned` when unset), and `default_org_id`.
+A fetched source's fetcher is compiled with `org_id`, the first tenant id of the org its `fetcher.org` names (`default_org_id` when unset), and `default_org_id`.
 
-`default_org_id` is `unassigned` in every app: a record that names no org takes that tenant id, which no org may hold as a name or an org ID, so only a caller reading every org reads those records. With gitops off the engine writes no app overlay, so the apps keep their built-in `default`.
+`default_org_id` is the same in every app: your org's first tenant id, your org being the one `PUT /api/v1/system/organisation` names, so a hunt for your org reads every record that names no org. Naming your org, or changing its org IDs, recompiles the apps. With no org named as yours, or one that is not registered and enabled, it is `unassigned`, which no org may hold as a name or an org ID, so only a caller reading every org reads those records. With gitops off the engine writes no app overlay, so the apps keep their built-in `default`.
 
 Every key the engine emits must exist in dfe-loader's `RoutingConfig`
 (`src/config/pipeline.rs`): serde drops an unknown key without complaint, so an

@@ -120,6 +120,16 @@ def _elastic_agent_event(*, entry: sc.CatalogueEntry) -> dict[str, Any]:
     }
 
 
+def _filebeat_event(*, entry: sc.CatalogueEntry) -> dict[str, Any]:
+    """A plain Filebeat module's envelope for a line of *entry*, with no ``data_stream``."""
+    return {
+        "agent": {"type": "filebeat", "name": "agent-1", "version": "9.5.7"},
+        "event": {"dataset": entry.dataset},
+        "input": {"type": "log"},
+        "message": "a vendor line",
+    }
+
+
 def _label_of(
     *, entry: sc.CatalogueEntry, event: dict[str, Any], intake: sc.CatalogueIntake | None
 ) -> Any:
@@ -373,6 +383,44 @@ class TestElasticAgentRouting:
     ):
         entry = fixture_catalogue.entry(name="cisco-asa")
         assert not _routes_to_label(entry=entry, intake="receiver")
+
+
+BEATS_ENVELOPES = [
+    pytest.param(_elastic_agent_event, id="elastic-agent"),
+    pytest.param(_filebeat_event, id="filebeat-module"),
+]
+
+
+class TestBeatsEnvelopes:
+    """A beats source matches a Beats event whichever dataset field the shipper stamps."""
+
+    @pytest.mark.parametrize("envelope", BEATS_ENVELOPES)
+    @pytest.mark.parametrize("name", ["cisco-asa", "coredns-log", "okta"])
+    def test_the_dataset_labels_the_event(
+        self, fixture_catalogue: sc.SourceCatalogue, envelope, name: str
+    ):
+        entry = fixture_catalogue.entry(name=name)
+        event = envelope(entry=entry)
+        assert _label_of(entry=entry, event=event, intake="beats") == name
+
+    @pytest.mark.parametrize(
+        "event",
+        [
+            pytest.param({"data_stream": {"dataset": "coredns.log"}}, id="elastic-other-dataset"),
+            pytest.param({"event": {"dataset": "coredns.log"}}, id="filebeat-other-dataset"),
+            pytest.param({"event": {"dataset": "cisco_asa.log.debug"}}, id="filebeat-longer"),
+            pytest.param({"event": {"dataset": "x.cisco_asa.log"}}, id="filebeat-prefixed"),
+            pytest.param({"event": {"dataset": "Cisco_ASA.log"}}, id="filebeat-case"),
+            pytest.param({"event": {"dataset": ""}}, id="filebeat-empty"),
+            pytest.param({"event": {"module": "cisco_asa"}}, id="filebeat-module-only"),
+            pytest.param({"message": "a vendor line"}, id="no-dataset"),
+        ],
+    )
+    def test_another_dataset_is_left_for_main(
+        self, fixture_catalogue: sc.SourceCatalogue, event: dict[str, Any]
+    ):
+        entry = fixture_catalogue.entry(name="cisco-asa")
+        assert _label_of(entry=entry, event=event, intake="beats") is None
 
 
 def _hub_event(*, src_type: str) -> dict[str, Any]:

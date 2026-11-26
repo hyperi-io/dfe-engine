@@ -48,11 +48,15 @@ INTAKES: frozenset[str] = frozenset(get_args(CatalogueIntake))
 DEFAULT_ORIGIN_ORDER: tuple[CatalogueIntake, ...] = ("fetcher", "beats", "receiver")
 """A create with no intake takes the first of these the entry lists.
 
-Fetcher leads because the body carries the fetcher block exactly when it is an intake. Beats beats receiver because an entry that lists it is shipped by Elastic Agent, which stamps ``data_stream.dataset`` on every event, and the ``_source`` label a receiver source matches on is one no shipper sends.
+Fetcher leads because the body carries the fetcher block exactly when it is an intake. Beats comes before receiver because an entry that lists it is shipped by Beats, which stamps the dataset on every event, and the ``_source`` label a receiver source matches on is one no shipper sends.
 """
 
-BEATS_DATASET_FIELD = "data_stream.dataset"
-"""Beats and Elastic Agent stamp ``<package>.<data_stream>`` here on every event."""
+BEATS_DATASET_FIELDS: tuple[str, str] = ("data_stream.dataset", "event.dataset")
+"""The fields a Beats event carries its ``<package>.<data_stream>`` dataset in.
+
+Elastic Agent stamps ``data_stream.dataset``. A plain Filebeat module event carries
+``event.dataset`` and no ``data_stream``, so a beats source matches either field.
+"""
 
 TRANSFORM_CAPABILITY_KIND = "transform"
 """The capability-catalogue kind a transform app lists its compiled variants under, named for its engine."""
@@ -233,10 +237,15 @@ def _require_shipper_match(*, match: SourceMatch | None) -> None:
         )
 
 
-def _match_for(*, entry: CatalogueEntry, intake: str, source: str) -> dict[str, str]:
+def _match_for(*, entry: CatalogueEntry, intake: str, source: str) -> dict[str, Any]:
     """The receiver match a non-fetcher intake gives the source."""
     if intake == "beats":
-        return {"field": BEATS_DATASET_FIELD, "operator": "equals", "value": entry.dataset}
+        return {
+            "any": [
+                {"field": field, "operator": "equals", "value": entry.dataset}
+                for field in BEATS_DATASET_FIELDS
+            ]
+        }
     shipper = entry.request.match
     if entry.default_intake == "receiver" and shipper is not None and shipper.field:
         # A receiver-only entry names the field its shipper sends, where any other entry's source label.

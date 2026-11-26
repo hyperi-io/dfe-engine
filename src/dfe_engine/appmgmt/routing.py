@@ -15,8 +15,8 @@ deployed receiver ran on its built-in defaults and every event landed in the
 default topic whatever the sources said.
 
 Tenancy is compiled the same way, from a :class:`~dfe_engine.orgs.tenancy.Tenancy`
-read once per pass: ``unassigned`` as the receiver's, loader's and fetcher's
-default tenant, each fetched source's org into its fetcher, each ingest credential's orgs
+read once per pass: your org's first tenant id (``unassigned`` with none named) as the
+receiver's, loader's and fetcher's default tenant, each fetched source's org into its fetcher, each ingest credential's orgs
 into the receiver's ``ingest_bindings``, and each bearer listener's ``auth`` from
 the credentials that list it.
 
@@ -50,8 +50,12 @@ from typing import TYPE_CHECKING, Any
 from scalo.logger import logger
 
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
-from dfe_engine.orgs.models import UNASSIGNED_ORG_ID
-from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, compile_ingest_bindings
+from dfe_engine.orgs.tenancy import (
+    Tenancy,
+    UnknownOrgError,
+    compile_ingest_bindings,
+    default_tenant_id,
+)
 from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source, SourceTransform
 from dfe_engine.source.reader import SourceReader
@@ -212,7 +216,9 @@ def _receiver(
     tenancy = _required(tenancy, app)
     # Only the keys the engine derives: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
-    routing = compile_receiver_routing(registry, source_org_id=settings.ingest.source_org_id)
+    routing = compile_receiver_routing(
+        registry, source_org_id=settings.ingest.source_org_id, tenancy=tenancy
+    )
     destinations = compile_receiver_destinations(registry, settings)
     blocks: dict[str, Any] = {
         "routing": routing.model_dump(mode="json", exclude_unset=True),
@@ -329,13 +335,15 @@ def _fetcher_route(
 def _fetched_tenant(source: Source, tenancy: Tenancy | None, app: AppDescriptor) -> str:
     """The ``_org_id`` a fetched source's records carry: its org's first tenant id.
 
+    A source naming no org takes the tenant every record naming none takes.
+
     Raises:
         RoutingNotApplicableError: The source names an org that is not registered,
             so the fetcher is not run rather than stamping another org's tenant.
     """
     org = source.fetcher.org if source.fetcher is not None else None
     if org is None:
-        return UNASSIGNED_ORG_ID
+        return default_tenant_id(tenancy)
     try:
         return _required(tenancy, app).tenant_id(org)
     except UnknownOrgError as exc:
@@ -398,7 +406,7 @@ def _fetcher(
         "sources": polls,
         "output": output,
         "org_id": org_id,
-        "default_org_id": UNASSIGNED_ORG_ID,
+        "default_org_id": default_tenant_id(tenancy),
     }
 
 

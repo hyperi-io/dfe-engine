@@ -40,6 +40,6 @@ def make_org_registry(*, home: HomeOrgStore | None, path: Path) -> OrgRegistry:
     return registry
 
 
-def make_tenancy(*, orgs: tuple[Org, ...] = ()) -> Tenancy:
-    """Build an orgs.tenancy.Tenancy."""
-    return Tenancy(orgs=orgs)
+def make_tenancy(*, orgs: tuple[Org, ...] = (), home: str | None = None) -> Tenancy:
+    """Build an orgs.tenancy.Tenancy naming *home* as your org."""
+    return Tenancy(orgs=orgs, home=home)

@@ -84,7 +84,7 @@ class TestAnAccountsGroupsNeedTheirRoles:
         app.state.account_store.create("ops", _PASSWORD, groups=["dfe-admins"])
         app.state.group_store.add_member("dfe-admins", "ops")
 
-        resp = client.put(f"{ACCOUNTS}/ops", json={"groups": []}, headers=mgr)
+        resp = client.put(f"{ACCOUNTS}/ops", json={"groups": ["dfe-viewers"]}, headers=mgr)
 
         assert resp.status_code == 403, resp.text
         assert "ops" in app.state.group_store.get("dfe-admins").members
@@ -274,7 +274,7 @@ class TestDeletingAnAccountNeedsItsGroupsRoles:
 
 
 class TestADeletedAccountLeavesItsGroups:
-    """Membership is keyed by name, so an account recreated under a deleted name must start empty."""
+    """Membership is keyed by name, so an account recreated under a deleted name holds only the groups it is created with."""
 
     @pytest.fixture
     def ghost(self, app) -> None:
@@ -292,11 +292,18 @@ class TestADeletedAccountLeavesItsGroups:
         deleted = client.delete(path, headers=admin_headers)
         recreated = client.post(
             ACCOUNTS,
-            json={"name": "Test User", "username": "ghost", "password": _PASSWORD},
+            json={
+                "groups": ["dfe-viewers"],
+                "name": "Test User",
+                "username": "ghost",
+                "password": _PASSWORD,
+            },
             headers=admin_headers,
         )
 
         assert deleted.status_code == 204, deleted.text
         assert recreated.status_code == 201, recreated.text
         assert "ghost" not in app.state.group_store.get("dfe-admins").members
-        assert _roles(client, _bearer(app, api_settings, "ghost")) == []
+        assert set(_roles(client, _bearer(app, api_settings, "ghost"))) == set(
+            app.state.group_store.get("dfe-viewers").roles
+        )

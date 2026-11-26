@@ -25,11 +25,12 @@ TENANT_ID_PATTERN = r"^[^\s,\x00-\x1f\x7f](?:[^,\x00-\x1f\x7f]*[^\s,\x00-\x1f\x7
 
 TenantId = Annotated[str, StringConstraints(pattern=TENANT_ID_PATTERN)]
 
-# The _org_id every app stamps on a record that names no org. No org may hold it, as a name or a tenant id.
+# The _org_id a record naming no org takes while no org is named as yours. No org may hold it, as a name or a tenant id.
 UNASSIGNED_ORG_ID = "unassigned"
 
 UNASSIGNED_REFUSAL = (
-    f"{UNASSIGNED_ORG_ID!r} is the tenant of records that name no org, and no org may hold it"
+    f"{UNASSIGNED_ORG_ID!r} is the tenant of records that name no org while none is named "
+    "as yours, and no org may hold it"
 )
 
 

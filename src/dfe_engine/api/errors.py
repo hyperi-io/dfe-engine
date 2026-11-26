@@ -187,6 +187,18 @@ def _answer(
     return problem_response(error.problem, error.headers)
 
 
+def _distinct_errors(errors: Sequence[Any]) -> list[Any]:
+    """*errors* once each, since a route whose dependencies also declare its body reports each body error once per declaration."""
+    seen = set()
+    kept = []
+    for error in errors:
+        key = (tuple(error.get("loc", ())), error.get("type"), error.get("msg"))
+        if key not in seen:
+            seen.add(key)
+            kept.append(error)
+    return kept
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     """Answer the engine's domain exceptions as problems. Call it after :func:`scalo.api.install`."""
     from scalo.resilience import ServiceUnavailable
@@ -211,6 +223,9 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation(request: Request, exc: RequestValidationError):
+        distinct = _distinct_errors(exc.errors())
+        if len(distinct) != len(exc.errors()):
+            exc = RequestValidationError(distinct, body=exc.body)
         if is_floor_refusal(exc.errors()):
             count_floor_refusal(request)
         return await problem_validation(request, exc)  # ty: ignore[invalid-await]  # scalo registers an async handler

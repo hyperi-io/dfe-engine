@@ -86,6 +86,16 @@ class TestOrgLifecycleE2E:
         assert resp.status_code == 200, f"Login failed: {resp.text}"
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
+    def _granted(self, client: TestClient, headers: dict[str, str], org: str) -> dict[str, str]:
+        """*headers* with the re-auth grant the admin earns to delete or re-key *org*."""
+        resp = client.post(
+            "/api/v1/auth/reauth",
+            json={"kind": "org", "password": E2E_ADMIN_PASSWORD, "target": org},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        return {**headers, "X-DFE-Reauth": resp.json()["grant"]}
+
     def test_create_org_default_shared_db(self, e2e_client: TestClient):
         """Create org with default settings (shared DB, no dedicated)."""
         headers = self._login(e2e_client)
@@ -116,7 +126,7 @@ class TestOrgLifecycleE2E:
         assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "minimal-org"
-        assert data["org_ids"] == []
+        assert data["org_ids"] == ["minimal-org"]
 
     def test_get_org_after_create(self, e2e_client: TestClient):
         """Get a specific org after creating it."""
@@ -201,7 +211,9 @@ class TestOrgLifecycleE2E:
             json={"name": "delete-test", "org_ids": ["delt"]},
             headers=headers,
         )
-        resp = e2e_client.delete("/api/v1/orgs/delete-test", headers=headers)
+        resp = e2e_client.delete(
+            "/api/v1/orgs/delete-test", headers=self._granted(e2e_client, headers, "delete-test")
+        )
         assert resp.status_code in (200, 204)
 
         resp = e2e_client.get("/api/v1/orgs/delete-test", headers=headers)
@@ -210,7 +222,9 @@ class TestOrgLifecycleE2E:
     def test_delete_org_not_found_returns_404(self, e2e_client: TestClient):
         """DELETE on nonexistent org returns 404."""
         headers = self._login(e2e_client)
-        resp = e2e_client.delete("/api/v1/orgs/ghost-org", headers=headers)
+        resp = e2e_client.delete(
+            "/api/v1/orgs/ghost-org", headers=self._granted(e2e_client, headers, "ghost-org")
+        )
         assert resp.status_code == 404
 
     def test_org_crud_requires_auth(self, e2e_client: TestClient):
@@ -257,7 +271,7 @@ class TestOrgLifecycleE2E:
         resp = e2e_client.put(
             "/api/v1/orgs/full-lifecycle",
             json={"display_name": "Renamed Org", "org_ids": ["fl", "fl-sub", "fl-extra"]},
-            headers=headers,
+            headers=self._granted(e2e_client, headers, "full-lifecycle"),
         )
         assert resp.status_code == 200
         assert resp.json()["display_name"] == "Renamed Org"
@@ -269,7 +283,10 @@ class TestOrgLifecycleE2E:
         assert "fl-extra" in resp.json()["org_ids"]
 
         # Delete
-        resp = e2e_client.delete("/api/v1/orgs/full-lifecycle", headers=headers)
+        resp = e2e_client.delete(
+            "/api/v1/orgs/full-lifecycle",
+            headers=self._granted(e2e_client, headers, "full-lifecycle"),
+        )
         assert resp.status_code in (200, 204)
 
         # Verify gone
