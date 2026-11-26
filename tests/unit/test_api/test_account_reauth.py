@@ -38,6 +38,7 @@ def _account_body(username: str, **fields: object) -> dict[str, object]:
     """A create-account body for a local account called *username*."""
     return {
         "email": f"{username}@example.test",
+        "groups": ["dfe-viewers"],
         "name": username,
         "password": PASSWORD,
         "username": username,
@@ -57,6 +58,35 @@ def _provider_body(name: str) -> dict[str, str]:
 
 
 # Every access change, as (method, path, body). ``{short_token}`` is bob-key's.
+# Writes each route refuses for a reason of its own, which it answers before asking for the grant, as (method, path, body, status).
+REFUSED_FIRST = [
+    pytest.param("POST", ACCOUNTS, _account_body("bob"), 409, id="account-create-taken"),
+    pytest.param("PUT", f"{ACCOUNTS}/bob", {"org": "no-such-org"}, 422, id="account-unknown-org"),
+    pytest.param("POST", GROUPS, {"name": "bob-team", "roles": []}, 409, id="group-create-taken"),
+    pytest.param(
+        "POST",
+        GROUPS,
+        {"name": "half-linked", "roles": [], "source_id": "abc"},
+        422,
+        id="group-create-id-without-provider",
+    ),
+    pytest.param(
+        "PUT", f"{GROUPS}/bob-team", {"roles": ["org_admin"]}, 422, id="group-system-org-admin"
+    ),
+    pytest.param(
+        "PUT",
+        f"{ROLES}/bob-role",
+        {"permissions": ["group:write"], "scoped": True},
+        422,
+        id="role-scoped-write",
+    ),
+    pytest.param("POST", PROVIDERS, _provider_body("bob-idp"), 409, id="provider-create-taken"),
+    pytest.param(
+        "PUT", f"{PROVIDERS}/bob-idp", {"org": "no-such-org"}, 422, id="provider-unknown-org"
+    ),
+    pytest.param("POST", API_KEYS, {"name": "bob-key"}, 409, id="api-key-create-taken"),
+]
+
 WRITES = [
     pytest.param("POST", ACCOUNTS, _account_body("dave"), id="account-create"),
     pytest.param("PUT", f"{ACCOUNTS}/bob", {"name": "Bobby"}, id="account-update"),
@@ -95,9 +125,6 @@ WRITES = [
         {"attributes": {}},
         id="group-sensitive-attributes",
     ),
-    pytest.param(
-        "POST", ROLES, {"name": "new-role", "permissions": ["group:read"]}, id="role-create"
-    ),
     pytest.param("PUT", f"{ROLES}/bob-role", {"permissions": ["group:read"]}, id="role-update"),
     pytest.param("DELETE", f"{ROLES}/bob-role", None, id="role-delete"),
     pytest.param("POST", PROVIDERS, _provider_body("new-idp"), id="provider-create"),
@@ -131,14 +158,6 @@ OPENED = [
     pytest.param("account", "bob", "PUT", f"{ACCOUNTS}/bob", {"name": "Bobby"}, id="account"),
     pytest.param(
         "group", "bob-team", "PUT", f"{GROUPS}/bob-team", {"description": "B"}, id="group"
-    ),
-    pytest.param(
-        "role",
-        "new-role",
-        "POST",
-        ROLES,
-        {"name": "new-role", "permissions": ["group:read"]},
-        id="role-create",
     ),
     pytest.param("role", "bob-role", "DELETE", f"{ROLES}/bob-role", None, id="role"),
     pytest.param(
@@ -218,6 +237,22 @@ class TestAccessReauth:
             method, path.format(short_token=short_token), headers=admin_headers, json=body
         )
         assert (resp.status_code, resp.json().get("code")) == (403, "reauth_required"), resp.text
+
+    @pytest.mark.parametrize(("method", "path", "body", "expected_status"), REFUSED_FIRST)
+    def test_a_write_that_would_be_refused_answers_before_the_grant(
+        self,
+        admin_headers: dict[str, str],
+        client: TestClient,
+        short_token: str,
+        method: str,
+        path: str,
+        body: dict,
+        expected_status: int,
+    ):
+        resp = client.request(method, path, headers=admin_headers, json=body)
+
+        assert resp.status_code == expected_status, resp.text
+        assert resp.json().get("code") != "reauth_required"
 
     @pytest.mark.parametrize(("kind", "target", "method", "path", "body"), OPENED)
     def test_a_grant_for_the_target_opens_it(

@@ -40,7 +40,15 @@ def _sign_in(client: TestClient, username: str) -> dict[str, str]:
 
 
 def _create(client: TestClient, admin_headers: dict[str, str], **fields):
-    body = {"name": "Test User", "username": "alice", "password": PASSWORD, **fields}
+    org = fields.get("org", "")
+    body = {
+        # An org account holds only its own org's groups.
+        "groups": [f"{org}-viewers"] if org else ["dfe-viewers"],
+        "name": "Test User",
+        "username": "alice",
+        "password": PASSWORD,
+        **fields,
+    }
     return client.post(ACCOUNTS, json=body, headers=admin_headers)
 
 
@@ -93,7 +101,11 @@ class TestALocalAccountIsBoundToItsOrg:
     ):
         assert _create(client, admin_headers, org="acme").status_code == 201
 
-        resp = client.put(f"{ACCOUNTS}/alice", json={"org": "globex"}, headers=admin_headers)
+        resp = client.put(
+            f"{ACCOUNTS}/alice",
+            json={"groups": ["globex-viewers"], "org": "globex"},
+            headers=admin_headers,
+        )
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["org"] == "globex"
@@ -117,10 +129,12 @@ def _tenant_viewer(app: FastAPI, client: TestClient, admin_headers, *, org: str,
     """
     if (org) and (set(grants) != {org}):
         app.state.org_registry.home.set(actor="test", name=org)
-    assert _create(client, admin_headers, org=org).status_code == 201
     app.state.group_store.create("tenant-viewers", roles=["org_viewer"], members=["alice"])
     app.state.group_store.update("tenant-viewers", org_ids=grants)
-    app.state.account_store.update("alice", groups=["tenant-viewers"])
+    # The store, since the API would give alice her org's viewer group as well.
+    app.state.account_store.create(
+        "alice", PASSWORD, groups=["tenant-viewers"], name="Test User", org=org
+    )
     return _sign_in(client, "alice")
 
 

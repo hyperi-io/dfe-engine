@@ -430,6 +430,14 @@ class AccountStore:
         self._write(path, account)
         return account
 
+    def record_sign_in(self, username: str) -> None:
+        """Stamp ``last_login_at`` with now and leave ``updated_at``, since a sign-in changes nothing on the account. An unknown username records nothing."""
+        path = self._stored(username)
+        if path is None:
+            return
+        account = self._read(path)
+        self._write(path, account.model_copy(update={"last_login_at": _now()}))
+
     def reset_password(
         self, username: str, new_password: str, *, change_required: bool = False
     ) -> None:

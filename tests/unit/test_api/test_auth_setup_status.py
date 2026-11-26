@@ -409,6 +409,7 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
             user = client.post(
                 "/api/v1/auth/accounts",
                 json={
+                    "groups": ["dfe-viewers"],
                     "name": "Test User",
                     "username": "alexops",
                     "password": secrets.token_urlsafe(16),

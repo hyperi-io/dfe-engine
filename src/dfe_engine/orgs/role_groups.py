@@ -89,6 +89,12 @@ def org_role_groups(*, org: str) -> dict[str, str]:
     return {f"{org}-admins": ORG_ADMIN_ROLE, f"{org}-viewers": ORG_VIEWER_ROLE}
 
 
+def is_org_role_group(*, group: Group) -> bool:
+    """Whether *group* is one of the two groups the org it is tied to carries."""
+    org = group.scope_org
+    return (bool(org)) and (group.name in org_role_groups(org=org))
+
+
 def ensure_org_role_groups(*, group_store: GroupStore, org: str) -> None:
     """Create whichever of *org*'s two groups is missing, tied to *org*."""
     for name, role in org_role_groups(org=org).items():

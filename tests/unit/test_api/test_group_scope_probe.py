@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.settings import DFESettings
 from tests.support.accounts import session_token
+from tests.support.org_groups import seed_org_group
 
 GROUPS = "/api/v1/auth/groups"
 ORGS = "/api/v1/orgs"
@@ -34,19 +35,20 @@ def orgadmin(
         resp = client.post(ORGS, json={"name": org}, headers=admin_headers)
         assert resp.status_code == 201, resp.text
     app.state.account_store.create("orgadmin", "pw-orgadmin-123456")
-    for body in (
-        {"name": "acme-ops", "roles": ["admin"], "scope": "org:acme", "members": ["orgadmin"]},
-        {"name": "acme-eng", "roles": ["data_viewer"], "scope": "org:acme"},
-        {"name": "globex-analysts", "roles": ["data_analyst"], "scope": "org:globex"},
-        {
-            "name": "secops",
-            "roles": ["admin"],
-            "source_id": SYSTEM_SOURCE_ID,
-            "source_provider": "oidc",
-        },
+    for name, roles, members, scope in (
+        ("acme-ops", ["admin"], ["orgadmin"], "org:acme"),
+        ("acme-eng", ["data_viewer"], [], "org:acme"),
+        ("globex-analysts", ["data_analyst"], [], "org:globex"),
     ):
-        resp = client.post(GROUPS, json=body, headers=admin_headers)
-        assert resp.status_code == 201, resp.text
+        seed_org_group(app=app, members=members, name=name, roles=roles, scope=scope)
+    secops = {
+        "name": "secops",
+        "roles": ["admin"],
+        "source_id": SYSTEM_SOURCE_ID,
+        "source_provider": "oidc",
+    }
+    resp = client.post(GROUPS, json=secops, headers=admin_headers)
+    assert resp.status_code == 201, resp.text
     token = session_token(app, api_settings, {"sub": "orgadmin"})
     return {"Authorization": f"Bearer {token}"}
 
@@ -81,7 +83,6 @@ class TestALinkOutsideTheOrgCannotBeProbed:
             body = {
                 "name": name,
                 "roles": [],
-                "scope": "org:acme",
                 "source_id": source_id,
                 "source_provider": "oidc",
             }
@@ -163,18 +164,15 @@ class TestAGroupNameOutsideTheOrgCannotBeProbed:
         self, client: TestClient, orgadmin: dict[str, str]
     ):
         def create(name: str):
-            return client.post(
-                GROUPS, json={"name": name, "roles": [], "scope": "org:acme"}, headers=orgadmin
-            )
+            return client.post(GROUPS, json={"name": name, "roles": []}, headers=orgadmin)
 
         group_name = create("globex-analysts")
         link_id = create(SYSTEM_SOURCE_ID)
+        free = create("never-held-anywhere")
 
-        assert group_name.status_code == link_id.status_code == 409
-        assert group_name.json()["code"] == link_id.json()["code"] == "conflict"
+        assert _answer(group_name)[:2] == _answer(link_id)[:2] == _answer(free)[:2]
+        assert group_name.status_code == 403, group_name.text
         assert "source_id" not in link_id.text
-        assert group_name.json()["detail"] == "Group name 'globex-analysts' is not available"
-        assert link_id.json()["detail"] == f"Group name '{SYSTEM_SOURCE_ID}' is not available"
 
 
 class TestAGroupOutsideTheOrgReadsAsMissing:

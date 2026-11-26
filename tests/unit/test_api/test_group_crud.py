@@ -470,7 +470,7 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
         assert "crosser" not in app.state.group_store.get("acme-ops").members
         created = client.post(
             "/api/v1/auth/groups",
-            json={"name": "acme-own", "roles": ["admin"], "scope": "org:acme"},
+            json={"name": "acme-own", "roles": ["admin"]},
             headers=headers,
         )
         assert created.status_code == 403, created.text
@@ -970,29 +970,20 @@ class TestAMembershipWriteLeavesAnIdpAccountsOwnList:
     @pytest.fixture
     def callers(
         self,
-        admin_headers: dict[str, str],
         api_settings: DFESettings,
         app: FastAPI,
-        client: TestClient,
         operator_headers: dict[str, str],
     ) -> dict[str, dict[str, str]]:
-        """Link dfe-admins, make jane Entra-owned and orgop acme's infra_admin. Return each caller's headers."""
+        """Link dfe-admins and make jane Entra-owned. Return each caller's headers."""
         app.state.group_store.update(
             name="dfe-admins", source_id=ADMINS_SOURCE_ID, source_provider="entra"
         )
         app.state.account_store.create(groups=["dfe-viewers"], password="", username=IDP_ACCOUNT)
         app.state.account_store.update(external=True, source_provider="entra", username=IDP_ACCOUNT)
         app.state.group_store.add_member(group_name="dfe-infra", username=IDP_ACCOUNT)
-        org = client.post("/api/v1/orgs", headers=admin_headers, json={"name": "acme"})
-        assert org.status_code == 201, org.text
-        app.state.account_store.create(password=secrets.token_urlsafe(16), username="orgop")
-        app.state.group_store.create(
-            members=["orgop"], name="acme-infra", roles=["infra_admin"], scope="org:acme"
-        )
         return {
             "jane": _bearer(app, api_settings=api_settings, subject=IDP_ACCOUNT),
             "operator": operator_headers,
-            "orgop": _bearer(app, api_settings=api_settings, subject="orgop"),
         }
 
     @pytest.mark.parametrize(
@@ -1618,7 +1609,13 @@ class TestAGroupChangeIsAudited:
         deleted = [event for event in audit_events if event["event"] == "auth.group.deleted"]
         assert [
             (event["admin_id"], event["group_name"], event["details"]) for event in deleted
-        ] == [("admin", "audited", {"source_id": "Audited", "source_provider": "oidc"})]
+        ] == [
+            (
+                "admin",
+                "audited",
+                {"members": [], "source_id": "Audited", "source_provider": "oidc"},
+            )
+        ]
 
     def test_a_scim_delete_records_the_link(
         self,
@@ -1793,6 +1790,7 @@ class TestUpdateGroup:
         client.post(
             "/api/v1/auth/accounts",
             json={
+                "groups": ["dfe-viewers"],
                 "name": "Test User",
                 "username": "memsync-user",
                 "password": secrets.token_urlsafe(16),
@@ -1819,7 +1817,7 @@ class TestUpdateGroup:
         )
         assert resp.status_code == 200
         account = client.get("/api/v1/auth/accounts/memsync-user", headers=admin_headers)
-        assert account.json()["groups"] == []
+        assert account.json()["groups"] == ["dfe-viewers"]
 
     def test_remove_member_syncs_account_groups(self, client, admin_headers):
         client.post(
@@ -1974,15 +1972,19 @@ class TestDeleteGroup:
         resp = client.get("/api/v1/auth/groups/del-group", headers=admin_headers)
         assert resp.status_code == 404
 
-    def test_delete_group_with_members_returns_409(self, client, admin_headers):
+    def test_a_group_with_members_is_deleted_and_they_lose_it(self, app, client, admin_headers):
         client.post(
             "/api/v1/auth/groups",
             json={"name": "busy-group", "roles": ["data_viewer"], "members": ["admin"]},
             headers=admin_headers,
         )
+        assert "busy-group" in app.state.account_store.get("admin").groups
+
         resp = client.delete("/api/v1/auth/groups/busy-group", headers=admin_headers)
-        assert resp.status_code == 409
-        assert resp.json()["code"] == "conflict"
+
+        assert resp.status_code == 204, resp.text
+        assert app.state.group_store.get("busy-group") is None
+        assert "busy-group" not in app.state.account_store.get("admin").groups
 
 
 # -- The protected-name floor (issue #505) --------------------
@@ -2016,9 +2018,10 @@ class TestProtectedGroupMembership:
     def test_delete_of_the_admin_group_is_refused(
         self, recovery_accounts, client, admin_headers, username
     ):
-        """GroupStore.delete refuses a non-empty group, and the members cannot come out."""
+        """A delete drops every member, and a recovery credential cannot come out."""
         resp = client.delete("/api/v1/auth/groups/dfe-admins", headers=admin_headers)
-        assert resp.status_code == 409, resp.text
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_account"
         assert recovery_accounts.state.group_store.get("dfe-admins") is not None
         assert username in recovery_accounts.state.group_store.get("dfe-admins").members
 
@@ -2096,6 +2099,27 @@ class TestLastAdminGroupMembership:
         )
         assert resp.status_code == 200, resp.text
         assert "ops" not in recovery_accounts.state.group_store.get("dfe-admins").members
+
+    def test_deleting_the_group_that_holds_the_sole_usable_admin_is_refused(
+        self, recovery_accounts, client, app
+    ):
+        recovery_accounts.state.group_store.create("ops-admins", ["admin"], members=["ops"])
+        recovery_accounts.state.account_store.create(
+            "ops", secrets.token_urlsafe(16), groups=["ops-admins"]
+        )
+        store = recovery_accounts.state.account_store
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        token = session_token(app, app.state.settings, {"sub": "ops", "org_id": "test-org"})
+
+        resp = client.delete(
+            "/api/v1/auth/groups/ops-admins", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "last_admin"
+        assert recovery_accounts.state.group_store.get("ops-admins").members == ["ops"]
+        assert "ops-admins" in store.get("ops").groups
 
 
 class TestLinkedMembers:

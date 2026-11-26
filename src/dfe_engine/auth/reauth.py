@@ -19,16 +19,30 @@ REAUTH_AUDIENCE = "dfe-engine-account-reauth"
 REAUTH_HEADER = "X-DFE-Reauth"
 REAUTH_LIFETIME = timedelta(minutes=10)
 
-type ReauthKind = Literal["account", "api_key", "group", "provider", "role"]
-REAUTH_KINDS: tuple[ReauthKind, ...] = ("account", "api_key", "group", "provider", "role")
+type ReauthKind = Literal[
+    "account", "api_key", "credential", "group", "org", "provider", "role", "setting"
+]
+REAUTH_KINDS: tuple[ReauthKind, ...] = (
+    "account",
+    "api_key",
+    "credential",
+    "group",
+    "org",
+    "provider",
+    "role",
+    "setting",
+)
 
 # Store names hold no colon, so a prefixed target never names an account or another kind.
 _TARGET_PREFIXES: dict[str, str] = {
     "account": "",
     "api_key": "api-key:",
+    "credential": "credential:",
     "group": "group:",
+    "org": "org:",
     "provider": "provider:",
     "role": "role:",
+    "setting": "setting:",
 }
 
 

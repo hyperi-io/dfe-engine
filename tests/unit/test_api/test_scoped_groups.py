@@ -8,8 +8,9 @@
 
 """Scoped RBAC through the API.
 
-Proves two properties:
-- org-scoped grants never leak outside their org (create/read/write), and
+Proves three properties:
+- the API creates only system-wide groups, so a body naming a scope is refused,
+- org-scoped grants never leak outside their org (read/write), and
 - org-local groups are invisible to everyone outside the org, while
   members always see the groups they belong to.
 """
@@ -17,9 +18,9 @@ Proves two properties:
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.settings import DFESettings
 from tests.support.accounts import session_token
+from tests.support.org_groups import seed_org_group
 
 GROUPS = "/api/v1/auth/groups"
 ORGS = "/api/v1/orgs"
@@ -43,23 +44,12 @@ def scoped_setup(client: TestClient, app, admin_headers: dict[str, str]):
         if account_store.get(username) is None:
             account_store.create(username, f"pw-{username}")
 
-    for name, roles, members in (
-        ("acme-ops", ["admin"], ["orgadmin"]),
-        ("acme-analysts", ["data_analyst"], ["orguser"]),
+    for name, roles, members, scope in (
+        ("acme-ops", ["admin"], ["orgadmin"], "org:acme"),
+        ("acme-analysts", ["data_analyst"], ["orguser"], "org:acme"),
+        ("globex-analysts", ["data_analyst"], [], "org:globex"),
     ):
-        resp = client.post(
-            GROUPS,
-            json={"name": name, "roles": roles, "scope": "org:acme", "members": members},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 201, resp.text
-
-    resp = client.post(
-        GROUPS,
-        json={"name": "globex-analysts", "roles": ["data_analyst"], "scope": "org:globex"},
-        headers=admin_headers,
-    )
-    assert resp.status_code == 201, resp.text
+        seed_org_group(app=app, members=members, name=name, roles=roles, scope=scope)
     return client
 
 
@@ -99,14 +89,11 @@ class TestOrgGroupVisibility:
 
 
 class TestOrgLocalAdmin:
-    def test_can_crud_own_org_groups(self, scoped_setup, api_settings):
-        headers = _headers(scoped_setup.app, api_settings, "orgadmin")
-        resp = scoped_setup.post(
-            GROUPS,
-            json={"name": "acme-eng", "roles": ["data_viewer"], "scope": "org:acme"},
-            headers=headers,
+    def test_can_update_and_delete_own_org_groups(self, scoped_setup, api_settings):
+        seed_org_group(
+            app=scoped_setup.app, name="acme-eng", roles=["data_viewer"], scope="org:acme"
         )
-        assert resp.status_code == 201, resp.text
+        headers = _headers(scoped_setup.app, api_settings, "orgadmin")
 
         resp = scoped_setup.put(
             f"{GROUPS}/acme-eng", json={"roles": ["data_analyst"]}, headers=headers
@@ -117,21 +104,15 @@ class TestOrgLocalAdmin:
         resp = scoped_setup.delete(f"{GROUPS}/acme-eng", headers=headers)
         assert resp.status_code == 204
 
-    def test_cannot_create_system_group(self, scoped_setup, api_settings):
+    def test_cannot_create_a_group(self, scoped_setup, api_settings):
+        """Every group the API creates is system-wide, which an org admin cannot write."""
         resp = scoped_setup.post(
             GROUPS,
-            json={"name": "sneaky", "roles": ["admin"], "scope": "system"},
+            json={"name": "sneaky", "roles": ["admin"]},
             headers=_headers(scoped_setup.app, api_settings, "orgadmin"),
         )
         assert resp.status_code == 403
-
-    def test_cannot_create_group_in_other_org(self, scoped_setup, api_settings):
-        resp = scoped_setup.post(
-            GROUPS,
-            json={"name": "sneaky", "roles": ["admin"], "scope": "org:globex"},
-            headers=_headers(scoped_setup.app, api_settings, "orgadmin"),
-        )
-        assert resp.status_code == 403
+        assert scoped_setup.app.state.group_store.get("sneaky") is None
 
     def test_cannot_modify_system_group(self, scoped_setup, api_settings):
         """A system group is invisible to an org admin, so it answers as a missing one."""
@@ -170,49 +151,16 @@ class TestOrgReads:
 
 
 class TestScopeValidation:
-    def test_invalid_scope_string(self, scoped_setup, admin_headers):
+    @pytest.mark.parametrize(
+        "scope", ["system", "org:acme", "everywhere", "org:../elsewhere/outside"]
+    )
+    def test_a_body_naming_a_scope_is_refused(self, scoped_setup, app, admin_headers, scope):
         resp = scoped_setup.post(
-            GROUPS,
-            json={"name": "bad", "roles": [], "scope": "everywhere"},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 422
-
-    def test_unknown_org_rejected(self, scoped_setup, admin_headers):
-        resp = scoped_setup.post(
-            GROUPS,
-            json={"name": "bad", "roles": [], "scope": "org:nonexistent"},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 422
-
-    def test_an_org_scope_is_refused_with_no_org_registry(self, client, app, admin_headers):
-        """With nothing to check the org against, it is not known to exist."""
-        app.state.org_registry = None
-
-        resp = client.post(
-            GROUPS,
-            json={"name": "unchecked", "roles": [], "scope": "org:acme"},
-            headers=admin_headers,
+            GROUPS, json={"name": "scoped", "roles": [], "scope": scope}, headers=admin_headers
         )
 
         assert resp.status_code == 422, resp.text
-        assert resp.json()["code"] == "invalid_scope"
-        assert app.state.group_store.get("unchecked") is None
-
-    def test_an_org_name_that_is_a_path_finds_no_org(self, scoped_setup, app, admin_headers):
-        """The org is looked up by joining its name onto the orgs directory."""
-        OrgRegistry(app.state.org_registry._dir.parent / "elsewhere").create("outside")
-
-        resp = scoped_setup.post(
-            GROUPS,
-            json={"name": "climber", "roles": [], "scope": "org:../elsewhere/outside"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["code"] == "invalid_scope"
-        assert app.state.group_store.get("climber") is None
+        assert app.state.group_store.get("scoped") is None
 
     def test_viewer_sees_own_membership_only(self, scoped_setup, viewer_headers):
         # dfe-viewers roles carry no group:read - visibility is membership only.

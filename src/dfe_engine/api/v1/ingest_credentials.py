@@ -51,7 +51,12 @@ from scalo.concurrency import run_blocking
 from scalo.logger import logger
 from scalo.secrets.exceptions import SecretsError
 
-from dfe_engine.api.deps import CurrentUser, check_action, require_org_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    check_action,
+    require_credential_reauth,
+    require_org_action,
+)
 from dfe_engine.api.errors import ErrorCode, backend_failure
 from dfe_engine.api.v1.orgs import reconcile_tenancy
 from dfe_engine.api.write_turn import WRITE_TURN
@@ -86,6 +91,8 @@ router = APIRouter(
 
 _READ = Depends(require_org_action(scopes_dict["org_read"]))
 _WRITE = Depends(require_org_action(scopes_dict["org_ingest_credentials_write"]))
+# A credential is issued, changed or revoked only on a fresh sign-in, as an API key is.
+_REAUTH = Depends(require_credential_reauth)
 
 _RESOURCE = "ingest_credential"
 
@@ -509,7 +516,9 @@ def get_ingest_credential(
     return _response(held)
 
 
-@router.put("/{credential}", response_model=IngestCredentialWriteResponse, dependencies=[_WRITE])
+@router.put(
+    "/{credential}", response_model=IngestCredentialWriteResponse, dependencies=[_WRITE, _REAUTH]
+)
 async def apply_ingest_credential(
     org: str,
     credential: str,
@@ -589,7 +598,7 @@ async def apply_ingest_credential(
     return _written(minted, dry_run=False, token=token, synced=synced)
 
 
-@router.delete("/{credential}", status_code=204, dependencies=[_WRITE])
+@router.delete("/{credential}", status_code=204, dependencies=[_WRITE, _REAUTH])
 async def delete_ingest_credential(
     org: str,
     credential: str,
@@ -613,7 +622,9 @@ async def delete_ingest_credential(
 
 
 @router.post(
-    "/{credential}/rotate", response_model=IngestCredentialWriteResponse, dependencies=[_WRITE]
+    "/{credential}/rotate",
+    response_model=IngestCredentialWriteResponse,
+    dependencies=[_WRITE, _REAUTH],
 )
 async def rotate_ingest_credential(
     org: str,

@@ -567,6 +567,8 @@ Account, group, API key, role and OIDC provider CRUD sit under
 `/api/v1/auth/roles` and `/api/v1/auth/oidc-providers`. `openapi/openapi.json`
 lists every route.
 
+An account holds its roles only through its groups, so `POST /api/v1/auth/accounts` needs at least one group and a `PUT` cannot empty them (422).
+
 ### 3.4 Bootstrap Defaults
 
 `bootstrap_auth()` seeds these groups when the group store is empty:

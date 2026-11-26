@@ -150,6 +150,7 @@ class TestEmailTaken:
         body = {
             "name": "Test User",
             "email": _EMAIL.upper(),
+            "groups": ["dfe-viewers"],
             "password": "another-password-1",
             "username": "kaz2",
         }
@@ -169,6 +170,7 @@ class TestEmailTaken:
         body = {
             "name": "Test User",
             "email": "new@example.test",
+            "groups": ["dfe-viewers"],
             "password": "another-password-1",
             "username": "kaz3",
         }

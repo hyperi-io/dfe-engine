@@ -66,7 +66,7 @@ class TestOrgs:
         org = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
         group = client.post(
             "/api/v1/auth/groups",
-            json={"name": "acme-analysts", "roles": [], "scope": "org:acme"},
+            json={"name": "acme-analysts", "roles": []},
             headers=admin_headers,
         )
 
