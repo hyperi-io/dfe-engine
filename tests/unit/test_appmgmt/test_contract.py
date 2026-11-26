@@ -976,6 +976,24 @@ class TestJudgingAWrite:
         assert contract.check_value(option, ["ch-0:8123"]) == ""
         assert "takes array" in contract.check_value(option, "ch-0:8123")
 
+    @pytest.mark.parametrize(
+        ("value", "reason"),
+        [
+            ("/etc/ssl/ca.pem", ""),
+            (["/etc/ssl/ca.pem", "/etc/ssl/extra.pem"], ""),
+            ([], ""),
+            (5, "takes string or array, not integer"),
+            (True, "takes string or array, not boolean"),
+            ({"path": "/etc/ssl/ca.pem"}, "takes string or array, not object"),
+            (None, "does not accept a null"),
+        ],
+    )
+    def test_a_string_or_list_option_takes_either(self, value, reason):
+        # scalo's ca_paths is one path or a list of them, as anyOf [string, array].
+        option = self._option("dfe-loader", "config.kafka.tls.ca_paths")
+        got = contract.check_value(option, value)
+        assert (reason in got) if reason else got == ""
+
 
 class TestProtectedPaths:
     def test_the_policy_decides_which_paths_are_protected(self):
