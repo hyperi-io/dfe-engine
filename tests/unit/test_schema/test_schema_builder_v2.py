@@ -10,7 +10,7 @@ from dfe_engine.schema.schema_builder_v2 import (
     SchemaBuilderV2,
     SchemaBuildResult,
 )
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import Source, inherited_header_version
 from dfe_engine.source.type_registry import TypeRegistry
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -416,7 +416,7 @@ class TestUnauthoredHeader:
         names = [c.name for c in result.columns]
 
         assert cfg.profile_name == "timeseries"
-        assert cfg.profile_version == "1.0.3"
+        assert cfg.profile_version == inherited_header_version()
         # The retention the config declares rides a column the table now carries.
         assert cfg.ttl_columns == ["_timestamp_load"]
         assert "_timestamp_load" in names
