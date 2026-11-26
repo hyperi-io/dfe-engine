@@ -970,6 +970,39 @@ class TestJudgingAWrite:
         plain = self._option("dfe-loader", "config.batch_processing.max_chunk_size")
         assert "does not accept a null" in contract.check_value(plain, None)
 
+    @pytest.mark.parametrize(
+        ("spec", "expected"),
+        [
+            (
+                {"name": "protocol", "enum_values": ["http", "native"]},
+                {"clickhouse.protocol": ["http", "native"]},
+            ),
+            (
+                {
+                    "name": "protocol",
+                    "enum_values": ["http"],
+                    "schema_path": "sink.clickhouse.protocol",
+                },
+                {"sink.clickhouse.protocol": ["http"]},
+            ),
+            ({"name": "format", "enum_values": ["csv"], "schema_path": "tables[].format"}, {}),
+            ({"name": "level", "enum_values": ["info"], "schema_path": "outputs{}.levels[]"}, {}),
+            ({"name": "protocol", "enum_values": []}, {}),
+            ({"name": "protocol"}, {}),
+        ],
+        ids=[
+            "name-path",
+            "schema-path-wins",
+            "array-path-skipped",
+            "map-path-skipped",
+            "empty-enum",
+            "no-enum",
+        ],
+    )
+    def test_a_catalogue_enum_keys_on_its_schema_path(self, spec, expected):
+        capabilities = [{"name": "clickhouse", "fields": [spec]}]
+        assert contract.catalogue_enums(capabilities) == expected
+
     def test_an_array_takes_a_list(self):
         option = self._option("dfe-loader", "config.clickhouse.hosts")
         assert contract.check_value(option, ["ch-0:8123"]) == ""
