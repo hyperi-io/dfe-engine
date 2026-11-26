@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from scalo.logger.filters import is_credential_name
 
 from dfe_engine.appmgmt import catalogue, contract
 from dfe_engine.gitcrud import GitCrud
@@ -1859,8 +1858,8 @@ class TestTheNameRuleReadsEverySpelling:
         }
 
 
-class TestACredentialWordAnywhereInTheNameIsOne:
-    """scalo's matcher finds a credential word anywhere in a name, in any spelling."""
+class TestACredentialNameInAnySpellingIsOne:
+    """scalo's matcher reads a credential term at the end of a name, in any spelling."""
 
     def test_a_name_that_runs_on_past_its_credential_word_is_masked(self):
         overlay = {
@@ -1880,7 +1879,7 @@ class TestACredentialWordAnywhereInTheNameIsOne:
         }
 
     # Each name in the shipped contracts that holds a credential word and is a setting, with
-    # one block it sits in. scalo's matcher alone would hide every one of them.
+    # one block it sits in.
     @pytest.mark.parametrize(
         ("name", "section", "mapping"),
         [
@@ -1925,7 +1924,6 @@ class TestACredentialWordAnywhereInTheNameIsOne:
         ],
     )
     def test_a_shipped_setting_that_holds_a_credential_word_is_shown(self, name, section, mapping):
-        assert is_credential_name(name, section) is True
         assert contract.secret_name(name, section, mapping=mapping) is False
 
     def test_the_onepassword_source_is_a_section_and_a_scalar_of_that_name_is_masked(self):
