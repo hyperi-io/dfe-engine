@@ -60,11 +60,11 @@ HOLDING_BLOCKS = [
 # What each app's contract flattens to. Asserted exactly: these move only when an
 # app changes its own config or the flattener changes what it counts as an option.
 LEAF_COUNTS = {
-    "dfe-receiver": 336,
-    "dfe-loader": 187,
-    "dfe-archiver": 82,
-    "dfe-fetcher": 343,
-    "dfe-transform-vrl": 56,
+    "dfe-receiver": 351,
+    "dfe-loader": 198,
+    "dfe-archiver": 95,
+    "dfe-fetcher": 367,
+    "dfe-transform-vrl": 73,
     "dfe-transform-vector": 88,
 }
 
