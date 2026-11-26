@@ -231,6 +231,7 @@ class TestCredentialName:
             ("session_login", "auth"),
             ("client_auth", "tls"),
             ("private_key_id", "auth"),
+            ("pin_sha256", "tls"),
             ("field_mapping", ""),
             ("mappings", "coercion"),
             ("accept_unauthenticated", ""),
