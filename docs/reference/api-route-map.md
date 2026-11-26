@@ -2,7 +2,7 @@
 
 Where each engine API operation goes in the resource hierarchy. `scripts/route_map.py` generates this page from the engine's routes, `scripts/route-plan.toml` and `scripts/route-consumers.json`: change those and run `uv run python scripts/generate_openapi.py`, never this page.
 
-One row per operation the engine serves today. **New** is where it goes, and its operation id, `dfe` CLI command and MCP tool all come from that path. An MCP tool exists only for an operation that opts in. **Consumers** counts the files in each repo that name the old path, whatever the method (ui = dfe-ui 973f7139f030, infra = dfe-infra a235b788df2a, docker = dfe-docker 4ba5d7ab78f7, cli = dfe-engine 79d5bffd2333).
+One row per operation the engine serves today. **New** is where it goes, and its operation id, `dfe` CLI command and MCP tool all come from that path. An MCP tool exists only for an operation that opts in. **Consumers** counts the files in each repo that name the old path, whatever the method (ui = dfe-ui 8c5e6a4a5bbe, infra = dfe-infra a235b788df2a, docker = dfe-docker 4ba5d7ab78f7, cli = dfe-engine 80f738fbc544).
 
 ## Summary
 
