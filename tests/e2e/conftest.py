@@ -388,6 +388,25 @@ def count_rows(
     return int(result.result_rows[0][0]) if result.result_rows else 0
 
 
+def marker_rows_per_replica(ch_client, table: str, marker: str) -> str:
+    """This run's marked rows on each replica of *table*, for a timeout message.
+
+    A read through the service lands on one replica, and a replica whose fetch
+    queue is stuck answers 0 while the others hold the rows. The DFE database is
+    a Replicated database, so its name is the cluster ``clusterAllReplicas`` reads.
+    """
+    db = table.split(".", 1)[0]
+    sql = (
+        f"SELECT hostName() AS replica, countIf({PAYLOAD_TEXT} LIKE %(m)s) "
+        f"FROM clusterAllReplicas('{db}', {table}) GROUP BY replica ORDER BY replica"
+    )
+    try:
+        rows = ch_client.query(sql, parameters={"m": f"%{marker}%"}).result_rows
+    except Exception as exc:
+        return f"per-replica count unavailable ({type(exc).__name__}: {exc})"
+    return ", ".join(f"{replica}={count}" for replica, count in rows) or "no replica answered"
+
+
 def connect_clickhouse(cfg: E2EConfig) -> Client:
     """A clickhouse-connect client against the live ClickHouse (native JSON path)."""
     import clickhouse_connect
