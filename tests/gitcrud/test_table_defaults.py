@@ -23,7 +23,7 @@ from dfe_engine.gitcrud.table_defaults import (
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.schema.applier import LiveTable, LiveTtl
 from dfe_engine.settings import ClickHouseSettings, DFESettings
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import Source, inherited_header_version
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ class TestResolve:
         assert state.header_type == "timeseries"
         assert state.header_type_stored is None
         assert state.header_type_origin == "deployment"
-        assert state.header_version == "1.0.3"
+        assert state.header_version == inherited_header_version()
         assert state.header_version_stored is None
         assert state.engine == "MergeTree"
         assert state.engine_stored is None

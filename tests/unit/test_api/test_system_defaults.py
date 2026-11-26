@@ -24,6 +24,7 @@ from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.retention import MAX_DEFAULT_TTL_DAYS
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import ClickHouseResilienceSettings, ClickHouseSettings
+from dfe_engine.source.models import inherited_header_version
 
 URL = "/api/v1/system/defaults"
 
@@ -50,10 +51,10 @@ def _deployment_body(*, editable: bool) -> dict:
             "deployment_default": "timeseries",
         },
         "common_header_version": {
-            "effective": "1.0.3",
+            "effective": inherited_header_version(),
             "stored": None,
             "origin": "deployment",
-            "deployment_default": "1.0.3",
+            "deployment_default": inherited_header_version(),
         },
         "engine": {
             "effective": "MergeTree",
@@ -261,7 +262,7 @@ class TestApplyDefaults:
         assert body["unchanged"] == []
         assert [entry["source"] for entry in body["live"]] == ["alpha"]
         alpha = _version(client, admin_headers, "alpha")
-        assert alpha["header"] == {"type": "minimal", "version": "1.0.3"}
+        assert alpha["header"] == {"type": "minimal", "version": inherited_header_version()}
         assert alpha["schema"]["ttl_days"] == 90
         assert alpha["schema"]["engine"] == "ReplacingMergeTree"
         assert alpha["match"]["value"] == "alpha"
@@ -375,7 +376,10 @@ class TestDefaultDrift:
             json={
                 "source": "alpha",
                 "match": {"field": "tags.collector.type", "value": "alpha"},
-                "header": {"type": "common-header/timeseries", "version": "1.0.3"},
+                "header": {
+                    "type": "common-header/timeseries",
+                    "version": inherited_header_version(),
+                },
                 "schema": {"ttl_days": 90, "engine": "MergeTree"},
             },
         )
