@@ -145,12 +145,11 @@ class TestSaveConfig:
             reg.close()
 
     def test_a_receiver_ca_keeps_the_receiver_s_key(self, registry, tmp_path):
-        tls = {"enabled": True, "ca_file": "/etc/dfe/kafka-ca.pem"}
+        tls = {"enabled": True, "trust": "bundle", "ca_paths": ["/etc/dfe/kafka-ca.pem"]}
         registry.save_config("receiver", {"kafka": {"brokers": ["kafka:9092"], "tls": tls}})
 
         on_disk = yaml_load_string((tmp_path / "services" / "receiver-default.yaml").read_text())
-        assert on_disk["kafka"]["tls"]["ca_file"] == "/etc/dfe/kafka-ca.pem"
-        assert "ca_cert_file" not in on_disk["kafka"]["tls"]
+        assert on_disk["kafka"]["tls"] == tls
 
 
 # ---------------------------------------------------------------------------
