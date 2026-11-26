@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Config",
-  "description": "Main configuration struct.\n\n## Hot-reload behaviour\n\nThe config file is watched for changes. When reloaded, values are\navailable via `SharedConfig::get()`. However, not all settings take\neffect without a restart.\n\n**Hot-reloaded (takes effect on next fetch cycle):**\n- `scheduler.default_interval_secs` -- fetch interval re-computed each cycle\n- `scheduler.jitter_percent` -- jitter re-computed each cycle\n- `sources.*.filter` -- CEL filter re-evaluated on each record\n- `org_id`, `default_org_id` -- the `_org_id` stamped on each record, re-read\n  each fetch cycle and for each extractor record\n- `cursor.default_window_hours` -- the cap on one tick's window, re-read each cycle\n- `cursor.on_missing_cursor` -- what a tick with no cursor does, re-read each cycle\n- dropping a source, or `sources.*.enabled: false` -- its fetch task is cancelled on reload\n\n**Requires pod restart:**\n- `output.*` -- transport connections established at startup\n- `kafka.*` -- transport config bound at startup\n- `kafka.topic_suffix` -- the Vector extractor builds its topics once at start\n- `ingest.*` -- HTTP server binds at startup, auth token resolved once\n- `extractors.*` -- containers and Vector instances spawned at startup\n- `metrics.*` -- metrics server binds at startup\n- `instance_id` -- cursor key prefix set at startup\n- `cursor.directory` -- cursor store created at startup\n- adding a source, or `sources.*.enabled: true` -- source registration at startup\n- `sources.*.credential_secret`, `tenant_id`, `subscription_id`, `project_id` -- resolved once at startup\n- `scheduler.max_concurrent_fetches` -- semaphore created at startup\n- `dlq.*` -- DLQ created at startup\n- `buffer.*` -- buffer manager created at startup",
+  "description": "Main configuration struct.\n\n## Hot-reload behaviour\n\nThe config file is re-read on SIGHUP, when the file changes, and every\n`config_reload_secs` when that is set. A reload that does not validate is\nrefused and the running config kept. Not every setting takes effect without\na restart.\n\n**Hot-reloaded:**\n- `scheduler.default_interval_secs`, `scheduler.jitter_percent`,\n  `cursor.default_window_hours`, `cursor.on_missing_cursor` -- the scheduler\n  re-reads them on each tick\n- `sources.*.filter`, `output.routes`, `output.topic_suffix`, `org_id`,\n  `default_org_id`, `unwrap_nested_json`, `accumulate`, `oversize`,\n  `self_regulation` -- each source re-reads them on each tick, and `org_id`\n  and `default_org_id` are also re-read for each extractor record\n- adding, removing or changing a source, `enabled` and credentials\n  included -- its fetch task is started, stopped or rebuilt, its `env:` and\n  `vault:` specs resolved first\n\n**Requires pod restart:**\n- `output.*` other than the two above -- transports and destinations are\n  built at startup\n- `kafka.*` -- transport config bound at startup\n- the topic suffix, for the Vector extractor -- its topics are built once at\n  start\n- `ingest.*` -- HTTP server binds at startup, auth token resolved once\n- `extractors.*` -- containers and Vector instances spawned at startup\n- `metrics.*` -- metrics server binds at startup\n- `instance_id` -- cursor key prefix set at startup\n- `cursor.directory` -- cursor store created at startup\n- `scheduler.max_concurrent_fetches` -- semaphore created at startup\n- `dlq.*` -- DLQ created at startup\n- `buffer.*` -- memory guard created at startup",
   "type": "object",
   "properties": {
     "scheduler": {
@@ -248,7 +248,14 @@
           "path": "/var/spool/dfe/dlq",
           "rotation": "hourly",
           "max_age_days": 30,
-          "compress_rotated": true
+          "compress_rotated": {
+            "codec": "gzip"
+          },
+          "max_bytes": null,
+          "max_files": null,
+          "durable": false,
+          "file_mode": null,
+          "dir_mode": null
         },
         "kafka": {
           "enabled": true,
@@ -614,7 +621,7 @@
           "default": {}
         },
         "db": {
-          "description": "Database sources on the source framework, keyed by instance id.\n\nEach entry names an engine (`odbc` with a dialect, or `clickhouse`),\nits connection string as a credential spec, the block-cursor bounds,\nand the stores: each a query dumped whole into the snapshot envelope\nor tailed by keyset. The id is the connection id, as for `rest`. An\nengine this binary was built without is refused at load.",
+          "description": "Database sources on the source framework, keyed by instance id.\n\nEach entry names an engine (`odbc` with a dialect, `clickhouse`,\n`mongodb` or `hana`), its connection string as a credential spec, the block-cursor bounds,\nand the stores: each a query dumped whole into the snapshot envelope\nor tailed by keyset. The id is the connection id, as for `rest`. An\nengine this binary was built without is refused at load.",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/DbInstance"
@@ -3645,6 +3652,11 @@
           "type": "string",
           "default": ""
         },
+        "topic_per_dump_unit": {
+          "description": "Off lands dump units on `<topic>` instead of `<topic>-<unit>`.",
+          "type": "boolean",
+          "default": true
+        },
         "filter": {
           "description": "CEL keep-filter over each row, hot-reloaded.",
           "type": [
@@ -3692,6 +3704,14 @@
             "$ref": "#/$defs/UnitOverride"
           },
           "default": {}
+        },
+        "window": {
+          "description": "This instance's `delay` and `overlap` over the profile's.",
+          "$ref": "#/$defs/InstanceWindow",
+          "default": {
+            "delay": null,
+            "overlap": null
+          }
         },
         "accumulate": {
           "description": "Batch bounds for this instance; the deployment's when unset.",
@@ -3868,7 +3888,8 @@
             "format": "rfc3339_secs",
             "step": null,
             "lookback": "3600s",
-            "delay": null
+            "delay": null,
+            "overlap": null
           }
         },
         "probe": {
@@ -4768,6 +4789,18 @@
         },
         "delay": {
           "description": "How long after the fact the provider makes a record visible. Every\nwindow ends at least this far before now.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurationText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "overlap": {
+          "description": "How far before the window's start every tick reads again. A record\nthat became visible up to this long after its window closed is read\nby the next tick, which also delivers the rows it saw before a second\ntime.",
           "anyOf": [
             {
               "$ref": "#/$defs/DurationText"
@@ -6122,6 +6155,37 @@
       },
       "additionalProperties": false
     },
+    "InstanceWindow": {
+      "description": "An instance's own `delay` and `overlap`, over the profile's: how long\nthis provider takes to make a record visible is a property of the system,\nnot of the shape.",
+      "type": "object",
+      "properties": {
+        "delay": {
+          "description": "Replaces the profile's `window.delay` when set.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurationText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "overlap": {
+          "description": "Replaces the profile's `window.overlap` when set.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurationText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "AccumulateConfig": {
       "description": "Batch bounds, from the config cascade under `accumulate` and overridable per\nsource.",
       "type": "object",
@@ -6172,7 +6236,7 @@
           "default": "odbc"
         },
         "dialect": {
-          "description": "The SQL dialect; required for `odbc`, implied for `clickhouse`.",
+          "description": "The SQL dialect. Required for `odbc`, implied for `clickhouse` and `hana`.",
           "anyOf": [
             {
               "$ref": "#/$defs/Dialect"
@@ -6204,6 +6268,11 @@
           "description": "Topic base; dump units land on `<topic>-<unit>`, tails on `<topic>`.",
           "type": "string",
           "default": ""
+        },
+        "topic_per_dump_unit": {
+          "description": "Off lands dump units on `<topic>` instead of `<topic>-<unit>`.",
+          "type": "boolean",
+          "default": true
         },
         "filter": {
           "description": "CEL keep-filter over each row, hot-reloaded.",
@@ -6263,6 +6332,11 @@
           "description": "The official MongoDB driver: a collection dumped by `find`, tailed by\nchange stream or by `_id`.",
           "type": "string",
           "const": "mongodb"
+        },
+        {
+          "description": "SAP HANA over its own wire protocol, pure Rust, TLS through rustls.",
+          "type": "string",
+          "const": "hana"
         }
       ]
     },
@@ -6313,6 +6387,11 @@
           "description": "Databricks.",
           "type": "string",
           "const": "databricks"
+        },
+        {
+          "description": "SAP HANA, read by the `hana` engine. Not an ODBC dialect.",
+          "type": "string",
+          "const": "hana"
         }
       ]
     },
@@ -6506,6 +6585,11 @@
           "description": "Topic base; dump units land on `<topic>-<unit>`, tails on `<topic>`.",
           "type": "string",
           "default": ""
+        },
+        "topic_per_dump_unit": {
+          "description": "Off lands dump units on `<topic>` instead of `<topic>-<unit>`.",
+          "type": "boolean",
+          "default": true
         },
         "filter": {
           "description": "CEL keep-filter over each row, hot-reloaded.",
@@ -6710,7 +6794,7 @@
           }
         },
         "data_dir": {
-          "description": "Directory the checkpoint file lives in; must be on durable storage.",
+          "description": "Directory the checkpoint file lives in; must be on durable storage.\nLeft empty, dfe-fetcher uses a directory of its own for this unit under\n`cursor.directory`.",
           "type": "string",
           "default": ""
         }
@@ -7320,7 +7404,7 @@
       "type": "object",
       "properties": {
         "memory_limit": {
-          "description": "Maximum memory for buffers in bytes (0 = auto-detect 67% of available).",
+          "description": "Memory guard limit in bytes. 0 auto-detects 85% of the cgroup limit (of\nsystem memory outside a cgroup), or cgroup v2 `memory.high` when that is lower.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
@@ -7403,7 +7487,14 @@
             "path": "/var/spool/scalo/dlq",
             "rotation": "hourly",
             "max_age_days": 30,
-            "compress_rotated": true
+            "compress_rotated": {
+              "codec": "gzip"
+            },
+            "max_bytes": null,
+            "max_files": null,
+            "durable": false,
+            "file_mode": null,
+            "dir_mode": null
           }
         },
         "kafka": {
@@ -7423,7 +7514,7 @@
       "description": "How backends are used when multiple are enabled.",
       "oneOf": [
         {
-          "description": "Try backends in order; stop on first success.\nDefault order: Kafka first, file fallback.",
+          "description": "Try backends in order. Stop on first success.\nDefault order: Kafka first, file fallback.",
           "type": "string",
           "const": "cascade"
         },
@@ -7471,26 +7562,111 @@
           "default": 30
         },
         "compress_rotated": {
-          "description": "Compress rotated files with flate2/gzip.",
+          "description": "Codec for rotated files past the six newest: `none`, `gzip` or `zstd`.\nDefault gzip.",
+          "type": "object",
+          "properties": {
+            "codec": {
+              "description": "Codec for compress_rotated.",
+              "type": "string",
+              "enum": [
+                "none",
+                "gzip",
+                "zstd"
+              ]
+            },
+            "level": {
+              "description": "Level, by codec: gzip 1-9, zstd 1-22. Unset, the codec's default.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 22
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "codec"
+          ],
+          "default": {
+            "codec": "gzip"
+          }
+        },
+        "max_bytes": {
+          "description": "Rotate before a write that would take the file past this many bytes.\nA write into an empty file always lands, however large. Unset: no size\nrotation. Works beside the time rotation: either rotates.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "max_files": {
+          "description": "Rotated files kept, newest first. Older ones are deleted at each\nrotation. Unset: no count limit, only the age limit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "durable": {
+          "description": "Sync the file's data to disk after each write, and its directory after\nthe file is created or rotated, so a write that returned `Ok` survives\npower loss. Costs a disk flush per batch. Off by default.",
           "type": "boolean",
-          "default": true
+          "default": false
+        },
+        "file_mode": {
+          "description": "Mode for files the writer creates, before the umask. Unset: `0666`\nbefore the umask, except in the file transport, where it is `0600`.\nUnix only: a Windows file takes its folder's ACL. Existing files keep\ntheirs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dir_mode": {
+          "description": "Mode for directories the writer creates, before the umask. Unset:\n`0777` before the umask, except in the file transport, where it is\n`0700`. Unix only.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       }
     },
     "RotationPeriod": {
-      "description": "File rotation period.",
+      "description": "File rotation period, by local time.",
       "oneOf": [
         {
-          "description": "Rotate files every hour.",
+          "description": "Rotate before the first write in a new hour.",
           "type": "string",
           "const": "hourly"
         },
         {
-          "description": "Rotate files every day.",
+          "description": "Rotate before the first write on a new day.",
           "type": "string",
           "const": "daily"
+        },
+        {
+          "description": "No time rotation. `max_bytes` can still rotate the file.",
+          "type": "string",
+          "const": "never"
         }
       ]
+    },
+    "FileMode": {
+      "description": "Unix permission mode in octal, such as \"0600\". Ignored on Windows.",
+      "type": "string",
+      "pattern": "^(0o)?[0-7]{1,4}$"
     },
     "KafkaDlqConfig": {
       "description": "Kafka-based DLQ configuration.",
@@ -7653,7 +7829,7 @@
           "default": "classic"
         },
         "consumer_protocol_probe_ms": {
-          "description": "No longer read: nothing waits on a KIP-848 join, because librdkafka\nreports no join for a member that holds no partitions.\n\nKept so configs that set it still parse; it has no effect.",
+          "description": "No longer read: nothing waits on a KIP-848 join, because librdkafka\nreports no join for a member that holds no partitions.\n\nKept so configs that set it still parse. It has no effect.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0,
@@ -7756,7 +7932,7 @@
           "default": null
         },
         "ssl_ca_location": {
-          "description": "SSL CA certificate file path (private-CA bundle; maps to\n`TlsTrust.extra_roots` -- a single combined root+intermediate PEM is\naccepted).",
+          "description": "SSL CA certificate file path (private-CA bundle -- maps to\n`TlsTrust.extra_roots` -- a single combined root+intermediate PEM is\naccepted).",
           "type": [
             "string",
             "null"
@@ -7788,6 +7964,18 @@
           "description": "Deliberately permit an unencrypted transport (`plaintext` /\n`sasl_plaintext`) in production. Default `false`: production\n[`validate`](KafkaConfig::validate) rejects unencrypted transports so a\nmisconfiguration cannot ship data/credentials in the clear. Set `true`\nonly for an audited case (e.g. mesh-encrypted in-cluster traffic).",
           "type": "boolean",
           "default": false
+        },
+        "allow_auto_create_topics": {
+          "description": "Let scalo's producers ask the broker to create a topic they write to\n(librdkafka `allow.auto.create.topics`, default `false`).\n\nApplies to every producer scalo builds: the transport's, `KafkaProducer`\nand the Kafka DLQ's. Never to a consumer or an admin client. Off, a send\nto a missing topic backpressures until the topic exists, and a producer\nthat once wrote to a topic does not bring it back after a delete. On,\na broker with `auto.create.topics.enable` creates it. A raw\n`librdkafka_overrides` or `sizing.producer_librdkafka` value wins.",
+          "type": "boolean",
+          "default": false
+        },
+        "auth_refusal_grace_secs": {
+          "description": "Seconds a client a broker has accepted may go on failing authentication\nor TLS, with no success between, before it counts as refused again\n(default 120).\n\nInside it a failure is a restarting broker and changes nothing. Past it\nreadiness fails and the clients are rebuilt to read a rotated CA bundle,\ncertificate or password. Raising it rides out a longer broker restart\nat the cost of that many seconds of a ready pod delivering nothing after\na rotation. No record is lost either way: a refused client backpressures.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 120
         },
         "enable_auto_commit": {
           "description": "Enable auto-commit (default: false for manual commit).",
@@ -7822,24 +8010,6 @@
           "minimum": 0,
           "default": 300000
         },
-        "fetch_min_bytes": {
-          "description": "Fetch minimum bytes.",
-          "type": "integer",
-          "format": "int32",
-          "default": 1
-        },
-        "fetch_max_bytes": {
-          "description": "Fetch maximum bytes.",
-          "type": "integer",
-          "format": "int32",
-          "default": 52428800
-        },
-        "max_partition_fetch_bytes": {
-          "description": "Maximum messages per partition per poll.",
-          "type": "integer",
-          "format": "int32",
-          "default": 1048576
-        },
         "auto_offset_reset": {
           "description": "Auto offset reset (earliest, latest, none).",
           "type": "string",
@@ -7851,7 +8021,7 @@
           "default": false
         },
         "sizing": {
-          "description": "Kafka sizing surface: profile + named knobs + raw librdkafka escape hatch.\n\nControls the byte-budget and latency envelope for GET (consumer) and\nSEND (producer) paths. See [`KafkaSizingConfig`] for full documentation.\n\nExample YAML:\n```yaml\nkafka:\n  sizing:\n    profile: throughput\n    consumer:\n      fetch_min_bytes: 2097152  # 2 MiB, overrides profile default\n    producer:\n      compression_type: lz4     # the default is zstd at level 3\n    consumer_librdkafka:\n      fetch.wait.max.ms: \"75\"   # raw override wins over the knobs\n    producer_librdkafka:\n      linger.ms: \"50\"\n```",
+          "description": "Kafka sizing surface: profile + named knobs + raw librdkafka escape hatch.\n\nControls the byte-budget and latency envelope for GET (consumer) and\nSEND (producer) paths. See [`KafkaSizingConfig`] for full documentation.\n\nExample YAML:\n```yaml\nkafka:\n  sizing:\n    profile: throughput\n    consumer:\n      fetch_min_bytes: 2097152  # 2 MiB, overrides profile default\n    producer:\n      compression: {codec: lz4} # the default is zstd at level 3\n    consumer_librdkafka:\n      fetch.wait.max.ms: \"75\"   # raw override wins over the knobs\n    producer_librdkafka:\n      linger.ms: \"50\"\n```",
           "$ref": "#/$defs/KafkaSizingConfig",
           "default": {
             "profile": "throughput",
@@ -7865,7 +8035,7 @@
             "producer": {
               "batch_size_bytes": null,
               "linger_ms": null,
-              "compression_type": null,
+              "compression": null,
               "buffer_memory_bytes": null,
               "max_in_flight": null,
               "idempotence": null,
@@ -7984,7 +8154,7 @@
           "default": {
             "batch_size_bytes": null,
             "linger_ms": null,
-            "compression_type": null,
+            "compression": null,
             "buffer_memory_bytes": null,
             "max_in_flight": null,
             "idempotence": null,
@@ -8071,7 +8241,7 @@
           "default": null
         },
         "max_poll_records": {
-          "description": "Maximum number of messages the recv() loop returns per call.\n\nNOTE: `max.poll.records` does NOT exist in librdkafka -- there is no\nbroker-level property for this. This is a purely CLIENT-SIDE cap,\nenforced by passing this value as the `max` argument to\n`KafkaTransport::recv()` via `KafkaSizingConfig::effective_poll_cap()`.\nIt bounds the batch size delivered to the WorkBatch layer, not the\nnetwork fetch size (which is byte-governed by the knobs above).",
+          "description": "Maximum number of messages one `KafkaTransport::recv()` or `recv_limited()`\ncall returns, whatever `max` the caller passes. At least 1: a receiving\ntransport refuses 0 when it is built, because a receive always takes its\nfirst record.\n\n`max.poll.records` does NOT exist in librdkafka, so this is a CLIENT-SIDE\ncap, read through `KafkaSizingConfig::effective_poll_cap()` when the\ntransport is built. It bounds the batch size delivered to the WorkBatch\nlayer, not the network fetch size (which is byte-governed by the knobs\nabove).",
           "type": [
             "integer",
             "null"
@@ -8105,16 +8275,39 @@
           "minimum": 0,
           "default": null
         },
-        "compression_type": {
-          "description": "Compression codec for MessageSets.\n\nlibrdkafka: `compression.type` (alias for `compression.codec`).\nValid values: `none`, `gzip`, `snappy`, `lz4`, `zstd`.\nDefault (all profiles): `zstd` at `compression.level` 3.\n\nThe level is set only while the resolved codec is `zstd`, so another\ncodec named here runs at librdkafka's own default level for it. To run\nzstd at another level, set `compression.level` in `producer_librdkafka`.",
-          "type": [
-            "string",
-            "null"
+        "compression": {
+          "description": "Codec and level for MessageSets: librdkafka's `compression.type` and\n`compression.level`. Codec `none`, `gzip`, `snappy`, `lz4` or `zstd`.\nDefault (all profiles): zstd at level 3.\n\nAn unset level is the codec's default (zstd 3, gzip 6), and lz4, snappy\nand none set no level, so lz4 never drops into its slow high-compression\nmode. A raw map that names a codec takes that codec's default level, or\nkeeps this level when it names this codec.",
+          "type": "object",
+          "properties": {
+            "codec": {
+              "description": "Codec for kafka.sizing.producer.compression.",
+              "type": "string",
+              "enum": [
+                "none",
+                "zstd",
+                "lz4",
+                "gzip",
+                "snappy"
+              ]
+            },
+            "level": {
+              "description": "Level, by codec: zstd 1-22, gzip 1-9. Unset, the codec's default.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 22
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "codec"
           ],
           "default": null
         },
         "buffer_memory_bytes": {
-          "description": "Total byte budget for the producer's in-memory queue.\n\nlibrdkafka: `queue.buffering.max.kbytes` (in KiB, default 1 GiB).\nThis is the TOTAL queue, not per-batch. Set lower to bound memory\nusage in containers. Stored as bytes in this struct; divided by 1024\nwhen applied to librdkafka.",
+          "description": "Total byte budget for the producer's in-memory queue.\n\nlibrdkafka: `queue.buffering.max.kbytes` (in KiB, default 1 GiB).\nThis is the TOTAL queue, not per-batch. Set lower to bound memory\nusage in containers. Stored as bytes in this struct. Divided by 1024\nwhen applied to librdkafka.",
           "type": [
             "integer",
             "null"
@@ -8234,9 +8427,26 @@
           "default": 16777216
         },
         "compression": {
-          "description": "Enable gzip compression for gRPC messages.",
-          "type": "boolean",
-          "default": false
+          "description": "Codec the client sends requests with: `none` (default), `gzip` or\n`zstd` with the `compression` feature, with no level. The server reads\nwhat the build compiles on every connection.",
+          "type": "object",
+          "properties": {
+            "codec": {
+              "description": "Codec for transport.grpc.compression.",
+              "type": "string",
+              "enum": [
+                "none",
+                "gzip",
+                "zstd"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "codec"
+          ],
+          "default": {
+            "codec": "none"
+          }
         },
         "tls_enabled": {
           "description": "Enable client TLS for the `endpoint` connection.",
@@ -8244,7 +8454,7 @@
           "default": false
         },
         "tls_ca_path": {
-          "description": "Private-CA PEM (maps to `TlsTrust.extra_roots`). When unset with\n`tls_enabled`, falls back to OS native roots.",
+          "description": "CA PEM file, trusted alone when set. Unset with `tls_enabled`, the OS\nnative roots are trusted. The HTTP transport's `tls_ca_path` differs:\nby default it adds the CA beside the OS store.",
           "type": [
             "string",
             "null"
@@ -8275,6 +8485,13 @@
           ],
           "default": null
         },
+        "proxy": {
+          "description": "Proxy the `endpoint` connection goes through: `none` (default),\n`system` (the machine's proxy) or a proxy URL. The connection is an\nHTTP CONNECT tunnel, and TLS runs inside it. See\n[`ProxyConfig`](crate::transport::ProxyConfig).",
+          "type": "string",
+          "x-scalo-secret": true,
+          "writeOnly": true,
+          "default": "none"
+        },
         "vector_compat": {
           "description": "Enable Vector wire protocol compatibility on the same server.\nWhen true, the server also accepts `/vector.Vector/PushEvents` RPCs\nfrom legacy Vector sinks.\nRequires the `transport-grpc-vector-compat` feature.",
           "type": "boolean",
@@ -8295,6 +8512,40 @@
             "$ref": "#/$defs/FilterRule"
           },
           "default": []
+        },
+        "coalesce": {
+          "description": "Joining small `send_batch` blocks for `endpoint` into one `RouteBatch`\ncall.",
+          "$ref": "#/$defs/CoalesceConfig",
+          "default": {
+            "enabled": true,
+            "max_batch_bytes": 65536,
+            "in_flight": 4
+          }
+        }
+      }
+    },
+    "CoalesceConfig": {
+      "description": "How `send_batch` joins small blocks for one endpoint into one `RouteBatch`\ncall.\n\nWhen a call slot is free, the next queued block goes out with every block\nqueued behind it, up to `max_batch_bytes` and `max_message_size` encoded,\nwith no timer. A block at that cap or over it is sent at once on its own.\n`send_timeout_ms` bounds the wait for a slot too.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Join blocks. `false` sends every `send_batch` as its own call.",
+          "type": "boolean",
+          "default": true
+        },
+        "max_batch_bytes": {
+          "description": "Most bytes one joined call carries, encoded.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 65536
+        },
+        "in_flight": {
+          "description": "Calls in flight to the endpoint at once, joined calls only.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 4
         }
       }
     },

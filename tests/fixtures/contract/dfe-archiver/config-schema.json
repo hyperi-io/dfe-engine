@@ -52,7 +52,6 @@
         "recv_buffer_size": 10000,
         "recv_timeout_ms": 100,
         "max_message_size": 16777216,
-        "compression": false,
         "acknowledgements": {
           "enabled": true
         }
@@ -122,7 +121,14 @@
           "path": "/var/spool/dfe/dlq",
           "rotation": "hourly",
           "max_age_days": 30,
-          "compress_rotated": true
+          "compress_rotated": {
+            "codec": "gzip"
+          },
+          "max_bytes": null,
+          "max_files": null,
+          "durable": false,
+          "file_mode": null,
+          "dir_mode": null
         },
         "kafka": {
           "enabled": true,
@@ -318,11 +324,6 @@
           "format": "uint",
           "minimum": 0,
           "default": 16777216
-        },
-        "compression": {
-          "description": "Enable gzip compression for gRPC messages.",
-          "type": "boolean",
-          "default": false
         },
         "acknowledgements": {
           "description": "The listener answers each push once its records are queued, with this\non or off: a record is released only when its archive file completes, at\nthe roll interval, long after any sender's deadline. So the archive copy\non this transport is at-most-once, and `enabled: false` only changes the\nreason `pipeline_delivery_guarantee` reports, from `sink_cannot_confirm`\nto `acks_disabled`.",
@@ -755,7 +756,14 @@
             "path": "/var/spool/scalo/dlq",
             "rotation": "hourly",
             "max_age_days": 30,
-            "compress_rotated": true
+            "compress_rotated": {
+              "codec": "gzip"
+            },
+            "max_bytes": null,
+            "max_files": null,
+            "durable": false,
+            "file_mode": null,
+            "dir_mode": null
           }
         },
         "kafka": {
@@ -775,7 +783,7 @@
       "description": "How backends are used when multiple are enabled.",
       "oneOf": [
         {
-          "description": "Try backends in order; stop on first success.\nDefault order: Kafka first, file fallback.",
+          "description": "Try backends in order. Stop on first success.\nDefault order: Kafka first, file fallback.",
           "type": "string",
           "const": "cascade"
         },
@@ -823,26 +831,111 @@
           "default": 30
         },
         "compress_rotated": {
-          "description": "Compress rotated files with flate2/gzip.",
+          "description": "Codec for rotated files past the six newest: `none`, `gzip` or `zstd`.\nDefault gzip.",
+          "type": "object",
+          "properties": {
+            "codec": {
+              "description": "Codec for compress_rotated.",
+              "type": "string",
+              "enum": [
+                "none",
+                "gzip",
+                "zstd"
+              ]
+            },
+            "level": {
+              "description": "Level, by codec: gzip 1-9, zstd 1-22. Unset, the codec's default.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 22
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "codec"
+          ],
+          "default": {
+            "codec": "gzip"
+          }
+        },
+        "max_bytes": {
+          "description": "Rotate before a write that would take the file past this many bytes.\nA write into an empty file always lands, however large. Unset: no size\nrotation. Works beside the time rotation: either rotates.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "max_files": {
+          "description": "Rotated files kept, newest first. Older ones are deleted at each\nrotation. Unset: no count limit, only the age limit.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "durable": {
+          "description": "Sync the file's data to disk after each write, and its directory after\nthe file is created or rotated, so a write that returned `Ok` survives\npower loss. Costs a disk flush per batch. Off by default.",
           "type": "boolean",
-          "default": true
+          "default": false
+        },
+        "file_mode": {
+          "description": "Mode for files the writer creates, before the umask. Unset: `0666`\nbefore the umask, except in the file transport, where it is `0600`.\nUnix only: a Windows file takes its folder's ACL. Existing files keep\ntheirs.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dir_mode": {
+          "description": "Mode for directories the writer creates, before the umask. Unset:\n`0777` before the umask, except in the file transport, where it is\n`0700`. Unix only.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       }
     },
     "RotationPeriod": {
-      "description": "File rotation period.",
+      "description": "File rotation period, by local time.",
       "oneOf": [
         {
-          "description": "Rotate files every hour.",
+          "description": "Rotate before the first write in a new hour.",
           "type": "string",
           "const": "hourly"
         },
         {
-          "description": "Rotate files every day.",
+          "description": "Rotate before the first write on a new day.",
           "type": "string",
           "const": "daily"
+        },
+        {
+          "description": "No time rotation. `max_bytes` can still rotate the file.",
+          "type": "string",
+          "const": "never"
         }
       ]
+    },
+    "FileMode": {
+      "description": "Unix permission mode in octal, such as \"0600\". Ignored on Windows.",
+      "type": "string",
+      "pattern": "^(0o)?[0-7]{1,4}$"
     },
     "KafkaDlqConfig": {
       "description": "Kafka-based DLQ configuration.",

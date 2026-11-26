@@ -17,7 +17,7 @@ kafka:
   tls:
     enabled: true
     trust: bundle
-    ca_paths: [/etc/tls/kafka-ca.crt]
+    ca_paths: /etc/tls/kafka-ca.crt
 
 # HTTP on 8123, never native 9000: the loader's ClickHouse client has no TCP row fetch.
 clickhouse:

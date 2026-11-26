@@ -18,7 +18,7 @@ kafka:
   tls:
     enabled: true
     trust: bundle
-    ca_paths: [/etc/tls/kafka-ca.crt]
+    ca_paths: /etc/tls/kafka-ca.crt
 
 buffer:
   pressure_threshold: 0.85
