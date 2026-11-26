@@ -202,6 +202,18 @@ def engines(openbao, tmp_path_factory) -> Iterator[_Pair]:
         yield _Pair(a=a, b=b, password=replaced, settings=settings)
 
 
+def _reauth_grant(*, kind: str, password: str, target: str, token: str, url: str) -> str:
+    """The re-auth grant the local admin earns for the *kind* named *target*, from the engine at *url*."""
+    granted = httpx.post(
+        f"{url}/api/v1/auth/reauth",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"kind": kind, "password": password, "target": target},
+        timeout=10,
+    )
+    assert granted.status_code == 200, granted.text
+    return granted.json()["grant"]
+
+
 def _signed_in(url: str, password: str) -> str:
     """An access token for the local admin, from the engine at *url*."""
     signed_in = httpx.post(
@@ -239,11 +251,14 @@ def test_the_receiver_s_secret_source_names_the_bearer_secret_an_engine_wrote(op
         timeout=30,
     )
     assert org.status_code == 201, org.text
+    grant = _reauth_grant(
+        kind="credential", password=engines.password, target="agents", token=token, url=engines.a
+    )
 
     created = httpx.put(
         f"{engines.a}/api/v1/orgs/acme/ingest-credentials/agents",
         json={"listeners": ["http"]},
-        headers={"Authorization": f"Bearer {token}", "If-None-Match": "*"},
+        headers={"Authorization": f"Bearer {token}", "If-None-Match": "*", "X-DFE-Reauth": grant},
         timeout=30,
     )
 
