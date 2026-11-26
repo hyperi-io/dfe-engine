@@ -1130,14 +1130,14 @@ def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Generato
     """
     from fastapi.testclient import TestClient
 
-    from dfe_engine.api.app import create_app
     from dfe_engine.api.deps import _registries
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
     from dfe_engine.gitcrud import GitCrud, default_registry
     from dfe_engine.gitops.repo import GitopsRepo
     from tests.support.accounts import admin_on_its_own_password
+    from tests.support.reauth import create_app_without_reauth
 
-    app = create_app(settings=settings)
+    app = create_app_without_reauth(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
