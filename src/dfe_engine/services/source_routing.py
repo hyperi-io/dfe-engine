@@ -36,8 +36,7 @@ from scalo.rules import CompileOptions, RuleDiagnostic
 from scalo.rules import RuleSet as ScaloRuleSet
 
 from dfe_engine.ingest.models import ALIASES_TABLE, IngestRules
-from dfe_engine.orgs.models import UNASSIGNED_ORG_ID
-from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError
+from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, default_tenant_id
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.services.routing_models import (
@@ -586,11 +585,13 @@ def compile_receiver_routing(
     default_source: str = DEFAULT_LANDING_LABEL,
     topic_suffix: str = TOPIC_LAND_SUFFIX,
     source_org_id: SourceOrgId = "disallow",
+    tenancy: Tenancy | None = None,
 ) -> ReceiverRoutingConfig:
     """Compile the receiver's ``routing`` block: defaults, tenancy and topic overrides.
 
-    ``default_org_id`` is ``unassigned``, the same value every app is compiled
-    with. ``source_org_id`` is the deployment's ``ingest.source_org_id``.
+    ``default_org_id`` is the tenant a record naming no org takes
+    (:func:`~dfe_engine.orgs.tenancy.default_tenant_id`), the same value every app
+    is compiled with. ``source_org_id`` is the deployment's ``ingest.source_org_id``.
 
     ``source_to_topic`` is emitted only where a source's landing topic
     deviates from ``{_source}{topic_suffix}``, which is the rule the receiver
@@ -608,7 +609,7 @@ def compile_receiver_routing(
 
     return ReceiverRoutingConfig(
         default_source=default_source,
-        default_org_id=UNASSIGNED_ORG_ID,
+        default_org_id=default_tenant_id(tenancy),
         topic_suffix=topic_suffix,
         source_to_topic=source_to_topic,
         source_org_id=source_org_id,
@@ -799,9 +800,9 @@ def compile_loader_routing(
     Dormant and disabled sources are left out: their schema stays
     pre-positioned but they have no live loader path.
 
-    ``default_org_id`` is ``unassigned``, the same value the receiver and fetcher
-    are compiled with, so a record no first hop stamped lands where every other
-    app would have put it.
+    ``default_org_id`` is the tenant a record naming no org takes, the same value
+    the receiver and fetcher are compiled with, so a record no first hop stamped
+    lands where every other app would have put it.
 
     ``external_topics`` holds each topic a customer's own pipeline writes to the
     source's org and name, which only ``tenancy`` can resolve to a tenant id.
@@ -817,7 +818,8 @@ def compile_loader_routing(
     Args:
         registry: Where the Source definitions are read from.
         db: Default database for the loader.
-        tenancy: The registered orgs, to resolve an external source's org.
+        tenancy: The registered orgs and your org, to resolve an external source's
+            org and the tenant a record naming none takes.
         derived_base_dir: Root a deployment's own meta-schemas resolve under.
         schemas_base_dir: The schemas tree, where a meta schema the release ships
             resolves when the deployment's own store has no copy.
@@ -838,7 +840,7 @@ def compile_loader_routing(
 
     config = LoaderRoutingConfig(
         default_db=db,
-        default_org_id=UNASSIGNED_ORG_ID,
+        default_org_id=default_tenant_id(tenancy),
         source_to_table=source_to_table,
     )
     # Each is set only when non-empty, so a block with nothing to carry is unchanged.
@@ -875,15 +877,16 @@ def _loader_schema_version(source: Source, deployed: str, builder: SchemaBuilder
 def _external_topic(source: Source, tenancy: Tenancy | None) -> LoaderExternalTopic | None:
     """The loader's hold on the topic *source*'s external pipeline writes, or None without one.
 
-    A source whose org is not registered is left out with a warning rather than
-    held to ``unassigned``, which would put its records in a tenant that is not theirs.
+    A source naming no org is held to the tenant a record naming no org takes. One
+    whose org is not registered is left out with a warning rather than held to that
+    tenant, which would put its records in a tenant that is not theirs.
     """
     pipeline = source.external_pipeline()
     if pipeline is None:
         return None
     topic = source.topic_land if source.external is not None else transformed_topic(source.source)
     if pipeline.org is None:
-        org_id = UNASSIGNED_ORG_ID
+        org_id = default_tenant_id(tenancy)
     else:
         try:
             if tenancy is None:

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -75,22 +75,42 @@ def apprise_url(receiver_url: str, *, token: str | None, verify: bool) -> str:
     return f"{scheme}://{parts.netloc}{parts.path or '/'}{query}"
 
 
-def _tenant_org(engine: EngineAPI, ch_client, table: str, marker: str) -> str:
-    """The registered org whose tenant ids hold the ``_org_id`` the receiver stamped.
+def _tenant_org(
+    engine: EngineAPI, ch_client, table: str, marker: str, post_probe: Callable[[], None]
+) -> str:
+    """The registered org whose tenant ids hold an ``_org_id`` the receiver stamped.
 
-    Read off a landed record rather than assumed: whether the suite's posts land in
-    the default org depends on whether the deployment authenticates them.
+    Read off landed records rather than assumed: an unauthenticated post takes your
+    org's first tenant id, and an authenticated one its credential's org. A probe
+    the receiver took before it rolled onto your org lands ``unassigned``, so a fresh
+    one is posted on each pass until one lands under a registered org.
     """
-    rows = ch_client.query(
-        f"SELECT _org_id FROM {table} WHERE {PAYLOAD_TEXT} LIKE %(m)s LIMIT 1",
-        parameters={"m": f"%{marker}%"},
-    ).result_rows
-    assert rows, f"the probe record is not in {table}"
-    tenant = str(rows[0][0])
-    orgs = engine.json("GET", "/orgs?page_size=1000")["items"]
-    owners = [str(org["name"]) for org in orgs if tenant in org["org_ids"]]
-    assert owners, f"no registered org holds the tenant id {tenant!r} the receiver stamped"
-    return owners[0]
+
+    def owner() -> str | None:
+        post_probe()
+        tenants = {
+            str(row[0])
+            for row in ch_client.query(
+                f"SELECT DISTINCT _org_id FROM {table} WHERE {PAYLOAD_TEXT} LIKE %(m)s",
+                parameters={"m": f"%{marker}%"},
+            ).result_rows
+        }
+        orgs = engine.json("GET", "/orgs?page_size=1000")["items"]
+        # An org declaring no org IDs stamps its name, as the engine compiles it.
+        owners = [
+            str(org["name"]) for org in orgs if tenants & set(org["org_ids"] or [org["name"]])
+        ]
+        return owners[0] if owners else None
+
+    return poll_until(
+        owner,
+        timeout=LANDING_DEADLINE,
+        interval=PROBE_INTERVAL,
+        desc=(
+            f"a probe in {table} stamped with a registered org's tenant id. With no org named "
+            "as yours, a record naming no org lands unassigned, which no hunt reads"
+        ),
+    )
 
 
 @pytest.fixture
@@ -156,7 +176,7 @@ class TestAlertDelivery:
             timeout=LANDING_DEADLINE,
             desc=f"the probe record in {table}",
         )
-        customer = _tenant_org(engine, ch_client, table, marker)
+        customer = _tenant_org(engine, ch_client, table, marker, post_probe)
 
         rule = engine.call(
             "POST",
