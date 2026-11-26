@@ -1295,6 +1295,10 @@ def catalogue_enums(capabilities: list[Any]) -> dict[str, list[Any]]:
     ``clickhouse.protocol`` as a plain string - while the catalogue names the two
     values it accepts and says which one is refused at startup. The catalogue is
     the better answer, so where it names a field it wins.
+
+    A field's ``schema_path`` names its config leaf, and wins over the path built
+    from catalogue names. A ``schema_path`` through an array (``[]``) or a map
+    (``{}``) addresses no single option, because an array or map is one leaf here.
     """
     out: dict[str, list[Any]] = {}
 
@@ -1312,8 +1316,13 @@ def catalogue_enums(capabilities: list[Any]) -> dict[str, list[Any]]:
                 if not isinstance(spec, dict):
                     continue
                 values = spec.get("enum_values")
-                if isinstance(values, list) and values and spec.get("name"):
+                if not (isinstance(values, list) and values and spec.get("name")):
+                    continue
+                schema_path = spec.get("schema_path")
+                if not schema_path:
                     out[f"{path}.{spec['name']}"] = list(values)
+                elif "[]" not in schema_path and "{}" not in schema_path:
+                    out[str(schema_path)] = list(values)
             visit(entry.get("children"), path)
 
     visit(capabilities, "")
