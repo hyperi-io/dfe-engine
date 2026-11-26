@@ -261,6 +261,7 @@ class DeclaredOption:
     type: str
     enum: list[Any] | None
     nullable: bool
+    accepts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -429,6 +430,22 @@ def _type_of(node: dict, root: dict) -> str:
                 declared = resolved["type"]
                 return declared if isinstance(declared, str) else str(declared[0])
     return ""
+
+
+def _types_of(node: dict, root: dict) -> tuple[str, ...]:
+    """Every non-null type a value may take, so a string-or-list option takes either."""
+    declared = node.get("type")
+    if isinstance(declared, str):
+        return () if declared == "null" else (declared,)
+    if isinstance(declared, list):
+        return tuple(str(t) for t in declared if t != "null")
+    out: list[str] = []
+    for keyword in ("anyOf", "oneOf"):
+        for branch in node.get(keyword) or ():
+            for name in _types_of(_deref(branch, root), root):
+                if name not in out:
+                    out.append(name)
+    return tuple(out)
 
 
 def _enum_of(node: dict, root: dict) -> list[Any] | None:
@@ -1326,6 +1343,17 @@ def _json_type(value: Any) -> str:
     return "null"
 
 
+def _is_json_type(value: Any, name: str) -> bool:
+    """Whether ``value`` is the JSON Schema type ``name``.
+
+    A bool is an int in Python and is not one here: `true` in a chunk-size field
+    would otherwise be written as 1.
+    """
+    if isinstance(value, bool):
+        return name == "boolean"
+    return isinstance(value, _JSON_TYPES[name])
+
+
 def declared_options(app_contract: AppContract) -> dict[str, DeclaredOption]:
     """Every option the contract declares, keyed by the overlay path a write uses."""
     enums = catalogue_enums(app_contract.capabilities)
@@ -1338,6 +1366,7 @@ def declared_options(app_contract: AppContract) -> dict[str, DeclaredOption]:
             type=_type_of(node, app_contract.schema),
             enum=enums.get(path) or _enum_of(node, app_contract.schema),
             nullable=_nullable(node, app_contract.schema),
+            accepts=_types_of(node, app_contract.schema),
         )
     return out
 
@@ -1350,15 +1379,9 @@ def check_value(option: DeclaredOption, value: Any) -> str:
     """
     if value is None:
         return "" if option.nullable else f"{option.path} does not accept a null"
-    accepted = _JSON_TYPES.get(option.type)
-    if accepted is not None:
-        # A bool is an int in Python and is not one here: `true` in a chunk-size
-        # field would otherwise be written as 1.
-        wrong = not isinstance(value, accepted) or (
-            isinstance(value, bool) and option.type != "boolean"
-        )
-        if wrong:
-            return f"{option.path} takes {option.type}, not {_json_type(value)}"
+    names = [n for n in option.accepts or (option.type,) if n in _JSON_TYPES]
+    if names and not any(_is_json_type(value, name) for name in names):
+        return f"{option.path} takes {' or '.join(names)}, not {_json_type(value)}"
     if option.enum is not None and value not in option.enum:
         offered = ", ".join(repr(v) for v in option.enum)
         return f"{option.path} takes one of {offered}, not {value!r}"
