@@ -239,6 +239,7 @@ def _loader(
     tenancy: Tenancy | None,
 ) -> dict[str, Any]:
     from dfe_engine.schema.derived_registry import derived_reference_root
+    from dfe_engine.schema.schema_builder_v2 import inherited_builder_kwargs
     from dfe_engine.services.source_routing import compile_loader_capture, compile_loader_routing
 
     db = settings.clickhouse.effective_data_database
@@ -250,6 +251,7 @@ def _loader(
         tenancy=tenancy,
         derived_base_dir=derived_reference_root(settings),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        builder_kwargs=inherited_builder_kwargs(settings),
     )
     blocks: dict[str, Any] = {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
     capture = compile_loader_capture(

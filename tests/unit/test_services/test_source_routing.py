@@ -673,6 +673,136 @@ class TestCompileLoaderRouting:
             FakeSourceRegistry([fw]), schemas_base_dir=tmp_path, derived_base_dir=tmp_path
         )
         assert config.table_schema_versions == {"fw": "1.0.0"}
+        assert config.table_schemas == {}, "the loader reads that table from ClickHouse"
+
+
+def _ddl_column_lines(ddl: str) -> list[str]:
+    """Each column definition in a CREATE TABLE, without its trailing comma."""
+    body = ddl.split("\n(\n", 1)[1].split("\n)\n", 1)[0]
+    lines = [line.strip().rstrip(",") for line in body.splitlines()]
+    return [line for line in lines if not line.startswith(("INDEX ", "PROJECTION "))]
+
+
+class TestLoaderTableSchemas:
+    """``table_schemas`` holds the columns the deploy's CREATE TABLE declares, column for column."""
+
+    _COLUMN = "{ name: %s, type: string }"
+
+    def _write_schemas(self, root, *, meta_current: str) -> None:
+        (root / "meta").mkdir()
+        (root / "derived").mkdir()
+        (root / "meta" / "fw.yaml").write_text(
+            f"current: '{meta_current}'\n"
+            "versions:\n"
+            "  '1.0.0':\n"
+            "    columns:\n"
+            f"      - {self._COLUMN % 'a'}\n"
+            f"      - {self._COLUMN % 'b'}\n"
+            "      - { name: shout, type: string, attribute: [materialized],"
+            " default: 'upper(a)', comment: 'a, loud' }\n"
+            "      - { name: user_id, type: string, _field_type: promoted }\n"
+            "  '1.1.0':\n"
+            "    columns:\n"
+            f"      - {self._COLUMN % 'a'}\n"
+            f"      - {self._COLUMN % 'b'}\n"
+            f"      - {self._COLUMN % 'c'}\n"
+            "      - { name: shout, type: string, attribute: [materialized],"
+            " default: 'upper(a)', comment: 'a, loud' }\n"
+            "      - { name: user_id, type: string, _field_type: promoted }\n",
+            encoding="utf-8",
+        )
+        (root / "derived" / "fw.yaml").write_text(
+            "current: '1.0.0'\n"
+            "versions:\n"
+            "  '1.0.0': {select: [{name: a}, {name: b}, {name: c}, {name: shout}]}\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _deployed(schema: dict) -> Source:
+        return Source.model_validate(
+            {
+                "source": "fw",
+                "current": "1.0.0",
+                "deployed_version": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "agent.type", "operator": "equals", "value": "fw"},
+                        "schema": schema,
+                    }
+                },
+            }
+        )
+
+    @pytest.mark.parametrize(
+        ("meta_current", "schema", "added"),
+        [
+            pytest.param("1.0.0", {"meta_schema": "meta/fw"}, set(), id="new-table"),
+            pytest.param("1.1.0", {"meta_schema": "meta/fw"}, {"c"}, id="meta-schema-change"),
+            pytest.param(
+                "1.0.0",
+                {"meta_schema": "meta/fw", "derived_schema": "derived/fw"},
+                set(),
+                id="promoted-column",
+            ),
+        ],
+    )
+    def test_the_emitted_columns_are_the_ddl_s_columns(self, tmp_path, meta_current, schema, added):
+        from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+
+        if schema.get("derived_schema"):
+            # The derived schema selects c, which only 1.1.0 holds.
+            meta_current = "1.1.0"
+        self._write_schemas(tmp_path, meta_current=meta_current)
+        fw = self._deployed(schema)
+        config = compile_loader_routing(
+            FakeSourceRegistry([fw]), schemas_base_dir=tmp_path, derived_base_dir=tmp_path
+        )
+        ddl = (
+            SchemaBuilderV2(schemas_base_dir=tmp_path, derived_base_dir=tmp_path)
+            .build_for_source_version(fw, source_version="1.0.0")
+            .create_table_ddl
+        )
+
+        emitted = config.table_schemas["fw"]
+        lines = _ddl_column_lines(ddl)
+        assert [c.name for c in emitted] == [line.split(" ", 1)[0].strip("`") for line in lines]
+        for column, line in zip(emitted, lines, strict=True):
+            definition = line.split(" ", 1)[1]
+            assert definition.startswith(column.type), f"{column.name}: {line}"
+            kinds = [
+                k for k in ("DEFAULT", "MATERIALIZED", "ALIAS") if f" {k} " in f" {definition} "
+            ]
+            assert kinds == ([column.default_kind] if column.default_kind else []), line
+            assert ("COMMENT '" in definition) == bool(column.comment), line
+            if column.comment:
+                quoted = column.comment.replace("\\", "\\\\").replace("'", "\\'")
+                assert f"COMMENT '{quoted}'" in definition, line
+        names = {c.name for c in emitted}
+        assert {"a", "b", "user_id"} | added <= names, "promoted and new columns are listed"
+        shout = next(c for c in emitted if c.name == "shout")
+        assert (shout.default_kind, shout.comment) == ("MATERIALIZED", "a, loud")
+
+    def test_a_source_never_deployed_lists_no_columns(self, tmp_path):
+        self._write_schemas(tmp_path, meta_current="1.0.0")
+        draft = self._deployed({"meta_schema": "meta/fw"}).model_copy(
+            update={"deployed_version": None}
+        )
+        config = compile_loader_routing(
+            FakeSourceRegistry([draft]), schemas_base_dir=tmp_path, derived_base_dir=tmp_path
+        )
+        assert config.table_schemas == {}
+
+    def test_an_emitted_column_carries_no_null(self, tmp_path):
+        self._write_schemas(tmp_path, meta_current="1.0.0")
+        compiled = compile_loader_routing(
+            FakeSourceRegistry([self._deployed({"meta_schema": "meta/fw"})]),
+            schemas_base_dir=tmp_path,
+            derived_base_dir=tmp_path,
+        ).model_dump(mode="json", exclude_unset=True)
+        a = next(c for c in compiled["table_schemas"]["fw"] if c["name"] == "a")
+        assert set(a) == {"name", "type"}
 
 
 # ---------------------------------------------------------------------------

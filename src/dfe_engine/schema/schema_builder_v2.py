@@ -247,6 +247,21 @@ class SchemaBuilderV2:
         source_columns = self._load_source_columns_for_snapshot(source.source, snap)
         return SchemaLoader.compose(profile_columns, source_columns)
 
+    def table_columns_for_source_version(
+        self, source: Source, *, source_version: str
+    ) -> list[tuple[str, str, str | None, str | None]]:
+        """Each column a source version's CREATE TABLE declares, in DDL order.
+
+        ``(name, type, default kind, comment)`` per column, from the columns and the
+        DDL generator the build itself uses, so they match the table it creates.
+
+        Raises:
+            SchemaBuildError: The version is not defined, or its schemas do not load.
+            TypeRegistryError: A column's type is not in the registry.
+        """
+        columns = self.load_columns_for_source_version(source, source_version=source_version)
+        return [(col.name, *self._ddl_gen.column_shape(col)) for col in columns]
+
     @staticmethod
     def version_snapshot_has_schema_files(snap: SourceVersion) -> bool:
         """True when the snapshot references at least one schema YAML file."""
