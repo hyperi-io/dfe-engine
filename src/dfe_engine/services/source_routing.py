@@ -37,7 +37,7 @@ from scalo.rules import RuleSet as ScaloRuleSet
 
 from dfe_engine.ingest.models import ALIASES_TABLE, IngestRules
 from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, default_tenant_id
-from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.services.routing_models import (
     BUS_DESTINATION,
@@ -48,6 +48,7 @@ from dfe_engine.services.routing_models import (
     DestinationsConfig,
     LoaderExternalTopic,
     LoaderRoutingConfig,
+    LoaderTableColumn,
     MatchOp,
     ReceiverRoutingConfig,
     Rule,
@@ -787,6 +788,7 @@ def compile_loader_routing(
     tenancy: Tenancy | None = None,
     derived_base_dir: Any = None,
     schemas_base_dir: Any = None,
+    builder_kwargs: Mapping[str, Any] | None = None,
 ) -> LoaderRoutingConfig:
     """Compile Source definitions into a LoaderRoutingConfig.
 
@@ -815,6 +817,11 @@ def compile_loader_routing(
     change, and its reload re-reads the table, so the new columns fill from the next
     record rather than once the cached schema expires.
 
+    ``table_schemas`` maps each deployed source's table to the columns its deployed
+    version's CREATE TABLE declares, built the way the deploy builds them and with no
+    ClickHouse read. The loader writes to the table from the first record instead of
+    waiting on its own read of it, and ClickHouse's answer replaces these columns.
+
     Args:
         registry: Where the Source definitions are read from.
         db: Default database for the loader.
@@ -823,10 +830,17 @@ def compile_loader_routing(
         derived_base_dir: Root a deployment's own meta-schemas resolve under.
         schemas_base_dir: The schemas tree, where a meta schema the release ships
             resolves when the deployment's own store has no copy.
+        builder_kwargs: The deployment's schema-build defaults
+            (``inherited_builder_kwargs``), which pick an unauthored source's header.
     """
-    builder = SchemaBuilderV2(schemas_base_dir=schemas_base_dir, derived_base_dir=derived_base_dir)
+    builder = SchemaBuilderV2(
+        schemas_base_dir=schemas_base_dir,
+        derived_base_dir=derived_base_dir,
+        **dict(builder_kwargs or {}),
+    )
     source_to_table: dict[str, str] = {}
     schema_versions: dict[str, str] = {}
+    table_schemas: dict[str, list[LoaderTableColumn]] = {}
     external: list[LoaderExternalTopic] = []
     for source in registry.get_all_sources(states=("active",)):
         source_to_table[source.source] = source.table_name
@@ -834,6 +848,9 @@ def compile_loader_routing(
             schema_versions[source.table_name] = _loader_schema_version(
                 source, source.deployed_version, builder
             )
+            columns = _loader_table_columns(source, source.deployed_version, builder)
+            if columns:
+                table_schemas[source.table_name] = columns
         entry = _external_topic(source, tenancy)
         if entry is not None:
             external.append(entry)
@@ -846,6 +863,8 @@ def compile_loader_routing(
     # Each is set only when non-empty, so a block with nothing to carry is unchanged.
     if schema_versions:
         config.table_schema_versions = schema_versions
+    if table_schemas:
+        config.table_schemas = table_schemas
     if external:
         config.external_topics = external
     return config
@@ -872,6 +891,37 @@ def _loader_schema_version(source: Source, deployed: str, builder: SchemaBuilder
         )
         return deployed
     return "+".join(part for part in parts if part)
+
+
+def _loader_table_columns(
+    source: Source, deployed: str, builder: SchemaBuilderV2
+) -> list[LoaderTableColumn]:
+    """The columns a deployed source's table was created with, empty when they cannot be built.
+
+    A version with no schema files builds no table. One whose schemas do not build is
+    left out with a warning, and the loader reads that table from ClickHouse instead.
+    """
+    from dfe_engine.source.type_registry import TypeRegistryError
+
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(source.versions[deployed]):
+        return []
+    try:
+        shapes = builder.table_columns_for_source_version(source, source_version=deployed)
+    except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
+        logger.warning(
+            f"Source {source.source!r} does not build its columns ({exc}) - the loader "
+            f"reads its table from ClickHouse"
+        )
+        return []
+    # Set only when present, so an emitted column carries no null.
+    return [
+        LoaderTableColumn(
+            name=name,
+            type=ch_type,
+            **{key: value for key, value in (("default_kind", kind), ("comment", note)) if value},
+        )
+        for name, ch_type, kind, note in shapes
+    ]
 
 
 def _external_topic(source: Source, tenancy: Tenancy | None) -> LoaderExternalTopic | None:

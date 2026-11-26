@@ -106,6 +106,8 @@ dfe-loader reads three things from the table, never a profile YAML or a source d
 
 The loader caches that schema for `schema.cache_ttl_secs` (300 by default, dfe-loader `docs/config-schema.yaml`). A source deploy moves the source's entry in the loader's `routing.table_schema_versions`, and the reload that follows drops that table's cached schema, so a column the deploy added fills from the next record. Any other applied change reaches the loader on the next refresh, and until then it keeps using the schema it holds.
 
+The same reload carries `routing.table_schemas`, the deployed table's columns and comments as the DDL created them ([source-routing.md](source-routing.md)). The loader starts that table's cache from them, so a first burst to a newly deployed table lands without waiting on a ClickHouse read. The read still runs, and its answer replaces the configured columns.
+
 ## What has to agree
 
 - Directive vocabulary. The loader parses `@skip`, `@default`, `@source`, `@renamed`, `@computed` and `@coerce` (dfe-loader `src/column_meta/mod.rs`). `tests/unit/test_services/test_loader_directive_contract.py` restates that list as a literal and fails when the engine writes a directive the loader does not parse.
