@@ -62,8 +62,8 @@ HOLDING_BLOCKS = [
 LEAF_COUNTS = {
     "dfe-receiver": 351,
     "dfe-loader": 198,
-    "dfe-archiver": 87,
-    "dfe-fetcher": 353,
+    "dfe-archiver": 95,
+    "dfe-fetcher": 367,
     "dfe-transform-vrl": 73,
     "dfe-transform-vector": 88,
 }
