@@ -24,6 +24,22 @@ from typing import Any
 from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 
 
+def collision_refusal(*, name: str, org_ids: Iterable[str], other: Any) -> tuple[str, str]:
+    """Why a write naming *name* and *org_ids* collides with *other*, and the request field to show it on."""
+    declared = set(org_ids)
+    shared = sorted({name, *declared} & {other.name, *org_tenant_ids(other)})
+    owner = getattr(other, "display_name", "") or other.name
+    clashing = [marker for marker in shared if marker in declared]
+    if not (clashing):
+        return f"The name {name!r} is already an organisation ID of {owner}.", "name"
+    listed = ", ".join(repr(marker) for marker in clashing)
+    if len(clashing) == 1:
+        detail = f"Organisation ID {listed} already belongs to {owner}."
+    else:
+        detail = f"Organisation IDs {listed} already belong to {owner}."
+    return f"{detail} An ID can belong to one organisation only.", "org_ids"
+
+
 def org_tenant_ids(org: Any) -> list[str]:
     """The ``_org_id`` values an org's rows carry: its ``org_ids``, else its name.
 

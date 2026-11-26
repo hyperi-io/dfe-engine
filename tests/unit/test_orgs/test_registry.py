@@ -54,9 +54,9 @@ class TestCreate:
         org = registry.create("acme")
         assert org.enabled is True
 
-    def test_create_empty_org_ids_by_default(self, registry):
+    def test_create_takes_its_name_as_its_id_by_default(self, registry):
         org = registry.create("acme")
-        assert org.org_ids == []
+        assert org.org_ids == ["acme"]
 
     def test_create_duplicate_raises(self, registry):
         registry.create("acme")

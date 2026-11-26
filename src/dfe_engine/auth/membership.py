@@ -33,6 +33,15 @@ def linked_providers(names: Iterable[str], bindings: Mapping[str, str]) -> froze
     return frozenset(name for name in own | related if name)
 
 
+def _assertions(
+    *, asserted: Iterable[str], identities: Iterable[LinkedIdentity], stamp: str
+) -> list[tuple[str, Iterable[str]]]:
+    """Each (provider, identifiers) an account's IdPs assert: its own list under its stamp, then each linked sign-in's."""
+    assertions = [(stamp, asserted)] if stamp else []
+    assertions.extend((identity.provider, identity.groups) for identity in identities)
+    return assertions
+
+
 def linked_groups(
     identifiers: Iterable[str], groups: Iterable[Group], providers: Collection[str]
 ) -> list[Group]:
@@ -122,12 +131,28 @@ def groups_held_by(
     """
     listed = list(groups)
     held = {group.name: group for group in listed if username in group.members}
-    assertions = [(stamp, asserted)] if stamp else []
-    assertions.extend((identity.provider, identity.groups) for identity in identities)
-    for provider, identifiers in assertions:
+    for provider, identifiers in _assertions(asserted=asserted, identities=identities, stamp=stamp):
         providers = linked_providers([provider], bindings)
         held.update((group.name, group) for group in linked_groups(identifiers, listed, providers))
     return [held[name] for name in sorted(held)]
+
+
+def groups_held_by_link(
+    account: Account, groups: Iterable[Group], *, bindings: Mapping[str, str]
+) -> dict[str, str]:
+    """Each group *account* holds only through an IdP assertion, by name, with the provider whose assertion links it. A group it is also a stored member of is left out."""
+    listed = list(groups)
+    members = {group.name for group in listed if account.username in group.members}
+    held = {}
+    assertions = _assertions(
+        asserted=account.groups, identities=account.identities, stamp=account.source_provider
+    )
+    for provider, identifiers in assertions:
+        providers = linked_providers([provider], bindings)
+        for group in linked_groups(identifiers, listed, providers):
+            if group.name not in members:
+                held.setdefault(group.name, provider)
+    return dict(sorted(held.items()))
 
 
 def groups_held_after(

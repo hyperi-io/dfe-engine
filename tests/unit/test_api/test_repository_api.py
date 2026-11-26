@@ -26,6 +26,7 @@ from dfe_engine.repository.store import RepositoryStore
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import DFESettings
 from tests.support.accounts import session_token
+from tests.support.org_groups import seed_org_group
 
 PREFS = "/api/v1/repository/preferences"
 OBJECTS = "/api/v1/repository/objects"
@@ -76,12 +77,7 @@ def repo_setup(client: TestClient, app, fake_ch, admin_headers: dict[str, str]) 
         ("acme-analysts", ["data_analyst"], "org:acme", ["orguser"]),
         ("globex-analysts", ["data_analyst"], "org:globex", ["globexuser"]),
     ):
-        resp = client.post(
-            GROUPS,
-            json={"name": name, "roles": roles, "scope": scope, "members": members},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 201, resp.text
+        seed_org_group(app=app, members=members, name=name, roles=roles, scope=scope)
     return client
 
 

@@ -22,7 +22,6 @@ from fastapi.testclient import TestClient
 from scalo.logger import logger
 from scalo.secrets import SecretsError
 
-from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -40,7 +39,9 @@ from dfe_engine.settings import IngestSettings
 from tests.support.accounts import session_token
 from tests.support.held_callers import caller_in_group, define_role
 from tests.support.local_kube_api import local_kube_api, mirror_for
+from tests.support.org_groups import seed_org_group
 from tests.support.present import present
+from tests.support.reauth import create_app_without_reauth
 
 BASE = "/api/v1/orgs/acme/ingest-credentials"
 CREATE = {"If-None-Match": "*"}
@@ -320,17 +321,9 @@ def acme_admin(client, app, admin_headers, api_settings, orgs) -> dict[str, str]
     """A user holding the admin role in acme alone."""
     if app.state.account_store.get("acme-admin") is None:
         app.state.account_store.create("acme-admin", "pw-acme-admin")
-    resp = client.post(
-        "/api/v1/auth/groups",
-        json={
-            "name": "acme-ops",
-            "roles": ["admin"],
-            "scope": "org:acme",
-            "members": ["acme-admin"],
-        },
-        headers=admin_headers,
+    seed_org_group(
+        app=app, members=["acme-admin"], name="acme-ops", roles=["admin"], scope="org:acme"
     )
-    assert resp.status_code == 201, resp.text
     token = session_token(app, api_settings, {"sub": "acme-admin", "org_id": "default"})
     return {"Authorization": f"Bearer {token}"}
 
@@ -837,7 +830,7 @@ class TestTheMirrorSecret:
         monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
         monkeypatch.delenv("KUBERNETES_SERVICE_PORT", raising=False)
         api_settings.ingest = IngestSettings(bearer_secret="dfe-ingest-bearer-tokens")
-        app = create_app(settings=api_settings)
+        app = create_app_without_reauth(settings=api_settings)
         try:
             with TestClient(app, raise_server_exceptions=False) as started:
                 assert app.state.bearer_mirror is not None
@@ -849,7 +842,9 @@ class TestTheMirrorSecret:
 @pytest.fixture
 def replica_b(client, api_settings) -> Generator[TestClient]:
     """A second engine on the same config and secrets directories, as another replica runs."""
-    with TestClient(create_app(settings=api_settings), raise_server_exceptions=False) as other:
+    with TestClient(
+        create_app_without_reauth(settings=api_settings), raise_server_exceptions=False
+    ) as other:
         yield other
 
 

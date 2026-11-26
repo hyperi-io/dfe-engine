@@ -123,35 +123,11 @@ def _response_fields(key_meta: APIKey) -> dict:
 # -- Endpoints ------------------------------------------------
 
 
-async def require_new_api_key_reauth(
-    body: CreateAPIKeyRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+async def refuse_new_api_key(
+    body: CreateAPIKeyRequest, request: Request, user: CurrentUser
 ) -> None:
-    """FastAPI dependency: the caller's re-auth grant for the API key the body creates."""
-    target = grant_target(kind="api_key", name=body.name)
-    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
-
-
-@router.post(
-    "",
-    response_model=APIKeyCreatedResponse,
-    status_code=201,
-    dependencies=[
-        Depends(require_platform_action(scopes_dict["api_key_write"])),
-        Depends(require_new_api_key_reauth),
-    ],
-)
-async def create_api_key(
-    body: CreateAPIKeyRequest,
-    user: CurrentUser,
-    request: Request,
-):
-    """Create a new API key. Returns the full key exactly once.
-
-    422 ``unknown_org`` when ``org`` names no registered org, ``org_role_only`` when a key bound to an org other than yours names a group outside that org's admin and viewer roles.
-    """
-    from dfe_engine.auth.api_keys import APIKeyStore
-
-    store: APIKeyStore = request.app.state.api_key_store
+    """FastAPI dependency: answer a key create's own refusals before its re-auth grant is asked for."""
+    store = request.app.state.api_key_store
     if store.get(body.name) is not None:
         raise ProblemError(409, f"API key '{body.name}' already exists", code="conflict")
     # The key's session takes every role its groups carry, so minting it hands them out.
@@ -169,6 +145,38 @@ async def create_api_key(
             f"its own org's admin or viewer group, so group {breach!r} is refused",
             code="org_role_only",
         )
+
+
+async def require_new_api_key_reauth(
+    body: CreateAPIKeyRequest, request: Request, user: CurrentUser, reauth: ReauthGrant = ""
+) -> None:
+    """FastAPI dependency: the caller's re-auth grant for the API key the body creates."""
+    target = grant_target(kind="api_key", name=body.name)
+    refuse_without_grant(reauth=reauth, request=request, target=target, user=user)
+
+
+@router.post(
+    "",
+    response_model=APIKeyCreatedResponse,
+    status_code=201,
+    dependencies=[
+        Depends(require_platform_action(scopes_dict["api_key_write"])),
+        Depends(refuse_new_api_key),
+        Depends(require_new_api_key_reauth),
+    ],
+)
+async def create_api_key(
+    body: CreateAPIKeyRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Create a new API key. Returns the full key exactly once.
+
+    422 ``unknown_org`` when ``org`` names no registered org, ``org_role_only`` when a key bound to an org other than yours names a group outside that org's admin and viewer roles.
+    """
+    from dfe_engine.auth.api_keys import APIKeyStore
+
+    store: APIKeyStore = request.app.state.api_key_store
     expires_at = body.expires_at
     ttl_days = request.app.state.settings.auth.api_key_default_ttl_days
     if expires_at is None and ttl_days > 0:
@@ -182,7 +190,7 @@ async def create_api_key(
             expires_at=expires_at,
         )
     except ValueError as exc:
-        # Bad/past expires_at -- the duplicate-name case is caught above.
+        # Bad or past expires_at: a taken name is refused before the grant is asked for.
         raise ProblemError(400, str(exc), code="validation_error") from exc
     audit_api_key_change(
         user.user_id,
@@ -245,3 +253,13 @@ async def revoke_api_key(
     except KeyError:
         raise ProblemError(404, f"No API key with short_token '{short_token}'", code="not_found")
     audit_api_key_change(user.user_id, key_name, short_token, "revoked")
+
+
+def revoke_org_keys(*, actor: str, org: str, request: Request) -> list[str]:
+    """Revoke every API key bound to *org*, once the org itself goes."""
+    store = request.app.state.api_key_store
+    bound = [key for key in store.list() if key.org == org]
+    for key in bound:
+        store.revoke(key.short_token)
+        audit_api_key_change(actor, key.name, key.short_token, "revoked")
+    return [key.name for key in bound]

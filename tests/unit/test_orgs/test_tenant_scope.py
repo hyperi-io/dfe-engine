@@ -16,7 +16,12 @@ plant a marker another org already owns.
 import pytest
 
 from dfe_engine.orgs.models import Org
-from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids, resolve_orgs
+from dfe_engine.orgs.tenant_scope import (
+    colliding_org,
+    collision_refusal,
+    org_tenant_ids,
+    resolve_orgs,
+)
 
 ACME = Org(name="acme", org_ids=["t-acme-1", "t-acme-2"])
 BETA = Org(name="beta", org_ids=[])
@@ -122,3 +127,41 @@ def test_updating_an_org_is_checked_against_everyone_else_but_itself():
     # acme's own stored record is in the list, as it is on a real update, and is skipped.
     assert colliding_org("acme", ["t-acme-1", "t-new"], ORGS) is None
     assert colliding_org("acme", ["beta"], ORGS) is not None
+
+
+@pytest.mark.parametrize(
+    ("name", "org_ids", "other", "expected"),
+    [
+        (
+            "charlie",
+            ["t-acme-1", "t-charlie-1"],
+            Org(display_name="Acme", name="acme", org_ids=["t-acme-1"]),
+            (
+                "Organisation ID 't-acme-1' already belongs to Acme. "
+                "An ID can belong to one organisation only.",
+                "org_ids",
+            ),
+        ),
+        (
+            "charlie",
+            ["t-acme-2", "t-acme-1"],
+            ACME,
+            (
+                "Organisation IDs 't-acme-1', 't-acme-2' already belong to acme. "
+                "An ID can belong to one organisation only.",
+                "org_ids",
+            ),
+        ),
+        (
+            "t-acme-1",
+            [],
+            ACME,
+            ("The name 't-acme-1' is already an organisation ID of acme.", "name"),
+        ),
+    ],
+    ids=["one_id", "several_ids", "name"],
+)
+def test_a_collision_names_what_is_shared_and_its_field(
+    name: str, org_ids: list[str], other: Org, expected: tuple[str, str]
+):
+    assert collision_refusal(name=name, org_ids=org_ids, other=other) == expected
