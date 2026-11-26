@@ -273,9 +273,9 @@ class TestCredentialName:
             "ch_password_env",
         ],
     )
-    def test_scalo_alone_would_mask_each_of_these_settings(self, name):
-        # Each case above is one the engine's own rule shows, not one scalo never matched.
-        assert is_credential_name(name) is True
+    def test_scalo_alone_leaves_each_of_these_settings(self, name):
+        # scalo matches only a credential term at the end of the name, so it agrees.
+        assert is_credential_name(name) is False
 
     def test_no_name_scalo_lists_ends_in_a_setting_word(self):
         # A setting word ending a listed name would show a credential scalo masks.
