@@ -5217,7 +5217,7 @@
           "OIDC Providers"
         ],
         "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).",
+        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).\n\nThe engine fetches the issuer from its own pod, so a caller who does not act across every org may not name one on a loopback, link-local or cloud metadata address (``host_blocked``).",
         "operationId": "auth.oidc-providers.create",
         "parameters": [
           {
@@ -5579,7 +5579,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.\n\nThe engine fetches the issuer from its own pod, so a caller who does not act across every org may not name one on a loopback, link-local or cloud metadata address (``host_blocked``).",
         "operationId": "auth.oidc-providers.apply",
         "parameters": [
           {
@@ -13634,7 +13634,7 @@
           "Rules"
         ],
         "summary": "Update Rule",
-        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as SQL, a ``where_clause`` or a ``condition``, as on\ncreate, and a rule replaced with SQL or a WHERE no longer carries a condition. With\nno ``source`` in the body the stored one stands, read as the registered source its\ntable names when it names none. Only a source the body sets or changes must be registered.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).\n\nThe replacement is written as SQL, a ``where_clause`` or a ``condition``, as on\ncreate, and a rule replaced with SQL or a WHERE no longer carries a condition. With\nno ``source`` in the body the stored one stands, read as the registered source its\ntable names when it names none. A source the body sets or changes must be registered,\nand SQL on a registered source must read its table. A stored source no longer\nregistered is not checked, so the rule stays editable.\n\nA replacement the hunt runner could not compile is refused with 422 and the\nstored rule is left as it was. A production+team write is routed to a review\nbranch instead of the branch the runner git-syncs, and the\n``X-DFE-Review-Required`` header says so.",
         "operationId": "rules.apply",
         "parameters": [
           {
@@ -14919,7 +14919,7 @@
           "Alerts"
         ],
         "summary": "Create Destination",
-        "description": "Create an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so.",
+        "description": "Create an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so. A URL whose scheme\nApprise has no service for is 422 ``unsupported_url_scheme``, and one naming a\nloopback, link-local or cloud metadata host is 422 ``host_blocked``.",
         "operationId": "alerts.create-destination",
         "requestBody": {
           "required": true,
@@ -15103,7 +15103,7 @@
           "Alerts"
         ],
         "summary": "Update Destination",
-        "description": "Update an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so.",
+        "description": "Update an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so. A changed URL is\nchecked as a create checks it.",
         "operationId": "alerts.destinations.apply",
         "parameters": [
           {
@@ -17362,7 +17362,7 @@
           "hunts"
         ],
         "summary": "Update Hunt",
-        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA rule that stays in the hunt keeps its stored entry, per-rule source and target\nincluded. A rule the edit adds is stored by name. The rule and results-table checks\nof the create apply to the kept entries.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
+        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA rule that stays in the hunt keeps its stored entry, per-rule source and target\nincluded. A rule the edit adds is stored by name. The rule and results-table checks\nof the create apply to the kept entries, except that ClickHouse is not asked to plan\na hunt the update leaves disabled.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org, 422 ``unknown_rule`` when a\nrule newly named has no stored rule file.",
         "operationId": "hunts.apply",
         "parameters": [
           {
@@ -19103,7 +19103,7 @@
           "synthetic-data"
         ],
         "summary": "Start Stream",
-        "description": "Start a stream task that posts generated events to an ingest URL.\n\nThe stream presents the engine's own ingest credential, minted for the primary org\non the first stream, unless the request's ``headers`` carry an ``Authorization``.",
+        "description": "Start a stream task that posts generated events to an ingest URL.\n\nA stream to the deployment's own receiver (the host of\n``synthetic_data.autostart_receiver_url`` or one of ``allowed_receiver_hosts``, over\nhttp or https) presents the engine's own ingest credential, minted for the primary\norg on the first such stream, unless the request's ``headers`` carry an\n``Authorization``. Any other host gets no engine credential, whatever the scheme.",
         "operationId": "synthetic-data.stream",
         "requestBody": {
           "content": {

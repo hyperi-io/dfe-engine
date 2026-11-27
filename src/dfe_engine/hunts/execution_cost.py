@@ -14,8 +14,6 @@ compiled condition, so its estimate stays unmeasured. A preview that cannot
 finish does not fail the fire.
 """
 
-from __future__ import annotations
-
 import time
 from typing import Any
 
@@ -23,7 +21,7 @@ from clickhouse_connect.driver.exceptions import ClickHouseError
 from scalo.resilience import ServiceUnavailable
 
 from dfe_engine.hunts.hunt_spec import HuntSpec
-from dfe_engine.hunts.rule_creation_service import CostEstimate
+from dfe_engine.hunts.rule_creation_service import CostEstimate, preview_failure_reason
 from dfe_engine.hunts.rule_guard import (
     VolumeMeasure,
     preview_settings,
@@ -34,6 +32,7 @@ from dfe_engine.hunts.rule_guard import (
 from dfe_engine.settings import DetectionGuardSettings
 
 _NO_RULE = "This hunt has no compiled rule, so its alert volume was not estimated."
+_NO_ORG = "the hunt reads no org"
 
 
 def measure_hunt_cost(
@@ -60,11 +59,15 @@ def measure_hunt_cost(
         estimate = CostEstimate(window_minutes=window, warnings=[_NO_RULE])
         return window, estimate.model_dump_json()
 
+    # A compiled rule always reads a fenced set of orgs, so no fence counts nothing.
+    if not spec.tenant_ids:
+        estimate = CostEstimate(window_minutes=window, warnings=[unmeasured_warning(_NO_ORG)])
+        return window, estimate.model_dump_json()
+
     started = time.monotonic()
     matched = 0
     totals: dict[tuple[str, str], int] = {}
     warnings: list[str] = []
-    tenants = spec.tenant_ids or None
     for statement in statements:
         source_db, source_table = statement.source or ("", "")
         sql = preview_sql(
@@ -73,12 +76,16 @@ def measure_hunt_cost(
             spec.timestamp_field,
             statement.where_clause,
             window,
-            tenant_ids=tenants,
+            tenant_ids=spec.tenant_ids,
         )
         try:
             rows = client.query(sql, settings=preview_settings(guard)).result_rows
-        except (ServiceUnavailable, ClickHouseError) as exc:
-            warnings.append(unmeasured_warning(str(exc)))
+        except ServiceUnavailable:
+            warnings.append(unmeasured_warning("ClickHouse could not be reached"))
+            continue
+        except ClickHouseError as exc:
+            reason = preview_failure_reason(exc, guard, window, f"{source_db}.{source_table}")
+            warnings.append(unmeasured_warning(reason))
             continue
         if not rows:
             warnings.append(unmeasured_warning("ClickHouse returned no count"))

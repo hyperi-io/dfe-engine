@@ -26,14 +26,17 @@ from sqlglot.errors import SqlglotError
 from sqlglot.tokens import TokenType
 
 from dfe_engine.clickhouse.function_guard import CallNotPermittedError, tokenize
-
-from .hdx_sanitizer import (
+from dfe_engine.hunts.hdx_sanitizer import (
     REFUSED_CLAUSES,
     HdxSanitizeError,
     HdxSanitizeResult,
     split_time_window,
 )
-from .rule_rewriter import TIME_PLACEHOLDER, TIMESTAMP_COLUMNS, strip_time_placeholder
+from dfe_engine.hunts.rule_rewriter import (
+    TIME_PLACEHOLDER,
+    TIMESTAMP_COLUMNS,
+    strip_time_placeholder,
+)
 
 # Every quantifier below is possessive, so the patterns run in linear time on any input.
 # The legacy export names the table through two placeholders and no database.

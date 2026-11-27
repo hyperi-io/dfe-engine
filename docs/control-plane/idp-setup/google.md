@@ -17,6 +17,26 @@ Google puts no groups in its sign-in token. So DFE asks for a read-only groups s
 DFE signs in with Google by code exchange, then reads the user's groups from the Cloud Identity API with the user's token.
 
 ```mermaid
+---
+config:
+  theme: base
+  fontFamily: Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif
+  themeVariables:
+    fontSize: 15px
+    lineColor: "#64748B"
+    primaryTextColor: "#0F172A"
+    actorBkg: "#FFFFFF"
+    actorBorder: "#94A3B8"
+    actorTextColor: "#0F172A"
+    actorLineColor: "#64748B"
+    signalColor: "#64748B"
+    signalTextColor: "#0F172A"
+    noteBkgColor: "#FFFFFF"
+    noteBorderColor: "#94A3B8"
+    noteTextColor: "#0F172A"
+  themeCSS: >-
+    .messageText{paint-order:stroke;stroke:#FFFFFF;stroke-width:3px;stroke-linejoin:round}
+---
 sequenceDiagram
     accTitle: L4 Detail -- Google sign-in
     accDescr: The browser opens DFE sign-in and DFE redirects to Google with the Cloud Identity groups scope. DFE exchanges the code for an ID token and the user's access token, then searches the user's groups in the Cloud Identity API with that token.

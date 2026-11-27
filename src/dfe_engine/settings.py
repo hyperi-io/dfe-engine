@@ -1095,7 +1095,11 @@ class SyntheticDataSettings(BaseModel):
         description="Comma-separated pack refs to stream continuously (empty = off)",
     )
     autostart_receiver_url: str = Field(
-        default="", description="Ingest URL the standing streams post to"
+        default="",
+        description=(
+            "Ingest URL the standing streams post to. Its host is the deployment's own "
+            "receiver, the one a stream presents the engine's ingest credential to"
+        ),
     )
     autostart_rate_eps: float = Field(
         default=2.0, gt=0, description="Per-pack rate for the standing streams"
@@ -1109,7 +1113,8 @@ class SyntheticDataSettings(BaseModel):
     allowed_receiver_hosts: str = Field(
         default="",
         description=(
-            "Comma-separated hostnames stream receiver URLs may target (empty = any http(s))"
+            "Comma-separated hostnames stream receiver URLs may target (empty = any http(s)). "
+            "A stream to one of them carries the engine's ingest credential"
         ),
     )
 

@@ -21,6 +21,7 @@ DELETE /api/v1/alerts/destinations/{name}     -> Delete destination
 """
 
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
@@ -53,6 +54,7 @@ from dfe_engine.hunts.alert_hunt_link import (
     require_hunt,
 )
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
+from dfe_engine.outbound_url import confine_outbound_url, refuse_blocked_host
 
 # Writes take the engine's write turn: each one syncs the whole mirror Secret, and a
 # hunt write or delete changes destinations too, so two in flight could land an older view.
@@ -183,7 +185,9 @@ def create_destination(
     """Create an alert destination.
 
     Linking it to a hunt writes the hunt YAML, so in production+team that link is
-    routed to a review branch and ``X-DFE-Review-Required`` says so.
+    routed to a review branch and ``X-DFE-Review-Required`` says so. A URL whose scheme
+    Apprise has no service for is 422 ``unsupported_url_scheme``, and one naming a
+    loopback, link-local or cloud metadata host is 422 ``host_blocked``.
     """
     if not is_destination_name(body.name):
         raise ProblemError(
@@ -197,6 +201,7 @@ def create_destination(
         raise ProblemError(409, f"Alert destination '{body.name}' already exists", code="conflict")
     # Nothing is stored yet, so the mask has nothing to restore from and is refused.
     body.url = _typed_url(body.url, "")
+    _refuse_unsafe_url(body.url)
     if body.hunt_name is not None:
         _ensure_hunt_for_link(hunt_registry, body.hunt_name)
     _write_destination(registry, body, hunt_name=body.hunt_name)
@@ -236,13 +241,16 @@ def update_destination(
     """Update an alert destination.
 
     Linking it to a hunt writes the hunt YAML, so in production+team that link is
-    routed to a review branch and ``X-DFE-Review-Required`` says so.
+    routed to a review branch and ``X-DFE-Review-Required`` says so. A changed URL is
+    checked as a create checks it.
     """
     if name not in registry:
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
     existing = registry.get(name)
     body.name = name
     body.url = _typed_url(body.url, existing.url)
+    if body.url != existing.url:
+        _refuse_unsafe_url(body.url)
     hunt_to_link = body.hunt_name
     if hunt_to_link is not None:
         _ensure_hunt_for_link(hunt_registry, hunt_to_link)
@@ -301,6 +309,44 @@ def _typed_url(written: str, stored: str) -> str:
         )
     except contract.MaskedValueError as exc:
         raise ProblemError(400, str(exc), code=exc.code) from exc
+
+
+# Apprise schemes that POST to whatever host the URL names, with the plain HTTP scheme each maps to.
+_WEBHOOK_SCHEMES = {
+    "apprise": "http",
+    "apprises": "https",
+    "form": "http",
+    "forms": "https",
+    "json": "http",
+    "jsons": "https",
+    "xml": "http",
+    "xmls": "https",
+}
+
+
+def _refuse_unsafe_url(url: str) -> None:
+    """Refuse a URL Apprise has no service for, or one the hunt runner would send to its own pod.
+
+    A webhook scheme's host is checked as an outbound URL is, resolved included. Any
+    other scheme's host is checked as written, never resolved, because for most
+    services it is part of the credential.
+
+    Raises:
+        ProblemError: 422 ``unsupported_url_scheme`` or ``host_blocked``.
+    """
+    from apprise.manager_plugins import NotificationManager
+
+    parsed = urlsplit(url.strip())
+    scheme = parsed.scheme.lower()
+    if scheme not in NotificationManager().schemas():
+        raise ProblemError(
+            422, f"url scheme {scheme!r} is not an Apprise service", code="unsupported_url_scheme"
+        )
+    webhook = _WEBHOOK_SCHEMES.get(scheme)
+    if webhook is not None:
+        confine_outbound_url(f"{webhook}{url.strip()[len(scheme) :]}", "url")
+    elif parsed.hostname:
+        refuse_blocked_host(parsed.hostname, "url")
 
 
 def _write_destination(

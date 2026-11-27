@@ -40,6 +40,9 @@ async def run_standing_stream(
     retry_seconds: float = _RETRY_SECONDS,
 ) -> None:
     """Stream one pack forever in bounded segments, presenting the token *credential* gives each one. Degrade and retry on errors."""
+    # A receiver that may not carry the token gets none, so none is minted for it.
+    if not (service.presents_credential(request.receiver_url)):
+        credential = None
     while True:
         try:
             held = None if credential is None else await asyncio.to_thread(credential)

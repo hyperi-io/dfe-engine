@@ -40,6 +40,7 @@ from dfe_engine.clickhouse.quoting import plain_table_name
 from dfe_engine.fieldmap.registry import FieldMapError
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.routing import WritePosture
+from dfe_engine.outbound_url import confine_outbound_url
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.sigma.catalog import (
@@ -520,76 +521,15 @@ def _make_provider(request: Request, config: ProviderConfig):
 
 
 def _confine_provider_url(url: str, field: str) -> None:
-    """Confine a provider's outbound URL (SSRF defence, S1).
-
-    http(s) only. A LITERAL-IP host is checked directly (blocks loopback,
-    link-local incl. the 169.254.169.254 metadata endpoint, unspecified, multicast,
-    reserved - even the trailing-dot form, no DNS needed). A HOSTNAME is resolved
-    BEST-EFFORT and rejected if it resolves to such an address. If resolution is
-    UNAVAILABLE (a network-restricted runner / CI) it is NOT hard-failed - the
-    ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` allowlist + pin-at-connect (follow-up) are the
-    backstop. Private RFC1918 hosts are NOT blocked (internal feeds are legitimate).
-    """
-    import ipaddress
+    """Confine a provider's outbound URL, held to ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` when that is set."""
     import os
-    import socket
-    from urllib.parse import urlparse
 
-    parsed = urlparse(url.strip())
-    if parsed.scheme not in ("http", "https"):
-        raise ProblemError(422, f"{field} must be http(s)", code="bad_url_scheme")
-    host = (parsed.hostname or "").rstrip(".").lower()
-    if not host:
-        raise ProblemError(422, f"{field} has no host", code="bad_url")
-    if host in ("localhost", "metadata", "metadata.google.internal"):
-        raise ProblemError(422, f"{field} host {host!r} is blocked", code="host_blocked")
-
-    def _blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        return (
-            ip.is_loopback
-            or ip.is_link_local
-            or ip.is_unspecified
-            or ip.is_multicast
-            or ip.is_reserved
-        )
-
-    # A literal-IP host is checked DIRECTLY (no DNS) - blocks 169.254.169.254 /
-    # 127.0.0.1 / 0.0.0.0 and their trailing-dot forms even with no network.
-    try:
-        literal = ipaddress.ip_address(host)
-    except ValueError:
-        literal = None
-    if literal is not None and _blocked(literal):
-        raise ProblemError(
-            422, f"{field} host {host!r} is blocked ({literal})", code="host_blocked"
-        )
-
-    # A hostname (or decimal/octal numeric) is resolved BEST-EFFORT: reject if it
-    # resolves to a blocked address, but if resolution is UNAVAILABLE (a
-    # network-restricted CI runner) do NOT hard-fail - the allowlist below +
-    # pin-at-connect (follow-up) are the backstop.
-    if literal is None:
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        try:
-            infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-        except OSError:
-            infos = []
-        for info in infos:
-            if _blocked(ipaddress.ip_address(info[4][0])):
-                raise ProblemError(
-                    422, f"{field} host {host!r} resolves to a blocked address", code="host_blocked"
-                )
-    allowed = [
-        h.strip().lower()
-        for h in os.environ.get("DFE_ENGINE_SIGMA_ALLOWED_HOSTS", "").split(",")
-        if h.strip()
-    ]
-    if allowed and host not in allowed:
-        raise ProblemError(
-            422,
-            f"{field} host {host!r} not in DFE_ENGINE_SIGMA_ALLOWED_HOSTS",
-            code="host_not_allowed",
-        )
+    allowed = {
+        host.strip().lower()
+        for host in os.environ.get("DFE_ENGINE_SIGMA_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    }
+    confine_outbound_url(url, field, allowed_hosts=allowed)
 
 
 _PROVIDER_SECRET_PREFIX = "sigma/"
@@ -621,6 +561,7 @@ def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
     - a git_repo ``url`` and a valhalla ``base_url`` are confined by
       :func:`_confine_provider_url` (http(s), no loopback/link-local/metadata host,
       and the ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` allowlist when set).
+    - a git_repo ``subdir`` must be a relative path with no ``..``, so a scan stays in the clone.
     - ``auth.secret_path`` must sit under ``sigma/``, so a provider cannot send
       another secret, such as the JWT signing key, to the host it names.
     """
@@ -638,6 +579,11 @@ def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
                 )
     elif config.kind == ProviderKind.GIT_REPO:
         _confine_provider_url(str(config.options.get("url", "")), "git url")
+        subdir = PurePosixPath(str(config.options.get("subdir", "")).strip())
+        if subdir.is_absolute() or ".." in subdir.parts:
+            raise ProblemError(
+                422, "git subdir must be a path inside the repository", code="path_escape"
+            )
     elif config.kind == ProviderKind.VALHALLA:
         base_url = str(config.options.get("base_url", "")).strip()
         if base_url:  # empty -> the provider's built-in Nextron API default (safe)

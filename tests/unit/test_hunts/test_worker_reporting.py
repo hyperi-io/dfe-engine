@@ -12,11 +12,15 @@ rows landed. These assert the LINE - that it carries the hunt, the rows and the
 duration - and the rows counter beside it.
 """
 
+import time
+from types import SimpleNamespace
+
 from scalo.logger import logger
 
-from dfe_engine.hunts.hunt_spec import HuntSpec
+from dfe_engine.hunts.hunt_spec import HuntSpec, HuntStatement
 from dfe_engine.hunts.runner_metrics import HuntRunnerMetrics
 from dfe_engine.hunts.worker import HuntWorker
+from dfe_engine.settings import DetectionGuardSettings
 from tests.support.recording_metrics import Observation
 
 SPEC = HuntSpec(
@@ -117,3 +121,63 @@ def test_a_worker_with_no_metrics_backend_still_runs_the_hunt():
     worker.run(SPEC, scheduled_start=600)
 
     assert coord.runs == [("brute-force", 600, 3)]
+
+
+class _CostedCh(_FakeCh):
+    """A client whose volume preview takes measurable time, and which notes when it started."""
+
+    def __init__(self) -> None:
+        super().__init__(written_rows=1)
+        self.preview_started: float | None = None
+
+    def query(self, sql: str, settings: dict | None = None) -> SimpleNamespace:
+        self.preview_started = time.monotonic()
+        time.sleep(0.05)
+        return SimpleNamespace(result_rows=[(10, 1)])
+
+
+class _TimingCoordinator(_FakeCoordinator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.durations_ms: list[float] = []
+
+    def record_run(self, hunt_id: str, fire: int, rows_written: int, **extra: object) -> None:
+        super().record_run(hunt_id, fire, rows_written)
+        self.durations_ms.append(float(extra["duration_ms"]))  # ty: ignore[invalid-argument-type]  # record_run's duration is a float
+
+
+def test_a_fire_stores_its_own_duration_without_the_cost_preview():
+    ch = _CostedCh()
+    coord = _TimingCoordinator()
+    spec = HuntSpec(
+        hunt_id="brute-force",
+        interval_seconds=60,
+        tenant_ids=["acme"],
+        queries=[
+            HuntStatement(
+                sql="INSERT INTO dfe.detection SELECT * FROM dfe.events WHERE {window}",
+                source=("dfe", "events"),
+                where_clause="severity = 1",
+            )
+        ],
+    )
+    worker = HuntWorker(ch, coord, guard=DetectionGuardSettings())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    before = time.monotonic()
+
+    worker.run(spec, scheduled_start=600)
+
+    assert ch.preview_started is not None
+    assert coord.durations_ms[0] / 1000 <= ch.preview_started - before
+
+
+def test_a_worker_keeps_only_each_hunts_latest_recorded_fire():
+    worker = HuntWorker(_FakeCh(written_rows=1), _FakeCoordinator())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+
+    for fire in (600, 660, 720):
+        worker.run(SPEC, scheduled_start=fire)
+
+    assert [worker.fire_recorded("brute-force", fire) for fire in (600, 660, 720)] == [
+        False,
+        False,
+        True,
+    ]

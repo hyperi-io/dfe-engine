@@ -178,13 +178,13 @@ class HuntWorker:
         # None leaves the fire's cost unmeasured. The runner passes the detection guard
         # only with hunts.measure_fire_cost on, because the preview runs inside the lease.
         self._guard = guard
-        # Fires whose execution row was written, so a later failure of the notifier
-        # is not recorded over the completed fire.
-        self._recorded: set[tuple[str, int]] = set()
+        # Each hunt's last fire whose execution row was written, so a later failure of
+        # the notifier is not recorded over the completed fire.
+        self._recorded: dict[str, int] = {}
 
     def fire_recorded(self, hunt_id: str, fire: int) -> bool:
-        """Whether this worker already stored an execution row for the fire."""
-        return (hunt_id, fire) in self._recorded
+        """Whether this worker stored an execution row for the hunt's latest fire, *fire*."""
+        return self._recorded.get(hunt_id) == fire
 
     def _execution_cost(self, spec: HuntSpec) -> tuple[int, str]:
         """The fire's cost window and estimate JSON, or zeros when it is not measured."""
@@ -474,16 +474,18 @@ class HuntWorker:
             short_of = complete if released[2] else released[1]
             self._settle_safe_horizon(spec.hunt_id, short_of, safe_from, dedupes=dedupes)
         self._coord.set_watermark(spec.hunt_id, end)
+        # Timed before the estimate, which is a preview read and not part of the fire.
+        elapsed = time.monotonic() - began
         window_minutes, estimate = self._execution_cost(spec)
         self._coord.record_run(
             spec.hunt_id,
             scheduled_start,
             written,
-            duration_ms=(time.monotonic() - began) * 1000,
+            duration_ms=elapsed * 1000,
             cost_window_minutes=window_minutes,
             cost_estimate=estimate,
         )
-        self._recorded.add((spec.hunt_id, scheduled_start))
+        self._recorded[spec.hunt_id] = scheduled_start
         # The ONE line a fire leaves behind: without it a hunt that stops finding
         # anything is indistinguishable from a hunt that stopped running (#357).
         logger.info(
@@ -491,7 +493,7 @@ class HuntWorker:
             hunt_id=spec.hunt_id,
             fire=scheduled_start,
             rows_written=written,
-            duration_seconds=round(time.monotonic() - began, 3),
+            duration_seconds=round(elapsed, 3),
         )
         self._metrics.rows_written(spec.hunt_id, written)
         if self._notifier is not None:

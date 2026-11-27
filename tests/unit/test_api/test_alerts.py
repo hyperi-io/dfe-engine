@@ -799,3 +799,61 @@ class TestDestinationNameContainment:
         assert resp.status_code == 404, resp.text
         assert not (tmp_path / "outside").exists()
         assert list((tmp_path / "alert-destinations").iterdir()) == []
+
+
+class TestTheDestinationUrlStaysOffThePod:
+    """A destination URL names where the hunt runner posts, so it may not name the runner's own pod or the cloud metadata address."""
+
+    @pytest.mark.parametrize(
+        ("url", "status", "code"),
+        [
+            pytest.param(
+                "json://169.254.169.254/latest/meta-data", 422, "host_blocked", id="metadata"
+            ),
+            pytest.param("jsons://localhost:8443/hook", 422, "host_blocked", id="localhost"),
+            pytest.param("form://127.0.0.1:9000/", 422, "host_blocked", id="loopback-form"),
+            pytest.param("xml://[::1]/x", 422, "host_blocked", id="loopback-v6"),
+            pytest.param(
+                "ntfy://169.254.169.254/topic", 422, "host_blocked", id="any-scheme-literal-ip"
+            ),
+            pytest.param("file:///etc/passwd", 422, "unsupported_url_scheme", id="file"),
+            pytest.param(
+                "http://hooks.example.test/x", 422, "unsupported_url_scheme", id="bare-http"
+            ),
+            pytest.param("jsons://hooks.example.test/x", 201, None, id="external-webhook"),
+            pytest.param("json://10.0.0.5:8080/hook", 201, None, id="private-network-webhook"),
+            pytest.param(
+                "slack://T00000000/B00000000/X0000000000000000000000/", 201, None, id="slack"
+            ),
+        ],
+    )
+    def test_create_refuses_a_url_the_runner_may_not_send_to(
+        self, alert_client, alert_admin_headers, sample_destination, url, status, code
+    ):
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json={**sample_destination, "url": url},
+            headers=alert_admin_headers,
+        )
+
+        assert resp.status_code == status, resp.text
+        if code is not None:
+            assert resp.json()["code"] == code
+            listed = alert_client.get("/api/v1/alerts/destinations", headers=alert_admin_headers)
+            assert listed.json()["items"] == []
+
+    def test_an_update_repointing_the_url_at_the_pod_is_refused(
+        self, alert_client, alert_admin_headers, sample_destination
+    ):
+        created = alert_client.post(
+            "/api/v1/alerts/destinations", json=sample_destination, headers=alert_admin_headers
+        )
+        assert created.status_code == 201, created.text
+
+        resp = alert_client.put(
+            "/api/v1/alerts/destinations/slack-alerts",
+            json={**sample_destination, "url": "json://127.0.0.1:8080/"},
+            headers=alert_admin_headers,
+        )
+
+        assert (resp.status_code, resp.json()["code"]) == (422, "host_blocked")

@@ -143,7 +143,7 @@ def _rule_entries(definition: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RuleTables:
     """The table a hunt's rule reads and the table it writes detections to."""
 

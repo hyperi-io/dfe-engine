@@ -727,16 +727,17 @@ def _flag_missing_rules(detail: HuntDetailResponse, rules_dir: Any) -> HuntDetai
 
 
 def _attach_rule_descriptions(detail: HuntDetailResponse, rules: Any) -> HuntDetailResponse:
-    """Copy each named rule's description onto the detail. A missing file stays blank."""
+    """Copy each named rule's description onto the detail. A missing or unloadable file stays blank."""
     if rules is None:
         return detail
     described: list[HuntRuleEntry] = []
     for entry in detail.rules:
-        description = None
         try:
-            description = rules.get(entry.rule_name).description or None
-        except RuleNotFoundError:
+            rule = rules.get(entry.rule_name)
+        except RuleNotFoundError, ValueError:
             description = None
+        else:
+            description = rule.description or None
         described.append(entry.model_copy(update={"description": description}))
     detail.rules = described
     return detail
@@ -879,8 +880,10 @@ def _execution_cost(row: HuntExecutionRow) -> CostEstimate:
     if row.cost_estimate:
         try:
             return CostEstimate.model_validate_json(row.cost_estimate)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.warning(
+                "stored hunt cost estimate does not parse", fire=row.fire, error=str(exc)
+            )
     return CostEstimate(
         window_minutes=row.cost_window_minutes,
         warnings=["The alert volume was not measured for this execution."],
@@ -1007,7 +1010,8 @@ def update_hunt(
 
     A rule that stays in the hunt keeps its stored entry, per-rule source and target
     included. A rule the edit adds is stored by name. The rule and results-table checks
-    of the create apply to the kept entries.
+    of the create apply to the kept entries, except that ClickHouse is not asked to plan
+    a hunt the update leaves disabled.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
@@ -1025,7 +1029,9 @@ def update_hunt(
     if body.enabled is None and "enabled" in stored:
         config["enabled"] = stored["enabled"]
     _validate_hunt_config(config, settings, rules, _held_rules(stored))
-    _check_hunt_will_run(config, settings, rules)
+    # A disabled hunt runs nothing, so one whose rule or target broke can still be switched off.
+    if config.get("enabled", True) is not False:
+        _check_hunt_will_run(config, settings, rules)
     _resolve_customers(request, config)
     outcome = registry.save(name, config, created_by=user.user_id)
     _clear_auto_disable(name, enabled=body.enabled, outcome=outcome)

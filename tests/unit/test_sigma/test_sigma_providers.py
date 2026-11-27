@@ -179,6 +179,38 @@ async def test_git_repo_provider_clones_and_scans(tmp_path):
     assert docs[0].source_ref.startswith("rules/")
 
 
+@pytest.mark.parametrize(
+    ("subdir", "found"),
+    [("rules", [_UUID_A]), ("../outside", []), ("rules/../../outside", [])],
+    ids=["inside", "parent", "dotdot_inside_the_path"],
+)
+async def test_a_git_scan_reads_only_files_inside_the_clone(tmp_path, subdir, found):
+    from dulwich import porcelain
+
+    outside = tmp_path / "cache" / "outside"
+    outside.mkdir(parents=True)
+    (outside / "b.yml").write_text(_rule_yaml(_UUID_B), encoding="utf-8")
+    repo = tmp_path / "src"
+    branch = _make_git_repo(repo, {"rules/a.yml": _rule_yaml(_UUID_A)})
+    link = repo / "rules" / "leak.yml"
+    link.symlink_to("../../outside/b.yml")
+    porcelain.add(str(repo), paths=[str(link)])
+    porcelain.commit(str(repo), message=b"link", author=b"t <t@t>", committer=b"t <t@t>")
+    provider = GitRepoProvider(
+        ProviderConfig(
+            name="localrepo",
+            kind=ProviderKind.GIT_REPO,
+            options={"url": str(repo), "branch": branch, "subdir": subdir},
+        ),
+        work_dir=tmp_path / "cache",
+    )
+
+    docs = await provider.fetch()
+
+    assert (provider._clone_path / "rules" / "leak.yml").is_symlink()
+    assert [doc.id for doc in docs] == found
+
+
 async def test_git_repo_provider_refresh_picks_up_new_commit(tmp_path):
     from dulwich import porcelain
 

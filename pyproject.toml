@@ -10,9 +10,9 @@ readme = "README.md"
 
 dependencies = [
     # [kafka] supplies genson to scalo.kafka.providers. Without [metrics], /metrics 404s.
-    "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.12,<3",
+    "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.14,<3",
     # Floor: hunt_run 1.1.0, the error, duration and cost a finished fire stores.
-    "dfe-schemas>=0.2.33rc4,<1",
+    "dfe-schemas>=0.2.33,<1",
     "pandas>=3.0.3",
     "numpy>=2.5.4",
     "clickhouse-connect>=1.10.0",
@@ -63,7 +63,7 @@ dependencies = [
     # Kafka topic admin: a source deploy creates its _land and _load topics.
     "confluent-kafka>=2.16.0",
     # The sampler's smart and anomaly modes. [enhanced] adds the fuzzy dedup SamplerSettings.level uses.
-    "logreducer[enhanced]>=3.5.6",
+    "logreducer[enhanced]>=3.5.7",
     "faker>=40.43.0",
     "sqlglot>=30.22.0",
 ]

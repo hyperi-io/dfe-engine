@@ -32,15 +32,15 @@ Usage:
 import re
 from dataclasses import dataclass, field
 
-from .hdx_sanitizer import HdxSanitizeError, split_time_window
+from dfe_engine.hunts.hdx_sanitizer import HdxSanitizeError, split_time_window
 
 TIME_PLACEHOLDER = "{timestamp_condition}"
+"""Time-bound placeholder a rule stored before #683 may still carry. The hunt window replaces it."""
 
 SELECT_STAR_WARNING = (
     "SELECT * detected. Hunt output will use lean columns "
     "(matched_uuid + rule metadata + _json) instead."
 )
-"""Time-bound placeholder a rule stored before #683 may still carry. The hunt window replaces it."""
 
 # The lookbehind starts the second form only at the first character of a whitespace
 # run, so a long run is read once rather than once from each of its characters.

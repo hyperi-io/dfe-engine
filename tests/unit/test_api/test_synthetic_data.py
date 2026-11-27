@@ -23,6 +23,8 @@ import pytest
 from dfe_engine.orgs.ingest_credentials import SYNTHETIC_DATA_CREDENTIAL
 from dfe_engine.orgs.ingest_tokens import credential_secret_path
 from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
+from dfe_engine.settings import SyntheticDataSettings
+from dfe_engine.synthetic_data.service import SyntheticDataService
 from tests.support.orgs import name_your_org
 
 _SCHEMAS_ROOT = _resolve_package_schemas_root()
@@ -199,18 +201,32 @@ class TestStream:
         assert summary["sent"] == 0
 
     @pytest.mark.parametrize(
-        ("named", "sent", "expected"),
+        ("own", "sent", "expected"),
         [
-            (True, {}, "engine"),
-            (True, {"Authorization": "Bearer mine"}, "Bearer mine"),
-            (False, {}, ""),
+            ({"allowed_receiver_hosts": "127.0.0.1"}, {}, "engine"),
+            ({"autostart_receiver_url": "http://127.0.0.1:1/ingest"}, {}, "engine"),
+            ({}, {}, ""),
+            ({"autostart_receiver_url": "http://receiver.dfe.example/ingest"}, {}, ""),
+            (
+                {"allowed_receiver_hosts": "127.0.0.1"},
+                {"Authorization": "Bearer mine"},
+                "Bearer mine",
+            ),
+            ({}, {"Authorization": "Bearer mine"}, "Bearer mine"),
         ],
-        ids=["engine_credential", "caller_auth_stands", "no_primary_org"],
+        ids=[
+            "listed_receiver_over_http",
+            "autostart_host_over_http",
+            "nothing_configured",
+            "foreign_receiver_over_http",
+            "caller_auth_stands_on_own",
+            "caller_auth_stands_on_foreign",
+        ],
     )
-    def test_receiver_auth(self, admin_headers, app, client, receiver, named, sent, expected):
+    def test_receiver_auth(self, admin_headers, app, client, receiver, own, sent, expected):
         url, seen = receiver
-        if named:
-            name_your_org(app=app)
+        name_your_org(app=app)
+        app.state.synthetic_data = SyntheticDataService(SyntheticDataSettings(**own))
         r = client.post(
             "/api/v1/synthetic-data/stream",
             json={
@@ -228,7 +244,36 @@ class TestStream:
         if expected == "engine":
             token = app.state.dfe_secrets.get_or_none(credential_secret_path(credential=held))
             expected = f"Bearer {token}"
+        else:
+            assert held is None
         assert (r.json()["response"]["sent"], set(seen)) == (2, {expected})
+
+    @pytest.mark.parametrize(
+        ("named", "minted"),
+        [(True, True), (False, False)],
+        ids=["engine_credential_minted", "no_primary_org"],
+    )
+    def test_the_own_https_receiver_mints_the_credential_once_an_org_is_named(
+        self, admin_headers, app, client, named, minted
+    ):
+        if named:
+            name_your_org(app=app)
+        app.state.synthetic_data = SyntheticDataService(
+            SyntheticDataSettings(allowed_receiver_hosts="127.0.0.1")
+        )
+        r = client.post(
+            "/api/v1/synthetic-data/stream",
+            json={
+                "count": 1,
+                "rate_eps": 200,
+                "receiver_url": "https://127.0.0.1:9/ingest",
+                "schema": "meta/syslog",
+                "wait": 30,
+            },
+            headers=admin_headers,
+        )
+        held = app.state.org_registry.ingest_credentials.get(SYNTHETIC_DATA_CREDENTIAL)
+        assert (r.status_code, held is not None) == (202, minted)
 
     def test_stream_task_is_pollable_and_listed(self, client, admin_headers):
         submit = client.post(

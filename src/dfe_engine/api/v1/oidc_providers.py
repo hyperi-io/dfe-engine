@@ -82,6 +82,7 @@ from dfe_engine.http_errors import (
 )
 from dfe_engine.names import StoreName
 from dfe_engine.orgs.role_groups import usable_org_admins
+from dfe_engine.outbound_url import confine_outbound_url
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -540,6 +541,17 @@ def _refuse_env_sources(
             )
 
 
+def _confine_issuer(*, issuer: str | None, request: Request, user: Any) -> None:
+    """Refuse an issuer the engine may not call, for a caller who does not act across every org.
+
+    The engine fetches the issuer's discovery document from its own pod, so an org admin
+    could otherwise point it at a loopback or metadata address.
+    """
+    if (not (issuer)) or reads_every_org(request, user, scopes_dict["oidc_write"]):
+        return
+    confine_outbound_url(issuer, "issuer")
+
+
 def _refuse_repointed_env_sources(
     *, body: UpdateProviderRequest, current: OIDCProvider, request: Request, user: Any
 ) -> None:
@@ -878,6 +890,7 @@ def _refuse_new_provider(*, body: CreateProviderRequest, request: Request, user)
         user=user,
     )
     refuse_unknown_orgs(request, [body.org])
+    _confine_issuer(issuer=body.issuer, request=request, user=user)
     registry = _get_registry(request)
     if registry.get(body.name) is not None:
         raise ProblemError(409, f"OIDC provider '{body.name}' already exists", code="conflict")
@@ -968,6 +981,8 @@ async def create_provider(
     """Create a new OIDC provider configuration (admin only).
 
     Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).
+
+    The engine fetches the issuer from its own pod, so a caller who does not act across every org may not name one on a loopback, link-local or cloud metadata address (``host_blocked``).
     """
     registry = _get_registry(request)
     provider = _refuse_new_provider(body=body, request=request, user=user)
@@ -1055,6 +1070,8 @@ def _refuse_provider_update(
     action = scopes_dict["oidc_write"]
     registry = _get_registry(request)
     current = _require_reachable_provider(action=action, name=name, request=request, user=user)
+    if body.issuer != current.issuer:
+        _confine_issuer(issuer=body.issuer, request=request, user=user)
     org = current.org if body.org is None else body.org
     if org != current.org:
         refuse_unreachable_org(
@@ -1191,6 +1208,8 @@ async def update_provider(
     """Update an OIDC provider configuration (admin only).
 
     A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled``, ``display_name`` and ``trusted_email_domains`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
+
+    The engine fetches the issuer from its own pod, so a caller who does not act across every org may not name one on a loopback, link-local or cloud metadata address (``host_blocked``).
     """
     registry = _get_registry(request)
     plan = _refuse_provider_update(body=body, name=name, request=request, user=user)

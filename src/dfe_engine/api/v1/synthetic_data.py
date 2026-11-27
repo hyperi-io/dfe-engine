@@ -49,7 +49,7 @@ from dfe_engine.synthetic_data.models import (
     StreamRequest,
     SyntheticDataError,
 )
-from dfe_engine.synthetic_data.service import SyntheticDataService
+from dfe_engine.synthetic_data.service import SyntheticDataService, caller_authorises
 
 router = APIRouter(tags=["synthetic-data"])
 
@@ -72,11 +72,6 @@ def _task_manager(request: Request) -> TaskManager:
 
 def _bad_request(exc: SyntheticDataError) -> ProblemError:
     return ProblemError(400, str(exc), code="bad_synthetic_data_request")
-
-
-def _caller_authorises(*, body: StreamRequest) -> bool:
-    """Whether the request sends its own receiver auth, which the engine's credential then stays out of."""
-    return any(name.lower() == "authorization" for name in body.headers or {})
 
 
 async def _stream_credential(*, request: Request, user: Any) -> StreamCredential | None:
@@ -148,8 +143,11 @@ async def start_stream(
 ) -> TaskOperation:
     """Start a stream task that posts generated events to an ingest URL.
 
-    The stream presents the engine's own ingest credential, minted for the primary org
-    on the first stream, unless the request's ``headers`` carry an ``Authorization``.
+    A stream to the deployment's own receiver (the host of
+    ``synthetic_data.autostart_receiver_url`` or one of ``allowed_receiver_hosts``, over
+    http or https) presents the engine's own ingest credential, minted for the primary
+    org on the first such stream, unless the request's ``headers`` carry an
+    ``Authorization``. Any other host gets no engine credential, whatever the scheme.
     """
     service = _service(request)
     try:
@@ -173,7 +171,8 @@ async def start_stream(
             code="too_many_streams",
         )
     credential = None
-    if not (_caller_authorises(body=body)):
+    # The token is minted only for a stream that may carry it.
+    if (not caller_authorises(body.headers)) and service.presents_credential(body.receiver_url):
         credential = await _stream_credential(request=request, user=user)
     info = manager.submit(
         _TASK_KIND,

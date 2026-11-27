@@ -172,7 +172,7 @@ class SyntheticDataService:
             )
         if not req.receiver_url.startswith(("http://", "https://")):
             raise SyntheticDataError("receiver_url must be http(s)")
-        allowed = [h.strip() for h in self.settings.allowed_receiver_hosts.split(",") if h.strip()]
+        allowed = self._allowed_hosts()
         if allowed:
             host = urlsplit(req.receiver_url).hostname or ""
             if host not in allowed:
@@ -181,6 +181,48 @@ class SyntheticDataService:
                 )
         self.resolve_ref(req.schema_ref)
 
+    def _allowed_hosts(self) -> set[str]:
+        """``allowed_receiver_hosts`` as lower-case hostnames, empty when unset."""
+        listed = self.settings.allowed_receiver_hosts.split(",")
+        return {host.strip().lower() for host in listed if host.strip()}
+
+    def presents_credential(self, receiver_url: str) -> bool:
+        """Whether a stream to *receiver_url* may carry the engine's ingest token.
+
+        Only to the deployment's own receiver, over http or https: the host of
+        ``autostart_receiver_url`` or one of ``allowed_receiver_hosts``. Any other host
+        is the caller's choice, so its stream goes without the token.
+        """
+        target = urlsplit(receiver_url)
+        if (target.scheme not in ("http", "https")) or (not target.hostname):
+            return False
+        own = self._allowed_hosts()
+        autostart = urlsplit(self.settings.autostart_receiver_url).hostname
+        if autostart:
+            own.add(autostart)
+        return target.hostname in own
+
+    def stream_auth(
+        self, req: StreamRequest, credential: StreamCredential | None
+    ) -> tuple[dict[str, str], float]:
+        """The headers a stream posts with, and until when it retries a 401.
+
+        *credential*'s token goes only where :meth:`presents_credential` allows and
+        the request carries no ``Authorization`` of its own.
+        """
+        headers = dict(req.headers or {})
+        if (credential is None) or (caller_authorises(headers)):
+            return headers, 0.0
+        if not (self.presents_credential(req.receiver_url)):
+            logger.warning(
+                "synthetic stream sent without the engine credential: the receiver is "
+                "not the deployment's own",
+                receiver_url=req.receiver_url,
+            )
+            return headers, 0.0
+        headers["Authorization"] = f"Bearer {credential.token}"
+        return headers, credential.refused_until
+
     async def run_stream(
         self,
         req: StreamRequest,
@@ -188,7 +230,7 @@ class SyntheticDataService:
         credential: StreamCredential | None = None,
         task: Any = None,
     ) -> dict[str, Any]:
-        """Stream to the receiver as a TaskManager coroutine, presenting *credential*'s token where one is given. Returns the summary."""
+        """Stream to the receiver as a TaskManager coroutine, authorised as :meth:`stream_auth` says. Returns the summary."""
         factory = self.build_factory(
             req.schema_ref,
             version=req.version,
@@ -196,11 +238,7 @@ class SyntheticDataService:
             tags=req.tags,
             mark_synthetic=req.mark_synthetic,
         )
-        headers = dict(req.headers or {})
-        refused_until = 0.0
-        if credential is not None:
-            headers["Authorization"] = f"Bearer {credential.token}"
-            refused_until = credential.refused_until
+        headers, refused_until = self.stream_auth(req, credential)
         sink = HttpPostSink(
             req.receiver_url,
             batch_max=req.batch_max,
@@ -226,6 +264,11 @@ class SyntheticDataService:
             failed=sink.failed,
             seconds=round(time.monotonic() - started, 1),
         ).model_dump(by_alias=True)
+
+
+def caller_authorises(headers: dict[str, str] | None) -> bool:
+    """Whether *headers* carry the caller's own receiver auth, which the engine's token then stays out of."""
+    return any(name.lower() == "authorization" for name in headers or {})
 
 
 class _ProgressSink:

@@ -387,7 +387,7 @@ _TOO_MANY_ROWS = 158
 _MEMORY_LIMIT_EXCEEDED = 241
 
 
-def _failure_reason(
+def preview_failure_reason(
     exc: ClickHouseError, guard: DetectionGuardSettings, window: int, source: str
 ) -> str:
     """Why the preview query failed, in words a rule author can act on."""
@@ -715,11 +715,14 @@ class RuleCreationService:
     def _refuse_another_table(self, user_sql: str, source: str) -> None:
         """Refuse SQL whose FROM is not the registered table of the source it names.
 
-        SQL that does not parse, or names no ``<db>.<table>``, is left to the SQL check.
+        SQL that does not parse, or names no ``<db>.<table>`` the runner can scan, is left
+        to the SQL check, which names the problem.
         """
         database, table = self._source_table(source)
         parsed = self._rewriter.parse_user_sql(strip_time_placeholder(user_sql))
         if not (parsed.source_db and parsed.source_table):
+            return
+        if _source_error(parsed.source_db, parsed.source_table) is not None:
             return
         if (parsed.source_db, parsed.source_table) != (database, table):
             raise RuleConditionError(
@@ -1175,7 +1178,7 @@ class RuleCreationService:
         except ServiceUnavailable:
             return unmeasured("ClickHouse could not be reached")
         except ClickHouseError as exc:
-            return unmeasured(_failure_reason(exc, guard, window, source))
+            return unmeasured(preview_failure_reason(exc, guard, window, source))
         duration_ms = (time.monotonic() - started) * 1000
         if not rows:
             return unmeasured("ClickHouse returned no count")

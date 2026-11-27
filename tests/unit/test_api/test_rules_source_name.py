@@ -275,3 +275,41 @@ def test_a_where_on_a_hyphenated_label_reads_that_table(client, admin_headers):
     assert resp.json()["sql_errors"] == []
     stored = client.get("/api/v1/rules/windows", headers=admin_headers).json()
     assert (stored["source_db"], stored["source_table"]) == ("dfe", "windows-audit")
+
+
+@pytest.mark.parametrize(
+    "route", ["/api/v1/rules/from-hyperdx", "/api/v1/rules/from-hyperdx/validate"]
+)
+@pytest.mark.parametrize(
+    ("source", "sql", "fragment"),
+    [
+        pytest.param("never-registered", _EVENTS_SQL, "not a registered source", id="unregistered"),
+        pytest.param("events", _KEPT_SQL, "the SQL reads dfe.main", id="FROM reads another table"),
+    ],
+)
+def test_a_search_naming_a_source_is_checked_as_a_create_is(
+    client, admin_headers, route, source, sql, fragment
+):
+    resp = client.post(route, json={"raw_sql": sql, "source": source}, headers=admin_headers)
+
+    _assert_refused_with(resp, fragment)
+    assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
+
+def test_an_edit_on_a_registered_source_must_still_read_its_table(client, admin_headers):
+    created = client.post(
+        "/api/v1/rules",
+        json={**_payload("bound", _EVENTS_SQL), "source": "events"},
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+
+    resp = client.put(
+        "/api/v1/rules/bound",
+        json={"severity": "high", "user_sql": _KEPT_SQL},
+        headers=admin_headers,
+    )
+
+    _assert_refused_with(resp, "the SQL reads dfe.main")
+    stored = client.get("/api/v1/rules/bound", headers=admin_headers).json()
+    assert (stored["source"], stored["source_table"]) == ("events", "events")

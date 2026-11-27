@@ -181,7 +181,7 @@ class Rule(BaseModel):
         default=None,
         description=(
             "How user_sql was written: raw, or hyperdx for SQL a Search view renders. "
-            "Absent when the rule was not written as SQL"
+            "Set by a rules-v2 save only, so absent for a v1 rule and any rule not written as SQL"
         ),
     )
     hunt_name: str | None = Field(default=None, description="Parent hunt name")

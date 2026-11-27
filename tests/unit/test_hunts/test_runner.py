@@ -925,3 +925,31 @@ def test_an_unreadable_hunt_state_keeps_this_runners_own_stops():
     coord._raises = True
     runner.tick(fire + 1)
     assert worker.runs == 1
+
+
+class _RunRecordingCoordinator(_RecordingCoordinator):
+    """A coordinator that keeps each execution row the runner stores."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.runs: list[dict] = []
+
+    def record_run(self, hunt_id: str, fire: int, rows_written: int, **extra) -> None:
+        self.runs.append({"hunt_id": hunt_id, "rows_written": rows_written, **extra})
+
+
+def test_a_failed_fire_stores_the_server_message_without_its_url():
+    coord = _RunRecordingCoordinator()
+    worker = _TableWorker(
+        error=(
+            "Received ClickHouse exception, code: 62, server response: Code: 62. "
+            "DB::Exception: Syntax error. (SYNTAX_ERROR) (for url http://clickhouse.internal:8123)"
+        )
+    )
+    runner, now = _due_runner(coord, worker, failures=HuntFailures(jitter=_exact))
+
+    runner.tick(now)
+
+    assert [(run["status"], run["error"]) for run in coord.runs] == [
+        ("failed", "Code: 62. DB::Exception: Syntax error. (SYNTAX_ERROR)")
+    ]
