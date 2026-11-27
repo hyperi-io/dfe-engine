@@ -22,6 +22,7 @@ throughout, so ``ch_rbac_reconcile_unconverged`` is where a run that has not got
 through shows.
 """
 
+import asyncio
 import threading
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, Protocol
@@ -49,8 +50,8 @@ ReconcileOutcome = Literal["ok", "partial", "failed"]
 - ``failed``: it raised -- ClickHouse unreachable, say -- and runs again after a back-off.
 """
 
-ReconcileKind = Literal["rbac", "service_roles", "retention"]
-"""Which reconcile a trigger runs: the full RBAC set, the service roles alone, or the default TTL."""
+ReconcileKind = Literal["rbac", "service_roles", "retention", "merged_deploys"]
+"""Which reconcile a trigger runs: the full RBAC set, the service roles alone, the default TTL, or the source deploys main has merged."""
 
 # Long enough to fold the writes of one request and a UI saving several records
 # into one run, short beside the run itself.
@@ -67,6 +68,7 @@ _DESCRIBED: dict[str, str] = {
     "rbac": "CH RBAC",
     "service_roles": "CH service-role",
     "retention": "default TTL",
+    "merged_deploys": "merged source deploy",
 }
 
 
@@ -380,6 +382,13 @@ class ReconcileTrigger:
         if failures:
             logger.info(f"{self._what} reconcile got through", failed_attempts=failures)
         return True
+
+
+async def request_every(trigger: ReconcileTrigger, seconds: float) -> None:
+    """Ask *trigger* for a run now and every *seconds* after, until cancelled."""
+    while True:
+        trigger.request()
+        await asyncio.sleep(seconds)
 
 
 def request_ch_rbac_reconcile(state: Any) -> None:

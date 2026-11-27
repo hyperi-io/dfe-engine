@@ -744,6 +744,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         resolve_into(app.state, settings, read_pin), name="stack-resolution"
     )
 
+    # Production+team holds a source deploy until its review merges, and main is read
+    # here on a timer for the ones that have.
+    from dfe_engine.gitcrud.auto_merge import gate
+
+    if gitcrud is not None and not gate(settings.env, settings.gitops.mode)[0]:
+        from dfe_engine.api.v1.sources import converge_merged_deploys
+        from dfe_engine.governance.ch.trigger import request_every
+
+        loop = asyncio.get_running_loop()
+
+        def converge_merged_now() -> Any:
+            # On the app's loop, which owns the HyperDX client the deploy writes through.
+            return asyncio.run_coroutine_threadsafe(converge_merged_deploys(app), loop).result()
+
+        app.state.merged_deploy_converge = ReconcileTrigger(
+            converge_merged_now, reconcile="merged_deploys"
+        )
+        app.state.merged_deploy_ticker = asyncio.create_task(
+            request_every(
+                app.state.merged_deploy_converge, settings.gitops.converge_interval_seconds
+            ),
+            name="merged-deploy-ticker",
+        )
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
@@ -774,6 +798,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if startup_topic_ensure is not None:
         startup_topic_ensure.cancel()
         await asyncio.gather(startup_topic_ensure, return_exceptions=True)
+    merged_deploy_ticker = getattr(app.state, "merged_deploy_ticker", None)
+    if merged_deploy_ticker is not None:
+        merged_deploy_ticker.cancel()
+        await asyncio.gather(merged_deploy_ticker, return_exceptions=True)
+    merged_deploy_converge = getattr(app.state, "merged_deploy_converge", None)
+    if merged_deploy_converge is not None:
+        # A run deploys through the registries and the deploy repo, so it ends before they close.
+        await asyncio.to_thread(merged_deploy_converge.close, 10.0)
     from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
     for attribute in TRIGGER_ATTRIBUTES:

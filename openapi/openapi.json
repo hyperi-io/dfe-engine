@@ -8872,7 +8872,7 @@
           "Sources"
         ],
         "summary": "Deploy Source Schema",
-        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied: an absent table is created, and\nan existing one gains the columns it lacks and moves to the version's TTL, so a\nre-deploy changes only what differs. The engine and the type of an existing\ncolumn are left as created. A schema that failed validation is never deployed.\nA source on the bus transport whose Kafka topics the broker did not create is\nnot marked deployed either, and the call answers 502 naming each topic.",
+        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied: an absent table is created, and\nan existing one gains the columns it lacks and moves to the version's TTL, so a\nre-deploy changes only what differs. The engine and the type of an existing\ncolumn are left as created. A schema that failed validation is never deployed.\nA source on the bus transport whose Kafka topics the broker did not create is\nnot marked deployed either, and the call answers 502 naming each topic.\n\nIn production with ``DFE_ENGINE_GITOPS_MODE=team`` the deploy is held: the record\ngoes to review with ``review_required``, and no table, topic, app or HyperDX\nsource changes. The engine deploys the version within\n``gitops.converge_interval_seconds`` of the review merging, and a review closed\nunmerged changes nothing.",
         "operationId": "sources.deploy",
         "parameters": [
           {
@@ -53303,7 +53303,7 @@
           "review_required": {
             "type": "boolean",
             "title": "Review Required",
-            "description": "True when production+team sent the deployed-version record to a review branch: the table is live, and main records the version once it merges",
+            "description": "True when production+team sent the deployed-version record to a review branch: nothing is applied yet, and the engine deploys the version once the review merges",
             "default": false
           },
           "pr_url": {

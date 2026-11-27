@@ -1926,6 +1926,14 @@ class GitopsSettings(BaseModel):
             "Forgejo/GitHub Enterprise). Empty = derive from repo_url."
         ),
     )
+    converge_interval_seconds: float = Field(
+        default=60.0,
+        gt=0.0,
+        description=(
+            "How often a production+team engine reads main for a source deploy whose "
+            "review has merged and applies it, seconds."
+        ),
+    )
     read: GitopsReadSettings = Field(default_factory=GitopsReadSettings)
     write: GitopsWriteSettings = Field(default_factory=GitopsWriteSettings)
     pack: GitopsPackSettings = Field(default_factory=GitopsPackSettings)
@@ -2737,6 +2745,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT": "gitops.write.reset_timeout",
             "DFE_ENGINE_GITOPS_WRITE_FAILURE_WINDOW_SECONDS": "gitops.write.failure_window_seconds",
             "DFE_ENGINE_GITOPS_PACK_INTERVAL_SECONDS": "gitops.pack.interval_seconds",
+            "DFE_ENGINE_GITOPS_CONVERGE_INTERVAL_SECONDS": "gitops.converge_interval_seconds",
         },
     ),
     (
