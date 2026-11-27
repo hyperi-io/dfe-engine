@@ -177,7 +177,7 @@ def test_the_hunt_ids_are_passed_as_a_bound_parameter():
     # than interpolated into the SQL.
     ch = _Rows([])
     read_run_status(ch, "dfe", ["a", "b"], now=1000)
-    assert ch.parameters == {"ids": ["a", "b"], "mark": "#stopped"}
+    assert ch.parameters == {"ids": ["a", "b"], "mark": "#stopped", "now": 1000}
     assert "{ids:Array(String)}" in ch.sql
 
 

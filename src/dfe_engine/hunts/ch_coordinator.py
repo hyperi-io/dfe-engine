@@ -147,6 +147,26 @@ _RUN_COLUMNS = [
 _ERROR_LIMIT = 2000
 
 
+def pending_runs_sql(qdb: str) -> str:
+    """Each run-now still to serve, as ``hunt_id, fire``, bound on ``{now:Int64}``.
+
+    A request whose fire the watermark has passed is served, by that fire or a later
+    one, so it is not pending. The runner and the run status read the same rows.
+
+    Args:
+        qdb: The quoted data database.
+    """
+    return (
+        "SELECT r.hunt_id AS hunt_id, r.fire AS fire FROM ("  # noqa: S608 - quoted configured database, values bound
+        "SELECT hunt_id, fire FROM ("
+        "SELECT hunt_id, fire, argMax(status, updated) AS status "
+        f"FROM {qdb}.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
+        ") r LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
+        f"FROM {qdb}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
+        "WHERE r.fire <= {now:Int64} AND coalesce(w.wm, 0) < r.fire"
+    )
+
+
 # The runner's stop on a hunt is its own hunt_state row, keyed ``<hunt_id>#stopped``, so
 # the counter row's read-then-write never carries it and no overrun can overwrite it.
 STOP_MARK = "#stopped"
@@ -649,16 +669,7 @@ class ChCoordinator:
         already served, so it is filtered here rather than re-run.
         """
         now = self.now() if now is None else now
-        rows = self._ch.query(
-            "SELECT r.hunt_id, r.fire FROM ("  # noqa: S608 - quoted configured database, values bound
-            "SELECT hunt_id, fire FROM ("
-            "SELECT hunt_id, fire, argMax(status, updated) AS status "
-            f"FROM {self._qdb}.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
-            ") r LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
-            f"FROM {self._qdb}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
-            "WHERE r.fire <= {now:Int64} AND coalesce(w.wm, 0) < r.fire",
-            parameters={"now": now},
-        ).result_rows
+        rows = self._ch.query(pending_runs_sql(self._qdb), parameters={"now": now}).result_rows
         return {str(row[0]): int(row[1]) for row in rows}
 
     # ---- heartbeat (runner liveness) ----------------------------------

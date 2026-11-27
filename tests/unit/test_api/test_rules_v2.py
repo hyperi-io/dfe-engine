@@ -378,13 +378,16 @@ def test_description_round_trips_and_the_list_has_no_source_or_hunt(tmp_path):
 class _ClickHouse:
     """Counts the preview, then returns one matching row for the run."""
 
-    def __init__(self, *, fail: BaseException | None = None):
+    def __init__(self, *, fail: BaseException | None = None, fail_preview: bool = False):
         self.fail = fail
+        self.fail_preview = fail_preview
         self.ran: list[tuple[str, dict]] = []
 
     def query(self, sql, **kwargs):
         self.ran.append((sql, kwargs))
         if "dfe_total" in sql:
+            if self.fail_preview and self.fail is not None:
+                raise self.fail
             return SimpleNamespace(result_rows=[(10, 2)])
         if self.fail is not None:
             raise self.fail
@@ -520,19 +523,36 @@ def test_an_on_demand_run_is_held_to_the_callers_orgs(monkeypatch):
     assert all("'acme'" in sql for sql, _kwargs in client.ran)
 
 
-def test_an_on_demand_run_surfaces_a_clickhouse_error_and_keeps_the_estimate(monkeypatch):
+_DRIVER_ERROR = (
+    "Received ClickHouse exception, code: 60, server response: Code: 60. "
+    "DB::Exception: Unknown table expression (UNKNOWN_TABLE) (for url http://127.0.0.1:8123)"
+)
+
+
+@pytest.mark.parametrize("preview_fails", [False, True], ids=["preview-counted", "preview-failed"])
+def test_an_on_demand_run_surfaces_a_clickhouse_error_once_without_its_url(
+    monkeypatch, preview_fails
+):
     from clickhouse_connect.driver.exceptions import ClickHouseError
 
-    client = _ClickHouse(fail=ClickHouseError("Unknown table expression"))
+    client = _ClickHouse(fail=ClickHouseError(_DRIVER_ERROR), fail_preview=preview_fails)
     monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
 
     result, _client = _run(client=client)
 
-    assert result.cost_estimate.estimated_rows == 2
     assert result.results == []
     assert result.columns == []
     assert result.execution_time_ms >= 0
-    assert any("Unknown table" in error.message for error in result.sql_errors)
+    [error] = result.sql_errors
+    assert error.message.startswith("Code: 60. DB::Exception: Unknown table expression")
+    assert "for url" not in error.message
+    assert "Received ClickHouse exception" not in error.message
+    warnings = " ".join(result.cost_estimate.warnings or [])
+    assert "Unknown table" not in warnings
+    if preview_fails:
+        assert result.cost_estimate.estimated_rows is None
+    else:
+        assert result.cost_estimate.estimated_rows == 2
 
 
 def test_an_on_demand_run_does_not_query_a_rule_the_runner_would_refuse(monkeypatch):

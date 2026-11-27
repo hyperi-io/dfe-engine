@@ -15,6 +15,8 @@ These classifiers are the SSoT the CH manager injects into scalo's
 
 from __future__ import annotations
 
+import pytest
+
 from dfe_engine.clickhouse.errors import (
     ChError,
     ErrorCategory,
@@ -23,6 +25,7 @@ from dfe_engine.clickhouse.errors import (
     is_identity_error,
     is_retryable_error,
     parse_code,
+    server_message,
     wrap_ch_error,
 )
 
@@ -30,6 +33,29 @@ from dfe_engine.clickhouse.errors import (
 def _exc(code: int, tail: str = "message") -> Exception:
     """A driver-style error string carrying a CH ``Code: NNN`` (what the driver emits)."""
     return Exception(f"Code: {code}. DB::Exception: {tail}")
+
+
+_SERVER_TEXT = "Code: 47. DB::Exception: Unknown identifier `x`. (UNKNOWN_IDENTIFIER)"
+
+
+@pytest.mark.parametrize(
+    ("raw", "shown"),
+    [
+        pytest.param(
+            "Received ClickHouse exception, code: 47, server response: "
+            f"{_SERVER_TEXT} (for url http://127.0.0.1:20022)",
+            _SERVER_TEXT,
+            id="driver-wrapped",
+        ),
+        pytest.param(
+            f"{_SERVER_TEXT} (for url https://ch.internal:8443)", _SERVER_TEXT, id="url-only"
+        ),
+        pytest.param(_SERVER_TEXT, _SERVER_TEXT, id="bare"),
+        pytest.param("  ", "", id="empty"),
+    ],
+)
+def test_the_server_message_carries_no_driver_wrapper_or_url(raw, shown):
+    assert server_message(Exception(raw)) == shown
 
 
 class TestParseCode:

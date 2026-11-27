@@ -140,6 +140,21 @@ class ChError(Exception):
         self.user_safe = user_safe
 
 
+_DRIVER_PREFIX_RE = re.compile(r"^.*?server response:\s*", re.DOTALL)
+_URL_SUFFIX_RE = re.compile(r"\s*\(for url [^)]*\)\s*$")
+
+
+def server_message(exc: BaseException) -> str:
+    """ClickHouse's own message for *exc*, without the driver's wrapper or the server URL.
+
+    clickhouse-connect wraps the server text as ``Received ClickHouse exception, code:
+    N, server response: <text> (for url <url>)``. The URL names an internal host, so
+    it never reaches a caller.
+    """
+    text = _DRIVER_PREFIX_RE.sub("", str(exc).strip(), count=1)
+    return _URL_SUFFIX_RE.sub("", text).strip()
+
+
 def parse_code(exc: BaseException) -> int | None:
     """Extract the ClickHouse ``Code: NNN`` from a driver error, or None."""
     match = _CODE_RE.search(str(exc))

@@ -51,6 +51,7 @@ from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import AuthorizationError
 from dfe_engine.auth.audit import audit_permission_denied, audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.clickhouse.errors import server_message
 from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
@@ -1485,9 +1486,13 @@ def _run_stored_rule(
             elapsed=(time.perf_counter() - started) * 1000,
         )
     except ClickHouseError as exc:
+        # The preview ran the same condition, so an unmeasured estimate carries the same
+        # refusal. The SQL error says it once.
+        if estimate.estimated_rows is None:
+            estimate = _unmeasured_cost(window, "Not measured: the run failed, see the SQL error")
         return answer(
             estimate=estimate,
-            errors=[SqlValidationError(message=str(exc))],
+            errors=[SqlValidationError(message=server_message(exc))],
             elapsed=(time.perf_counter() - started) * 1000,
         )
     columns = [str(column) for column in getattr(result, "column_names", ()) or ()]

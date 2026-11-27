@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier
-from dfe_engine.hunts.ch_coordinator import STOP_MARK
+from dfe_engine.hunts.ch_coordinator import STOP_MARK, pending_runs_sql
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,10 +83,8 @@ def _query(database: str) -> str:
         "argMax(rows_written, updated) AS rows_written "
         f"FROM {db}.hunt_run GROUP BY hunt_id, fire"
         ") WHERE status = 'completed' GROUP BY hunt_id) r USING (hunt_id) "
-        "LEFT JOIN (SELECT hunt_id, 1 AS pending FROM ("
-        "SELECT hunt_id, fire, argMax(status, updated) AS status "
-        f"FROM {db}.hunt_run GROUP BY hunt_id, fire"
-        ") WHERE status = 'requested' GROUP BY hunt_id) q USING (hunt_id)"
+        f"LEFT JOIN (SELECT hunt_id, 1 AS pending FROM ({pending_runs_sql(db)}) "
+        "GROUP BY hunt_id) q USING (hunt_id)"
     )
 
 
@@ -118,12 +116,13 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
         ch: a ClickHouse client exposing ``query``.
         database: the data database the coordination tables live in.
         hunt_ids: the hunts to report on (the page's own list).
-        now: epoch seconds, used to decide whether a lease is still live.
+        now: epoch seconds, used to decide whether a lease is still live and a
+            run-now still due.
     """
     if not hunt_ids:
         return {}
     rows = ch.query(
-        _query(database), parameters={"ids": list(hunt_ids), "mark": STOP_MARK}
+        _query(database), parameters={"ids": list(hunt_ids), "mark": STOP_MARK, "now": now}
     ).result_rows
     status: dict[str, RunStatus] = {}
     for row in rows:

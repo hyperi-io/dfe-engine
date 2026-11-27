@@ -185,3 +185,40 @@ def test_a_failed_run_now_stays_queued_until_a_fire_succeeds(ch_client, scratch_
     assert total == 1
     assert executions[0].status == "completed"
     assert executions[0].error == ""
+
+
+def test_a_failed_run_now_a_later_fire_passes_is_no_longer_queued(ch_client, scratch_db):
+    """The status reads the runner's own pending set, so a passed request is not shown queued."""
+    from dfe_engine.hunts.runner import HuntFailures
+
+    hunt = f"passed_{uuid.uuid4().hex[:8]}"
+    coord = _coord(ch_client, scratch_db)
+    spec = HuntSpec(
+        hunt_id=hunt,
+        interval_seconds=600,
+        queries=[
+            f"INSERT INTO `{scratch_db}`.tgt SELECT ev FROM `{scratch_db}`.gone WHERE {{window}}"
+        ],
+        timestamp_field="timestamp_load",
+    )
+    failures = HuntFailures(initial_seconds=30, jitter=lambda wait: wait)
+    runner = HuntRunner(coord, HuntWorker(ch_client, coord), {hunt: spec}, cap=4, failures=failures)
+
+    fire = current_fire(hunt, 600, 5_000_000)
+    coord.set_watermark(hunt, fire)
+    requested = fire + 3
+    coord.request_run(hunt, requested)
+    assert runner.tick(requested + 1) == 0
+    assert read_run_status(ch_client, scratch_db, [hunt], now=requested + 1)[hunt].run_requested
+
+    ch_client.command(
+        f"CREATE TABLE `{scratch_db}`.gone (timestamp_load Int64, ev String) "
+        "ENGINE = MergeTree ORDER BY timestamp_load"
+    )
+    # The next scheduled fire runs and its watermark passes the request's fire.
+    later = fire + 600 + 1
+    assert runner.tick(later) == 1
+    assert coord.get_watermark(hunt) > requested
+
+    assert coord.pending_runs(later) == {}
+    assert read_run_status(ch_client, scratch_db, [hunt], now=later)[hunt].run_requested is False
