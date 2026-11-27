@@ -56,7 +56,7 @@ sequenceDiagram
     D-->>U: Signed in, roles from the linked groups
 ```
 
-*Figure 1. L4 Detail -- Entra sign-in. Solid arrows are requests, dashed arrows are responses.* Up: [Identity provider setup](README.md).
+*Figure 1. L4 Detail -- Entra sign-in. Each reply is drawn back to the system that asked.* Up: [Identity provider setup](README.md).
 
 ## Set it up
 

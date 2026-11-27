@@ -96,7 +96,7 @@ flowchart TB
   style accept fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Acceptance scenarios. The dotted arrow marks a run that does not count.* Up: [Deployment](README.md).
+*Figure 1. L4 Detail -- Acceptance scenarios. The arrow labelled not sufficient marks a run that does not count.* Up: [Deployment](README.md).
 
 ## The two scenarios
 

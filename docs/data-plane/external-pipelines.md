@@ -89,7 +89,7 @@ flowchart LR
   style transform fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- External pipeline plug-in points. The dashed grey boxes are your pipeline.* Up: [Data plane](README.md).
+*Figure 1. L4 Detail -- External pipeline plug-in points. The two boxes labelled Your pipeline are yours.* Up: [Data plane](README.md).
 
 As a transform, your pipeline reads `acme-logs_land` in the consumer group `dfe-external-acme-logs`.
 

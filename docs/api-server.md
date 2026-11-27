@@ -113,7 +113,7 @@ flowchart TB
   style TARGETS fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L3 Components -- API server. The dotted arrow runs only where the deployment has Kafka.* Up: [L2 Services -- dfe-engine](architecture.md). Down: none.
+*Figure 1. L3 Components -- API server. The arrow to Kafka runs only where the deployment has Kafka.* Up: [L2 Services -- dfe-engine](architecture.md). Down: none.
 
 ## How it works
 

@@ -108,7 +108,7 @@ flowchart TB
   style s2 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Data evolution stages. Dotted arrows are optional steps, and dfe-receiver or dfe-fetcher fills the main table.* Up: [L2 Services -- dfe-engine](architecture.md). Down: [L4 Detail -- How a table gets built](#how-a-table-gets-built), [L4 Detail -- What a transform does](#what-a-transform-is-actually-for).
+*Figure 1. L4 Detail -- Data evolution stages. The promote and own source arrows are optional steps, and dfe-receiver or dfe-fetcher fills the main table.* Up: [L2 Services -- dfe-engine](architecture.md). Down: [L4 Detail -- How a table gets built](#how-a-table-gets-built), [L4 Detail -- What a transform does](#what-a-transform-is-actually-for).
 
 Nothing forces you down the stages. A source can sit in stage 0 forever, and stage 3 below drops `_json` from a source you know fully.
 

@@ -164,7 +164,7 @@ flowchart TB
   style KEDA fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Hunt runner autoscaling. The dotted arrow is the failure path.* Up: [L3 Components -- Hunt runner](../hunt-runner.md).
+*Figure 1. L4 Detail -- Hunt runner autoscaling. The arrow from dfe-keda-shim to Last good value is the failure path.* Up: [L3 Components -- Hunt runner](../hunt-runner.md).
 
 With `huntRunner.autoscaling.enabled`, the Deployment's `replicas` field is omitted, because the ScaledObject owns the count, and a `dfe-hunt-runner-scaler` ScaledObject is rendered beside it:
 

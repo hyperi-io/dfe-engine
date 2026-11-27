@@ -297,7 +297,7 @@ sequenceDiagram
     k8s->>k8s: Roll pods
 ```
 
-*Figure 3. L4 Detail -- A source change reaching a pod. Solid arrows are requests.* Up: [Data plane](README.md).
+*Figure 3. L4 Detail -- A source change reaching a pod. Each arrow is a request.* Up: [Data plane](README.md).
 
 The pod template has the ConfigMap checksum, so a config change rolls the pods (scalo-rs `charts/scalo-service/templates/_rollout.tpl`). A set `strategy` wins, a singleton or claim-holding pod gets `Recreate`, and the rest roll surge-first (`maxUnavailable: 0`, `maxSurge: 1`).
 

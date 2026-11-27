@@ -100,7 +100,7 @@ flowchart LR
   style STATE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L2 Services -- dfe-engine. The dashed grey box is outside DFE.* Up: [L2 Services -- DFE](https://github.com/hyperi-io/dfe-infra/blob/main/docs/architecture.md). Down: [L3 Components -- API server](api-server.md), [L3 Components -- Hunt runner](hunt-runner.md).
+*Figure 1. L2 Services -- dfe-engine. KEDA is outside DFE.* Up: [L2 Services -- DFE](https://github.com/hyperi-io/dfe-infra/blob/main/docs/architecture.md). Down: [L3 Components -- API server](api-server.md), [L3 Components -- Hunt runner](hunt-runner.md).
 
 ## How data flows
 

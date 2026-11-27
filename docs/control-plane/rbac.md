@@ -97,7 +97,7 @@ flowchart LR
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
 ```
 
-*Figure 1. L4 Detail -- Four authentication paths. The dotted arrow is the refusal, and `auth off` needs a dev `DFE_ENGINE_ENV`.* Up: [Control plane](README.md).
+*Figure 1. L4 Detail -- Four authentication paths. The arrow labelled none is the refusal, and `auth off` needs a dev `DFE_ENGINE_ENV`.* Up: [Control plane](README.md).
 
 A bearer token is verified for its signature (ES384 by default), issuer and expiry, and its `sub` binds an account. A disabled or blocked account answers 401, and the token's claims are ignored. A key or a header identity resolves its groups through the `GroupStore` the same way.
 
@@ -717,7 +717,7 @@ flowchart TB
   style idps fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 5. L4 Detail -- OIDC provider sync. Dashed grey boxes are external, and the dotted arrow writes the sync's status back.* Up: [Control plane](README.md).
+*Figure 5. L4 Detail -- OIDC provider sync. Google, Entra ID and Okta are external, and the status arrow writes the sync's status back.* Up: [Control plane](README.md).
 
 `get_adapter()` picks the adapter by provider type. A `generic` provider has no directory API, so it never syncs. Each provider resolves groups in one of three modes:
 
@@ -905,7 +905,7 @@ flowchart TB
   style q3 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 6. L4 Detail -- Who reads as whom. Green ends are ClickHouse users, orange are refusals.* Up: [Control plane](README.md).
+*Figure 6. L4 Detail -- Who reads as whom. Platform reader and Org's pinned user are ClickHouse users, and the two 403 ends are refusals.* Up: [Control plane](README.md).
 
 The platform reader holds no tenant role and reads every org. A pinned user holds the tenant role and its org's pinned setting. Both refusals fail closed.
 
@@ -969,7 +969,7 @@ sequenceDiagram
     HDX-->>API: Team id, or none on failure
 ```
 
-*Figure 7. L4 Detail -- Org creation. Solid arrows are requests, dashed arrows are responses.* Up: [Control plane](README.md).
+*Figure 7. L4 Detail -- Org creation. Each reply is drawn back to the system that asked.* Up: [Control plane](README.md).
 
 The team's ClickHouse connection is the fork's to create, from `GET /api/v1/hyperdx/connection`, and a dfe-hyperdx failure is logged and does not fail the request.
 

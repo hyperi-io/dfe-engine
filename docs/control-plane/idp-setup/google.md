@@ -54,7 +54,7 @@ sequenceDiagram
     D-->>U: Signed in, roles from the linked groups
 ```
 
-*Figure 1. L4 Detail -- Google sign-in. Solid arrows are requests, dashed arrows are responses.* Up: [Identity provider setup](README.md).
+*Figure 1. L4 Detail -- Google sign-in. Each reply is drawn back to the system that asked.* Up: [Identity provider setup](README.md).
 
 DFE asks for nested (transitive) membership first. Google serves that on Workspace Enterprise Standard, Enterprise Plus, Enterprise for Education and Cloud Identity Premium alone. On other editions DFE falls back to direct membership, so map the groups users are directly in.
 

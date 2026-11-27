@@ -104,7 +104,7 @@ flowchart TB
   style apps fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Token check at the edge. The dotted arrow is a read.* Up: [L2 Services -- dfe-engine](architecture.md).
+*Figure 1. L4 Detail -- Token check at the edge. The verifies arrow, from dfe-hyperdx to JWKS, is a read.* Up: [L2 Services -- dfe-engine](architecture.md).
 
 - Local login: `POST /api/v1/auth/login`, and the engine signs the JWT (`src/dfe_engine/api/v1/auth.py`).
 - External OIDC: the engine is the relying party. `/api/v1/auth/oidc/{provider}/login` redirects to the IdP, and the callback validates the IdP's token and mints an engine token (`src/dfe_engine/api/v1/oidc_login.py`). The IdP's token stays on the engine-to-IdP leg.
