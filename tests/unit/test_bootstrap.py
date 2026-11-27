@@ -77,6 +77,30 @@ class TestEnsureStorage:
         assert (schemas_dir / "user.yaml").read_text() == "name: user\n"
         assert (schemas_dir / SEED_MARKER_NAME).read_text().strip() == _seed_stamp()
 
+    def test_a_reseed_moves_the_inherited_header_to_the_new_tree(
+        self, monkeypatch, config_dir, schemas_dir, seed_dir
+    ):
+        # An upgraded pod reads its header version before startup re-seeds the tree.
+        from dfe_engine.source.models import DEFAULT_HEADER_TYPE, inherited_header_version
+
+        def profile(root: Path, current: str) -> None:
+            (root / "common-header").mkdir(parents=True, exist_ok=True)
+            (root / "common-header" / f"{DEFAULT_HEADER_TYPE}.yaml").write_text(
+                f'current: "{current}"\nversions:\n  "{current}":\n    columns: []\n'
+            )
+
+        profile(schemas_dir, "1.0.3")
+        (schemas_dir / SEED_MARKER_NAME).write_text("dfe-engine 0.0.1\n")
+        profile(seed_dir, "1.0.4")
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(schemas_dir))
+        inherited_header_version.cache_clear()
+        try:
+            assert inherited_header_version() == "1.0.3"
+            ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
+            assert inherited_header_version() == "1.0.4"
+        finally:
+            inherited_header_version.cache_clear()
+
     def test_marker_records_the_seeding_version(self, config_dir, schemas_dir, seed_dir):
         ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
         assert (schemas_dir / SEED_MARKER_NAME).read_text().strip() == _seed_stamp()

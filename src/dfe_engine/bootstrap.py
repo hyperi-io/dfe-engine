@@ -89,6 +89,10 @@ def ensure_storage(*, settings: DFESettings) -> None:
 
     _copy_seed(schemas_dir=schemas_dir, seed_dir=seed_dir)
     marker.write_text(f"{stamp}\n")
+    # A header version read before this seed came from the old tree.
+    from dfe_engine.source.models import inherited_header_version
+
+    inherited_header_version.cache_clear()
     if seeded_by:
         logger.info(f"Re-seeded schemas over a tree seeded by {seeded_by!r}; now {stamp!r}")
         return
