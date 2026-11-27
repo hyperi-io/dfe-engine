@@ -120,7 +120,8 @@ class SchemaDeployResult(BaseModel):
         default=False,
         description=(
             "True when production+team sent the deployed-version record to a review "
-            "branch: the table is live, and main records the version once it merges"
+            "branch: nothing is applied yet, and the engine deploys the version once "
+            "the review merges"
         ),
     )
     pr_url: str | None = Field(default=None, description="The review PR for that record")

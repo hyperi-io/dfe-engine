@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from scalo.logger import logger
 
-from .auto_merge import apply_auto_merge, resolve_state
+from .auto_merge import apply_auto_merge, gate, resolve_state
 from .commit_policy import resolve_mode
 
 if TYPE_CHECKING:
@@ -204,6 +204,11 @@ class WritePosture:
     ) -> WritePosture:
         """The posture the settings declare."""
         return cls(environment=settings.env, mode=settings.gitops.mode, forge=forge)
+
+    @property
+    def holds_for_review(self) -> bool:
+        """True where a governed write goes to a review branch, never main: production with team mode."""
+        return not gate(self.environment, self.mode)[0]
 
     @classmethod
     def from_loaded_settings(cls) -> WritePosture:

@@ -67,6 +67,7 @@ from dfe_engine.api.deps import (
     SourceReg,
     get_field_map_registry_optional,
     get_interactive_clickhouse_client,
+    get_source_registry_optional,
     held_orgs,
     reads_every_org,
     refuse_unknown_orgs,
@@ -2474,8 +2475,24 @@ async def _execute_source_deploy(
     version: str | None,
     dry_run: bool,
 ) -> SchemaDeployResult:
-    """Plan or deploy one source version. Shared by the single and bulk deploy paths."""
+    """Plan or deploy one source version. Shared by the single and bulk deploy paths.
+
+    Where production+team sends the deployed-version record to review, the deploy is
+    held: see :func:`_hold_source_deploy`.
+    """
     ddl_settings = await run_blocking(functools.partial(ttl_settings, request, settings))
+    if not dry_run:
+        held = await run_blocking(functools.partial(_held_version, registry, name, version))
+        if held is not None:
+            return await _hold_source_deploy(
+                name=name,
+                user=user,
+                registry=registry,
+                settings=ddl_settings,
+                request=request,
+                source=held[0],
+                version_id=held[1],
+            )
     applied = await run_blocking(
         functools.partial(_apply_source_schema, name, registry, ddl_settings, version, dry_run)
     )
@@ -2587,6 +2604,145 @@ async def _execute_source_deploy(
     return deploy_result
 
 
+def _held_version(registry: Any, name: str, version: str | None) -> tuple[Source, str] | None:
+    """The source and version a deploy targets when its record would go to review, else None.
+
+    A deploy of the version main already records changes no record, so nothing goes to
+    review and it runs as anywhere else.
+    """
+    if not registry.holds_writes_for_review:
+        return None
+    source, version_id = _resolve_source_version(registry, name, version, default_current=True)
+    if source.deployed_version == version_id:
+        return None
+    return source, version_id
+
+
+async def _hold_source_deploy(
+    *,
+    name: str,
+    user: Any,
+    registry: Any,
+    settings: Any,
+    request: Request,
+    source: Source,
+    version_id: str,
+) -> SchemaDeployResult:
+    """Send a deploy's record to review and change nothing else until it merges.
+
+    The schema is built and validated, and the record goes to its review branch. No
+    DDL runs, no topic is created or removed, and the apps and HyperDX are left as
+    main has them. The result is stored unapplied, so :func:`converge_merged_deploys`
+    runs the deploy once main carries the version.
+    """
+    if registry.is_core(name):
+        _raise_save_validation_http(SourceCoreResourceError(action="deploy", source=name))
+    planned = await run_blocking(
+        functools.partial(_apply_source_schema, name, registry, settings, version_id, True)
+    )
+    if not isinstance(planned, SchemaDeployResult):
+        raise TypeError("a dry run returns its result")
+    _refuse_invalid_schema(planned.validation_errors)
+    held = planned.model_copy(update={"dry_run": False, "applied": False})
+    store = SourceDeploymentStore.from_settings(settings)
+    record = ReviewRouting()
+    await run_blocking(
+        functools.partial(
+            _record_source_deploy,
+            store,
+            held,
+            source,
+            name,
+            version_id,
+            user,
+            registry,
+            request,
+            record,
+        )
+    )
+    held = held.model_copy(update=review_fields(record))
+    await run_blocking(functools.partial(store.save_deploy, held, source))
+    audit_resource_change(
+        user.user_id,
+        "schema",
+        name,
+        "deploy_held",
+        details={"version": version_id, **(routing_audit_detail(record) or {})},
+    )
+    return held
+
+
+# The actor a deploy run by the converge is recorded under.
+_CONVERGE_ACTOR = AuthContext(user_id="engine")
+
+
+@dataclass
+class MergedDeploysPass:
+    """What one :func:`converge_merged_deploys` pass did.
+
+    Attributes:
+        deployed: ``source@version`` for each deploy the pass ran.
+        errors: ``source@version: reason`` for each deploy that failed, which the trigger runs again.
+    """
+
+    deployed: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def merged_deploys(registry: Any, store: SourceDeploymentStore) -> list[tuple[str, str]]:
+    """``(source, version)`` for each version main records deployed that *store* has not applied."""
+    pending: list[tuple[str, str]] = []
+    for source in registry.get_all_sources():
+        version = source.deployed_version
+        if version is None or version not in source.versions or registry.is_core(source.source):
+            continue
+        doc = store.load_deploy_document(source.source)
+        if doc is not None and doc.deployed_version == version:
+            continue
+        pending.append((source.source, version))
+    return pending
+
+
+async def converge_merged_deploys(app: Any) -> MergedDeploysPass:
+    """Run the deploy of every version main records deployed and this engine has not applied.
+
+    A held deploy reaches main when its review merges. This runs the same deploy an
+    unheld one runs: the DDL, the topics, the apps reconcile and the HyperDX source,
+    then records it applied. A review closed unmerged never reaches main, so its
+    version is never deployed.
+    """
+    outcome = MergedDeploysPass()
+    registry = get_source_registry_optional()
+    if registry is None:
+        return outcome
+    settings = app.state.settings
+    store = SourceDeploymentStore.from_settings(settings)
+    # The deploy path reads only request.app, the state the API's own requests carry.
+    request = Request({"type": "http", "app": app, "headers": []})
+    pending = await run_blocking(functools.partial(merged_deploys, registry, store))
+    for name, version in pending:
+        label = f"{name}@{version}"
+        try:
+            await _execute_source_deploy(
+                name=name,
+                user=_CONVERGE_ACTOR,
+                registry=registry,
+                settings=settings,
+                request=request,
+                version=version,
+                dry_run=False,
+            )
+        except Exception as exc:
+            logger.warning(
+                "merged source deploy not applied", source=name, version=version, error=str(exc)
+            )
+            outcome.errors.append(f"{label}: {exc}")
+            continue
+        logger.info("merged source deploy applied", source=name, version=version)
+        outcome.deployed.append(label)
+    return outcome
+
+
 def _topics_not_created(name: str, failed: list[tuple[str, str]]) -> ProblemError:
     """The 502 for a deploy whose source rides the bus and did not get every topic.
 
@@ -2671,6 +2827,12 @@ async def deploy_source_schema(
     column are left as created. A schema that failed validation is never deployed.
     A source on the bus transport whose Kafka topics the broker did not create is
     not marked deployed either, and the call answers 502 naming each topic.
+
+    In production with ``DFE_ENGINE_GITOPS_MODE=team`` the deploy is held: the record
+    goes to review with ``review_required``, and no table, topic, app or HyperDX
+    source changes. The engine deploys the version within
+    ``gitops.converge_interval_seconds`` of the review merging, and a review closed
+    unmerged changes nothing.
     """
     return await _execute_source_deploy(
         name=name,
@@ -2710,19 +2872,21 @@ def _record_source_deploy(
     """Record the deploy, mark the version deployed and reconcile the apps it makes live.
 
     A record production+team sends to review leaves main on the old version, so the
-    apps are left as main has them until it merges.
+    apps are left as main has them until it merges. A version main already records
+    is not written again, since that write would go to review too.
     """
     store.save_deploy(deploy_result, source)
-    try:
-        registry.set_deployed_version(
-            name,
-            version_id,
-            created_by=git_author(user),
-            description=f"source: deploy {name} version {version_id}",
-            routing=routing,
-        )
-    except SourceValidationError as exc:
-        _raise_save_validation_http(exc)
+    if source.deployed_version != version_id:
+        try:
+            registry.set_deployed_version(
+                name,
+                version_id,
+                created_by=git_author(user),
+                description=f"source: deploy {name} version {version_id}",
+                routing=routing,
+            )
+        except SourceValidationError as exc:
+            _raise_save_validation_http(exc)
     if routing.review_required:
         return AppsSync(changes=[])
 
@@ -2817,6 +2981,21 @@ def _plan_and_apply_ddl(
     return planned, applied
 
 
+def _refuse_invalid_schema(validation_errors: list[str]) -> None:
+    """Refuse a deploy whose schema failed validation.
+
+    Raises:
+        ProblemError: 400 ``validation_failed`` naming each error.
+    """
+    if validation_errors:
+        raise ProblemError(
+            400,
+            "schema has validation errors; fix them or use dry_run to review",
+            code="validation_failed",
+            errors=[ProblemFieldError(field="schema", detail=str(e)) for e in validation_errors],
+        )
+
+
 def _apply_source_schema(
     name: str, registry: Any, settings: Any, version: str | None, dry_run: bool
 ) -> SchemaDeployResult | _AppliedSchema:
@@ -2908,13 +3087,7 @@ def _apply_source_schema(
         )
 
     # Deploy mode: refuse to apply a schema that failed validation.
-    if validation_errors:
-        raise ProblemError(
-            400,
-            "schema has validation errors; fix them or use dry_run to review",
-            code="validation_failed",
-            errors=[ProblemFieldError(field="schema", detail=str(e)) for e in validation_errors],
-        )
+    _refuse_invalid_schema(validation_errors)
 
     # The schema phase's refusal, made here too: after the caller's own errors, which
     # need no server, and before the first statement reaches one.

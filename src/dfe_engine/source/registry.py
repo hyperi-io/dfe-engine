@@ -426,6 +426,15 @@ class SourceRegistry:
                 return None
         return self._require_store().get(source_name)
 
+    @property
+    def holds_writes_for_review(self) -> bool:
+        """True where an operator's source write lands on a review branch rather than main."""
+        if self._crud is None:
+            return False
+        if self._posture is None:
+            self._posture = WritePosture.from_loaded_settings()
+        return self._posture.holds_for_review
+
     def _route_write(
         self,
         crud: GitCrud,
