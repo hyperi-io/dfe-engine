@@ -413,6 +413,31 @@ def test_anomaly_mode_runs_logreducers_anomaly_reducer(monkeypatch):
     assert set(result["lines"]) <= set(lines)
 
 
+@pytest.mark.parametrize("mode", [SampleMode.SMART, SampleMode.ANOMALY])
+def test_a_reducer_run_is_capped_by_the_sampler_settings(monkeypatch, mode):
+    import logreducer
+
+    seen: dict[str, object] = {}
+
+    class RecordingReducer(logreducer.LogReducer):
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(logreducer, "LogReducer", RecordingReducer)
+    lines = _scan_lines()
+    _scan_returns(monkeypatch, lines)
+    cfg = SamplerSettings(anomaly_max_rows=7, max_clusters=11)
+    sampler = Sampler(cfg, KafkaSettings(), ClickHouseSettings(data_database="dfe_data"))
+
+    req = SampleRequest(mode=mode, table="`db`.`events`")
+    result = asyncio.run(sampler.run(req, FakeCH([]), None, org_ids=None))
+
+    assert seen["anomaly_max_rows"] == 7
+    assert seen["max_clusters"] == 11
+    assert set(result["lines"]) <= set(lines)
+
+
 def test_a_gated_mode_without_logreducer_raises_clean_error(monkeypatch):
     # A None entry in sys.modules makes the import raise ImportError.
     monkeypatch.setitem(sys.modules, "logreducer", None)

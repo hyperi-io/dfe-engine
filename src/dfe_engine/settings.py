@@ -1038,6 +1038,16 @@ class SamplerSettings(BaseModel):
         ge=1,
         description="Rows fed to a logreducer run (bounds the CH scan / Kafka read)",
     )
+    anomaly_max_rows: int = Field(
+        default=5_000,
+        ge=1,
+        description="Unique rows a logreducer run scores for anomalies; past it rows are dropped",
+    )
+    max_clusters: int = Field(
+        default=1_000,
+        ge=1,
+        description="Template clusters a logreducer run keeps; ingested lines set the count",
+    )
     kafka_max_messages: int = Field(
         default=20_000, ge=1, description="Max Kafka messages read per sample pass"
     )
@@ -2696,6 +2706,8 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_SAMPLER_MAX_LIMIT": "sampler.max_limit",
             "DFE_ENGINE_SAMPLER_MAX_CONCURRENT": "sampler.max_concurrent",
             "DFE_ENGINE_SAMPLER_MAX_SCAN_ROWS": "sampler.max_scan_rows",
+            "DFE_ENGINE_SAMPLER_ANOMALY_MAX_ROWS": "sampler.anomaly_max_rows",
+            "DFE_ENGINE_SAMPLER_MAX_CLUSTERS": "sampler.max_clusters",
             "DFE_ENGINE_SAMPLER_KAFKA_MAX_MESSAGES": "sampler.kafka_max_messages",
             "DFE_ENGINE_SAMPLER_MAX_EXECUTION_TIME": "sampler.max_execution_time",
             "DFE_ENGINE_SYNTHETIC_DATA_MAX_COUNT": "synthetic_data.max_count",
