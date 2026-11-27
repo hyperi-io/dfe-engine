@@ -218,7 +218,9 @@ def test_a_failed_run_now_a_later_fire_passes_is_no_longer_queued(ch_client, scr
     # The next scheduled fire runs and its watermark passes the request's fire.
     later = fire + 600 + 1
     assert runner.tick(later) == 1
-    assert coord.get_watermark(hunt) > requested
+    watermark = coord.get_watermark(hunt)
+    assert watermark is not None
+    assert watermark > requested
 
     assert coord.pending_runs(later) == {}
     assert read_run_status(ch_client, scratch_db, [hunt], now=later)[hunt].run_requested is False
