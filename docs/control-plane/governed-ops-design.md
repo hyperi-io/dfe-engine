@@ -161,7 +161,7 @@ sequenceDiagram
     repo-->>argo: New commit
 ```
 
-*Figure 2. L4 Detail -- Writing a helm var. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- API server](../api-server.md).
+*Figure 2. L4 Detail -- Writing a helm var. The 409 goes back to the caller, and Argo CD is told of the new commit.* Up: [L3 Components -- API server](../api-server.md).
 
 The full path is `PUT /api/v1/helm/files/{name}/vars/{path}`, for example `receiver-default-values` and `keda.maxReplicaCount`. A production `DFE_ENGINE_ENV` in team mode routes the write to a review branch instead of `main`. Validation, the protected-var check and the commit live in the engine, so the CLI and the API take the same path.
 
@@ -212,7 +212,7 @@ sequenceDiagram
     crud-->>op: Diff and commit SHA
 ```
 
-*Figure 3. L4 Detail -- Invoking an action. Solid arrows are requests, dashed arrows are responses.* Up: [L3 Components -- API server](../api-server.md).
+*Figure 3. L4 Detail -- Invoking an action. The reply to the Operator carries the diff and commit SHA.* Up: [L3 Components -- API server](../api-server.md).
 
 A `ProtectedPolicy` is a list of locked `cls:name:path` globs that Tier 1 respects too, unless the caller holds the override grant. A set or revert at a parent, or a set below a locked scalar, is rejected like a write to the var itself, and a whole-document write is gated on the leaves it adds, changes or removes. Three policies ship: `baseline` locks image references, `storage-layout` locks the data-layer modes, the storage model, the `objectStore`, `tieredBlock` and `tieredObject` dial blocks and the disk size and class, and `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud.
 
@@ -416,7 +416,7 @@ flowchart TB
   style written fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 5. L4 Detail -- Hunt claim and run. The dotted arrow is the next run reading the watermark.* Up: [The DFE control-plane layer](README.md).
+*Figure 5. L4 Detail -- Hunt claim and run. The arrow labelled next window is the next run reading the watermark.* Up: [The DFE control-plane layer](README.md).
 
 `phase_offset` in `src/dfe_engine/hunts/schedule.py` gives each hunt a stable offset inside its interval from a hash of its id, so hunts on one schedule spread out. `latest_fire` names the most recent fire at or before now, and it stays owed until its watermark is written. A global cap limits concurrent runs.
 

@@ -68,7 +68,7 @@ sequenceDiagram
     api-->>client: JSON
 ```
 
-*Figure 1. L4 Detail -- View execution. Solid arrows are requests, dashed arrows are answers.* Up: [Data plane](README.md).
+*Figure 1. L4 Detail -- View execution. Each answer is drawn back to the system that asked.* Up: [Data plane](README.md).
 
 The client request names the view in the URL path:
 
@@ -196,7 +196,7 @@ flowchart TB
   style stores fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 2. L4 Detail -- Query routes. The dashed grey box is the caller.* Up: [L3 Components -- API server](../api-server.md).
+*Figure 2. L4 Detail -- Query routes. The HTTP client box is the caller.* Up: [L3 Components -- API server](../api-server.md).
 
 The executor looks each view up in the `ViewCatalog`, which discovers the views from ClickHouse and caches them for 60 seconds. Every route authenticates by JWT, OIDC headers or API key first.
 
@@ -670,7 +670,7 @@ flowchart TB
   style runq fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 4. L4 Detail -- Query route authorisation. The dotted arrow is the refusal.* Up: [Data plane](README.md).
+*Figure 4. L4 Detail -- Query route authorisation. The arrow to 403 is the refusal.* Up: [Data plane](README.md).
 
 Tenant isolation is structural, not per-query config: the executor injects
 `org_id` from the authenticated context (never client-settable), and the

@@ -116,7 +116,7 @@ flowchart TB
   style RUN fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Sigma detection pipeline. Dashed grey boxes are outside DFE.* Up: [Data plane](README.md).
+*Figure 1. L4 Detail -- Sigma detection pipeline. The SigmaHQ git and Valhalla API boxes are outside DFE.* Up: [Data plane](README.md).
 
 ## Providers - pull external feeds
 

@@ -101,7 +101,7 @@ flowchart TB
   style DECIDE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Identity resolution chain. The dotted arrow is the refusal.* Up: [rbac.md](rbac.md).
+*Figure 1. L4 Detail -- Identity resolution chain. The arrow to Denied is the refusal.* Up: [rbac.md](rbac.md).
 
 | Credential | Identity | Groups |
 |---|---|---|

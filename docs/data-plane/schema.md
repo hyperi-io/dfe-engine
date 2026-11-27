@@ -746,7 +746,7 @@ flowchart TB
   style USE fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 1. L4 Detail -- Elastic template conversion. The dashed box comes from outside DFE.* Up: [Data plane](README.md).
+*Figure 1. L4 Detail -- Elastic template conversion. The Elastic index template box comes from outside DFE.* Up: [Data plane](README.md).
 
 The converter flattens the field hierarchy into columns and writes `name`,
 `type`, `attribute`, `use_case` and a `comment` naming the Elastic type.

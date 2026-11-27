@@ -316,7 +316,7 @@ flowchart LR
   classDef part fill:#FFFFFF,stroke:#94A3B8,stroke-width:1.5px,color:#0F172A
 ```
 
-*Figure 3. L4 Detail -- Secrets provider choice. The dotted arrow is the refusal.* Up: [Deployment](README.md).
+*Figure 3. L4 Detail -- Secrets provider choice. The arrow to Refused at startup is the refusal.* Up: [Deployment](README.md).
 
 The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets an operator enters all go through `scalo.secrets`. With no `DFE_ENGINE_SECRETS_PROVIDER` they land in the `file` provider under `DFE_ENGINE_SECRETS_PATH` (default `./.secrets`), which is all dfe-docker needs.
 

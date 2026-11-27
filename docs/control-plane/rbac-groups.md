@@ -46,7 +46,7 @@ sequenceDiagram
     Sync->>Reg: Update last_sync_at and last_sync_status
 ```
 
-*Figure 1. L4 Detail -- OIDC group sync. Solid arrows are requests, dashed arrows are responses.* Up: [rbac.md](rbac.md).
+*Figure 1. L4 Detail -- OIDC group sync. Each reply is drawn back to the system that asked.* Up: [rbac.md](rbac.md).
 
 A remote group linked through this provider updates its group, and a clash with another provider or a taken name is skipped.
 
@@ -145,7 +145,7 @@ flowchart TB
   style q3 fill:none,stroke:#0072B2,stroke-width:1.5px,stroke-dasharray:6 4
 ```
 
-*Figure 2. L4 Detail -- Group sync decision. Dotted arrows end in a skip.* Up: [rbac.md](rbac.md).
+*Figure 2. L4 Detail -- Group sync decision. Only Skip provider_mismatch and Skip name_taken skip the group.* Up: [rbac.md](rbac.md).
 
 A provider that is disabled, or not in `api` mode, is skipped before the listing. The sync updates a stored group when it is linked to that IdP group: its `source_id` is the IdP group's id and its `source_provider` is this provider, or one `auth.source_provider_bindings` joins to it. The directory assigns that id, so a user cannot choose it the way they choose a display name. Okta is the exception: its groups claim holds names, so an Okta group's id here is its name ([idp-setup/okta.md](idp-setup/okta.md)).
 
