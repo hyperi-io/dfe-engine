@@ -136,3 +136,52 @@ def test_the_too_aggressive_flag_reaches_the_read_model(ch_client, scratch_db):
     status = read_run_status(ch_client, scratch_db, [hunt], now=5_000_000)[hunt]
     assert status.too_aggressive is True
     assert status.overrun_count == 1
+
+
+def test_a_failed_run_now_stays_queued_until_a_fire_succeeds(ch_client, scratch_db):
+    """A run-now that fails is listed as a failed fire and served again after the back-off."""
+    from dfe_engine.hunts.run_status import read_hunt_executions
+    from dfe_engine.hunts.runner import HuntFailures
+
+    hunt = f"retry_{uuid.uuid4().hex[:8]}"
+    coord = _coord(ch_client, scratch_db)
+    spec = HuntSpec(
+        hunt_id=hunt,
+        interval_seconds=600,
+        queries=[
+            f"INSERT INTO `{scratch_db}`.tgt SELECT ev FROM `{scratch_db}`.late WHERE {{window}}"
+        ],
+        timestamp_field="timestamp_load",
+    )
+    failures = HuntFailures(initial_seconds=30, jitter=lambda wait: wait)
+    runner = HuntRunner(coord, HuntWorker(ch_client, coord), {hunt: spec}, cap=4, failures=failures)
+
+    fire = current_fire(hunt, 600, 5_000_000)
+    coord.set_watermark(hunt, fire)
+    requested = fire + 3
+    coord.request_run(hunt, requested)
+
+    # The source table does not exist yet, so the run-now fails.
+    assert runner.tick(requested + 1) == 0
+    assert coord.pending_runs(requested + 1) == {hunt: requested}
+    status = read_run_status(ch_client, scratch_db, [hunt], now=requested + 1)[hunt]
+    assert status.run_requested is True
+    executions, total = read_hunt_executions(ch_client, scratch_db, hunt, limit=10, offset=0)
+    assert total == 1
+    assert executions[0].fire == requested
+    assert executions[0].status == "failed"
+    assert "late" in executions[0].error
+
+    # Inside the back-off the same request is not served again.
+    assert runner.tick(requested + 2) == 0
+
+    ch_client.command(
+        f"CREATE TABLE `{scratch_db}`.late (timestamp_load Int64, ev String) "
+        "ENGINE = MergeTree ORDER BY timestamp_load"
+    )
+    assert runner.tick(requested + 40) == 1
+    assert coord.pending_runs(requested + 40) == {}
+    executions, total = read_hunt_executions(ch_client, scratch_db, hunt, limit=10, offset=0)
+    assert total == 1
+    assert executions[0].status == "completed"
+    assert executions[0].error == ""

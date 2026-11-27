@@ -175,8 +175,8 @@ class HuntWorker:
         self._workload = workload
         # No manager wired records nothing, which is what the unit suite runs on.
         self._metrics = metrics or HuntRunnerMetrics()
-        # None leaves the fire's cost unmeasured. The long-running runner passes the
-        # deployment's detection guard so the execution row carries the preview.
+        # None leaves the fire's cost unmeasured. The runner passes the detection guard
+        # only with hunts.measure_fire_cost on, because the preview runs inside the lease.
         self._guard = guard
         # Fires whose execution row was written, so a later failure of the notifier
         # is not recorded over the completed fire.

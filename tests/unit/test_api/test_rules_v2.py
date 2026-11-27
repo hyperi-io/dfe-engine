@@ -394,6 +394,20 @@ class _ClickHouse:
         return None
 
 
+class _Rows(_ClickHouse):
+    """Returns *count* matching rows for the run."""
+
+    def __init__(self, count: int):
+        super().__init__()
+        self.count = count
+
+    def query(self, sql, **kwargs):
+        if "dfe_total" in sql:
+            return super().query(sql, **kwargs)
+        self.ran.append((sql, kwargs))
+        return SimpleNamespace(column_names=["n"], result_rows=[(i,) for i in range(self.count)])
+
+
 class _Rules:
     def __init__(self, where: str = "severity = 'high'"):
         self.rule = Rule(rule_id="high", name="High", where_clause=where)
@@ -456,7 +470,44 @@ def test_an_on_demand_run_returns_the_estimate_the_rows_and_the_time(monkeypatch
         assert "severity = 'high'" in sql
         assert "'v'" in sql
     assert execution[1]["settings"]["readonly"] == 1
-    assert "LIMIT 1000" in execution[0]
+    # One past the cap, so a result that fills it exactly is not called truncated.
+    assert "LIMIT 1001" in execution[0]
+
+
+@pytest.mark.parametrize(
+    ("matched", "returned", "truncated"),
+    [
+        pytest.param(0, 0, False, id="none"),
+        pytest.param(999, 999, False, id="under-the-cap"),
+        pytest.param(1000, 1000, False, id="exactly-the-cap"),
+        pytest.param(1001, 1000, True, id="past-the-cap"),
+    ],
+)
+def test_a_run_is_truncated_only_when_more_rows_matched_than_the_cap(
+    monkeypatch, matched, returned, truncated
+):
+    client = _Rows(matched)
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result, _client = _run(client=client)
+
+    assert len(result.results) == returned
+    assert result.truncated is truncated
+
+
+def test_a_where_ending_in_a_line_comment_keeps_the_source_match(monkeypatch):
+    """The comment ends at its newline, so the match and the closing brackets survive."""
+    client = _ClickHouse()
+    monkeypatch.setattr(RuleCreationService, "_query_client", lambda self: client)
+
+    result, _client = _run(client=client, registry=_Rules(where="severity = 'high' -- noisy"))
+
+    assert result.sql_errors == []
+    for sql, _kwargs in client.ran:
+        live = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
+        assert "severity = 'high'" in live
+        assert "'v'" in live
+        assert live.count("(") == live.count(")")
 
 
 def test_an_on_demand_run_is_held_to_the_callers_orgs(monkeypatch):
@@ -639,3 +690,29 @@ def test_an_on_demand_run_reports_a_missing_source():
         )
 
     assert raised.value.status == 404
+
+
+@pytest.mark.parametrize(
+    ("permissions", "status"),
+    [
+        pytest.param(None, 401, id="no-credentials"),
+        pytest.param(["rule:read"], 403, id="no-rule-validate"),
+        pytest.param(["rule:validate"], 403, id="no-schema-read"),
+        # Past both checks, the run looks the source up and finds none.
+        pytest.param(["rule:validate", "schema:read"], 404, id="both"),
+    ],
+)
+def test_a_run_returns_rows_so_it_needs_schema_read_as_well(
+    client, app, api_settings, permissions, status
+):
+    from tests.support.held_callers import caller_in_group, define_role
+
+    body = {"source": "no-such-source", "rule": {"where_clause": "severity = 'high'"}}
+    if permissions is None:
+        response = client.post("/api/v1/rules-v2/run", json=body)
+    else:
+        define_role(app, "run_probe", permissions, scoped=False)
+        caller = caller_in_group(app, api_settings, "probe", roles=["run_probe"], org_ids=[])
+        response = caller.post("/api/v1/rules-v2/run", json=body)
+
+    assert response.status_code == status, response.text

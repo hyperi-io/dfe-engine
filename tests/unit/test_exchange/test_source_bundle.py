@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tests.support.core_sources import LANDING_DEFINITION
 from tests.unit.test_exchange.conftest import CORE_SCHEMA, CUSTOM_SCHEMA
 
 SOURCE_BODY = {
@@ -316,7 +317,7 @@ class TestCoreSourceTravelsAsAReference:
         assert exported.status_code == 200, exported.text
         bundle = exported.json()
         assert bundle["resource_type"] == "core"
-        assert bundle["reference"] == {"path": "main", "version": "1.0.2"}
+        assert bundle["reference"] == {"path": "main", "version": LANDING_DEFINITION["current"]}
         assert "routing" not in bundle
         assert "schema" not in bundle
         assert "transform" not in bundle

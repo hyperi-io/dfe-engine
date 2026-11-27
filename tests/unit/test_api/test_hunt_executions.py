@@ -15,6 +15,7 @@ import pytest
 from scalo.resilience import ServiceUnavailable
 
 from dfe_engine.hunts.rule_creation_service import CostEstimate
+from tests.support.held_callers import caller_in_group, define_role
 
 pytestmark = pytest.mark.usefixtures("customer_orgs", "certutil_rule")
 
@@ -49,15 +50,10 @@ class _Executions:
         self.fail = fail
         self.sql: list[str] = []
 
-    def command(self, sql: str) -> None:
-        return None
-
     def query(self, sql: str, parameters: dict | None = None) -> _Result:
         self.sql.append(sql)
         if self.fail:
             raise ServiceUnavailable("clickhouse is down")
-        if "system.columns" in sql:
-            return _Result([[1]])
         if sql.startswith("SELECT count()"):
             return _Result([[2]])
         return _Result(
@@ -111,8 +107,8 @@ def test_executions_list_the_fire_without_its_rows(
     assert failed["rows_returned"] == 0
     assert failed["error"] == "Code: 241. memory limit"
     assert failed["execution_time_ms"] == 1500.0
-    assert any("status != 'requested'" in sql for sql in clickhouse.sql)
-    assert all("hunt_run" in sql or "system.columns" in sql for sql in clickhouse.sql)
+    # A GET reads hunt_run and nothing else: no DDL, no column probe.
+    assert all("hunt_run" in sql and "ALTER" not in sql for sql in clickhouse.sql)
 
 
 def test_an_unreachable_coordination_table_is_a_503(
@@ -125,3 +121,28 @@ def test_an_unreachable_coordination_table_is_a_503(
     response = client.get(f"/api/v1/hunts/{created_hunt}/executions", headers=admin_headers)
 
     assert response.status_code == 503
+
+
+@pytest.mark.parametrize(
+    ("permissions", "status"),
+    [
+        pytest.param(None, 401, id="no-credentials"),
+        pytest.param(["rule:read"], 403, id="no-hunt-read"),
+        pytest.param(["hunt:read"], 200, id="hunt-read"),
+    ],
+)
+def test_executions_need_hunt_read(
+    client, app, api_settings, created_hunt, monkeypatch, permissions, status
+):
+    from dfe_engine.api.v1 import hunts
+
+    monkeypatch.setattr(hunts, "_data_database_client", lambda: (_Executions(), "dfe"))
+    url = f"/api/v1/hunts/{created_hunt}/executions"
+    if permissions is None:
+        response = client.get(url)
+    else:
+        define_role(app, "executions_probe", permissions, scoped=False)
+        caller = caller_in_group(app, api_settings, "probe", roles=["executions_probe"], org_ids=[])
+        response = caller.get(url)
+
+    assert response.status_code == status, response.text

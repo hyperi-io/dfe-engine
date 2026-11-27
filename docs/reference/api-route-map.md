@@ -12,16 +12,16 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 139 | Not placed yet: see its question |
+| decide | 140 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 338 | |
+| total | 339 | |
 
 ## Questions
 
 | Question | Operations |
 |---|---|
 | [apps-depth](#apps-depth) | 22 |
-| [detection-rules](#detection-rules) | 17 |
+| [detection-rules](#detection-rules) | 18 |
 | [groups-scope](#groups-scope) | 11 |
 | [compute-helpers](#compute-helpers) | 8 |
 | [hunts-orgs](#hunts-orgs) | 8 |

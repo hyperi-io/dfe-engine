@@ -41,13 +41,15 @@ from dfe_engine.api.deps import (
     SchemaReg,
     Settings,
     SourceReg,
+    allowed_at_system_or_own_org,
     held_tenant_ids,
     require_action,
 )
 from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
-from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth import AuthorizationError
+from dfe_engine.auth.audit import audit_permission_denied, audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.customers import hunt_tenant_ids
@@ -778,6 +780,26 @@ def preview_rule(
     )
 
 
+def _row_read_tenant_ids(request: Request, user: CurrentUser) -> list[str] | None:
+    """The tenant ids a rule run may return rows from, or None for every org.
+
+    Raises:
+        AuthorizationError: The caller holds no ``schema:read``, so it may not see rows.
+    """
+    rows = scopes_dict["schema_read"]
+    if not allowed_at_system_or_own_org(request, user, rows):
+        reason = f"a rule run returns source rows, which needs '{rows}'"
+        audit_permission_denied(user.user_id, rows, user.roles, reason)
+        raise AuthorizationError(f"Action '{rows}' denied: {reason}")
+    validate = held_tenant_ids(request, user, scopes_dict["rule_validate"])
+    read = held_tenant_ids(request, user, rows)
+    if validate is None:
+        return read
+    if read is None:
+        return validate
+    return sorted(set(validate) & set(read))
+
+
 @router.post(
     "/run",
     response_model=RuleV2RunResponse,
@@ -803,10 +825,13 @@ def run_rule_draft(
     window, and both are held to the orgs the caller may read. A detection the
     hunt runner would refuse, or a SELECT ClickHouse rejects, comes back with
     200 and the reason in ``sql_errors``.
+
+    The run returns source rows, so it also needs ``schema:read``, as sample-rows
+    does, and reads only the orgs both grants reach. 403 without it.
     """
     return _run_rule_request(
         body=body,
-        tenant_ids=held_tenant_ids(request, user, scopes_dict["rule_validate"]),
+        tenant_ids=_row_read_tenant_ids(request, user),
         settings=settings,
         registry=registry,
         sources=sources,
@@ -1422,7 +1447,8 @@ def _run_stored_rule(
 
     where = rule.where_clause
     if match_sql:
-        where = f"({rule.where_clause}) AND ({match_sql})"
+        # The match on its own line, so a rule ending in a line comment cannot comment it out.
+        where = f"(\n{rule.where_clause.strip()}\n) AND (\n{match_sql}\n)"
     measured = rule.model_copy(
         update={"source_db": database, "source_table": table, "where_clause": where}
     )
@@ -1447,7 +1473,8 @@ def _run_stored_rule(
     window_sql = f"{time_column} >= now() - INTERVAL {int(window)} MINUTE"
     limit = int(service._hunts.max_detections_per_run)
     inner = matching_rows(database, table, ("*",), where, window_sql, tenant_condition=fence)
-    sql = f"SELECT * FROM {inner} LIMIT {limit}"  # noqa: S608 - quoted names, integer limit, the condition is the rule
+    # One row past the limit tells a capped result from one that fits exactly.
+    sql = f"SELECT * FROM {inner} LIMIT {limit + 1}"  # noqa: S608 - quoted names, integer limit, the condition is the rule
     started = time.perf_counter()
     try:
         result = client.query(sql, settings=preview_settings(service._hunts.detection_guard))
@@ -1472,9 +1499,9 @@ def _run_stored_rule(
         estimate=estimate,
         errors=[],
         columns=columns,
-        rows=rows,
+        rows=rows[:limit],
         elapsed=(time.perf_counter() - started) * 1000,
-        truncated=len(rows) >= limit,
+        truncated=len(rows) > limit,
     )
 
 

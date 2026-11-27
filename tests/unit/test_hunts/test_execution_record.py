@@ -1,80 +1,79 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_hunts/test_execution_record.py
-#  Purpose:      A finished fire stores its error, duration and cost when the table can
+#  Purpose:      A finished fire stores its error, duration and cost
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""hunt_run gained its execution columns after the first deploys, so a fire writes
-them when they are there and the original four when they are not.
-"""
-
-from __future__ import annotations
-
-from types import SimpleNamespace
+"""What a finished fire writes to hunt_run 1.1.0, and that a failed run-now stays queued."""
 
 import pytest
 
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
 
+_COLUMNS = [
+    "hunt_id",
+    "fire",
+    "status",
+    "rows_written",
+    "error",
+    "duration_ms",
+    "cost_window_minutes",
+    "cost_estimate",
+]
+
 
 class _ClickHouse:
-    def __init__(self, present: bool) -> None:
-        self.present = present
+    """Records inserts. A finished fire issues no DDL and no read."""
+
+    def __init__(self) -> None:
         self.inserts: list[tuple[list, list[str]]] = []
-
-    def command(self, sql: str) -> None:
-        return None
-
-    def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
-        return SimpleNamespace(result_rows=[[1 if self.present else 0]])
 
     def insert(self, table: str, data: list, column_names: list[str], database: str) -> None:
         self.inserts.append((data, column_names))
 
 
-def test_a_finished_fire_stores_its_error_duration_and_cost_when_the_columns_exist():
-    client = _ClickHouse(present=True)
+@pytest.mark.parametrize(
+    ("status", "run_now", "error", "stored", "stored_error"),
+    [
+        pytest.param("completed", False, "", "completed", "", id="completed"),
+        pytest.param("failed", False, "Code: 241.", "failed", "Code: 241.", id="failed"),
+        pytest.param("failed", True, "Code: 241.", "requested", "Code: 241.", id="run-now-stays"),
+        pytest.param("failed", True, "  ", "requested", "failed", id="run-now-keeps-an-error"),
+        pytest.param("completed", True, "", "completed", "", id="run-now-served"),
+    ],
+)
+def test_a_finished_fire_stores_its_status_error_duration_and_cost(
+    status, run_now, error, stored, stored_error
+):
+    client = _ClickHouse()
 
     ChCoordinator(client, database="dfe").record_run(
         "h",
         42,
-        0,
-        status="failed",
-        error="Code: 241. memory limit",
+        3,
+        status=status,
+        error=error,
         duration_ms=1500,
         cost_window_minutes=60,
         cost_estimate='{"window_minutes": 60}',
+        run_now=run_now,
     )
 
-    data, columns = client.inserts[0]
-    assert columns == [
-        "hunt_id",
-        "fire",
-        "status",
-        "rows_written",
-        "error",
-        "duration_ms",
-        "cost_window_minutes",
-        "cost_estimate",
-    ]
-    assert data == [
-        ["h", 42, "failed", 0, "Code: 241. memory limit", 1500.0, 60, '{"window_minutes": 60}']
+    assert client.inserts == [
+        ([["h", 42, stored, 3, stored_error, 1500.0, 60, '{"window_minutes": 60}']], _COLUMNS)
     ]
 
 
-def test_a_table_without_the_columns_still_records_the_fire():
-    client = _ClickHouse(present=False)
+def test_a_long_error_is_cut_to_the_limit():
+    client = _ClickHouse()
 
-    ChCoordinator(client, database="dfe").record_run("h", 42, 7)
+    ChCoordinator(client, database="dfe").record_run("h", 42, 0, status="failed", error="x" * 5000)
 
-    data, columns = client.inserts[0]
-    assert columns == ["hunt_id", "fire", "status", "rows_written"]
-    assert data == [["h", 42, "completed", 7]]
+    assert len(client.inserts[0][0][0][4]) == 2000
 
 
-def test_a_queued_run_is_not_a_finished_fire():
-    with pytest.raises(ValueError):
-        ChCoordinator(_ClickHouse(present=False), database="dfe").record_run(
-            "h", 42, 0, status="requested"
-        )
+@pytest.mark.parametrize("status", ["requested", "", "running"])
+def test_only_a_completed_or_failed_fire_is_finished(status):
+    with pytest.raises(ValueError, match="completed or failed"):
+        ChCoordinator(_ClickHouse(), database="dfe").record_run("h", 42, 0, status=status)

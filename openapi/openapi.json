@@ -14276,7 +14276,7 @@
           "Rules V2"
         ],
         "summary": "Run Rule Draft",
-        "description": "Run a stored rule, or a detection that has not been saved, writing nothing.\n\nGive ``rule.name`` to run a stored rule, or one of ``rule.where_clause``,\n``rule.cel_filter``, ``rule.user_sql``, or ``rule.match`` to run that detection\nwithout creating a rule.\nThe source is read the way a sample of it is read: its own table when that\nversion is deployed, otherwise the landing table filtered to the source's\nmatch. The volume estimate and the SELECT of matching rows share the lookback\nwindow, and both are held to the orgs the caller may read. A detection the\nhunt runner would refuse, or a SELECT ClickHouse rejects, comes back with\n200 and the reason in ``sql_errors``.",
+        "description": "Run a stored rule, or a detection that has not been saved, writing nothing.\n\nGive ``rule.name`` to run a stored rule, or one of ``rule.where_clause``,\n``rule.cel_filter``, ``rule.user_sql``, or ``rule.match`` to run that detection\nwithout creating a rule.\nThe source is read the way a sample of it is read: its own table when that\nversion is deployed, otherwise the landing table filtered to the source's\nmatch. The volume estimate and the SELECT of matching rows share the lookback\nwindow, and both are held to the orgs the caller may read. A detection the\nhunt runner would refuse, or a SELECT ClickHouse rejects, comes back with\n200 and the reason in ``sql_errors``.\n\nThe run returns source rows, so it also needs ``schema:read``, as sample-rows\ndoes, and reads only the orgs both grants reach. 403 without it.",
         "operationId": "rules-v2.run",
         "requestBody": {
           "content": {

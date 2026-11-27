@@ -29,14 +29,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from scalo.logger import logger
-
 from dfe_engine.clickhouse.quoting import quote_identifier
-from dfe_engine.hunts.ch_coordinator import (
-    STOP_MARK,
-    ensure_execution_columns,
-    execution_columns_present,
-)
+from dfe_engine.hunts.ch_coordinator import STOP_MARK
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,28 +186,24 @@ class HuntExecutionRow:
     cost_estimate: str
 
 
-def _execution_sql(database: str, *, wide: bool) -> str:
-    """Fires whose latest status is a finished run, newest fire first."""
+def _execution_sql(database: str) -> str:
+    """Fires that ran, newest first.
+
+    A ``requested`` row with an error is a run-now whose attempt failed and that
+    stays queued for the next one, so it lists as failed.
+    """
     db = quote_identifier(database)
-    if wide:
-        extras = (
-            "argMax(error, updated) AS error, "
-            "argMax(duration_ms, updated) AS duration_ms, "
-            "argMax(cost_window_minutes, updated) AS cost_window_minutes, "
-            "argMax(cost_estimate, updated) AS cost_estimate"
-        )
-    else:
-        extras = (
-            "'' AS error, toFloat64(0) AS duration_ms, "
-            "toUInt32(0) AS cost_window_minutes, '' AS cost_estimate"
-        )
     return (
-        "SELECT fire, status, rows_written, error, duration_ms, "  # noqa: S608 - quoted database, bound hunt id
-        "cost_window_minutes, cost_estimate FROM ("
+        "SELECT fire, if(status = 'requested', 'failed', status) AS shown, rows_written, "  # noqa: S608 - quoted database, bound hunt id
+        "error, duration_ms, cost_window_minutes, cost_estimate FROM ("
         "SELECT fire, argMax(status, updated) AS status, "
         "argMax(rows_written, updated) AS rows_written, "
-        f"{extras} FROM {db}.hunt_run WHERE hunt_id = {{hunt:String}} GROUP BY fire"
-        ") WHERE status != 'requested' ORDER BY fire DESC"
+        "argMax(error, updated) AS error, "
+        "argMax(duration_ms, updated) AS duration_ms, "
+        "argMax(cost_window_minutes, updated) AS cost_window_minutes, "
+        "argMax(cost_estimate, updated) AS cost_estimate "
+        f"FROM {db}.hunt_run WHERE hunt_id = {{hunt:String}} GROUP BY fire"
+        ") WHERE status != 'requested' OR error != '' ORDER BY fire DESC"
     )
 
 
@@ -222,9 +212,7 @@ def read_hunt_executions(
 ) -> tuple[list[HuntExecutionRow], int]:
     """One page of a hunt's finished fires, and how many there are.
 
-    A ``requested`` row is a run-now that has not executed, so it is not a fire
-    here. The page is newest fire first. A table that predates the execution
-    columns still lists the fires, with no error, duration or cost.
+    A run-now that has not executed is not a fire here. The page is newest fire first.
 
     Args:
         ch: a ClickHouse client exposing ``query``.
@@ -233,12 +221,7 @@ def read_hunt_executions(
         limit: rows in this page.
         offset: finished fires to skip.
     """
-    try:
-        ensure_execution_columns(ch, database)
-    except Exception as exc:
-        logger.warning("hunt execution columns were not added", hunt=hunt_id, error=str(exc))
-    wide = execution_columns_present(ch, database)
-    sql = _execution_sql(database, wide=wide)
+    sql = _execution_sql(database)
     parameters = {"hunt": hunt_id}
     total_rows = ch.query(
         "SELECT count() FROM (" + sql + ") AS fires",  # noqa: S608 - the statement is built above
