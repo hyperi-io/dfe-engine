@@ -714,7 +714,7 @@ requires-dist = [
     { name = "confluent-kafka", specifier = ">=2.16.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dfe-schemas", specifier = ">=0.2.33rc4,<1" },
+    { name = "dfe-schemas", specifier = ">=0.2.33,<1" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.43.0" },
     { name = "fastapi", specifier = ">=0.143.0" },
@@ -769,14 +769,14 @@ dev = [
 
 [[package]]
 name = "dfe-schemas"
-version = "0.2.33rc4"
+version = "0.2.33"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/c5/fb8fdd718be7dc50babe9a27a2e43aa63d72cb0af7293af406e88a5e9a48/dfe_schemas-0.2.33rc4.tar.gz", hash = "sha256:b0c19ecfd9e55c559df5db5f2c48fc38015fd26ad734dbf83c3c69e336a6d567", size = 1298997, upload-time = "2026-11-27T00:18:54.201Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/71/311217498ab15a22ea257441e2042c4676b0ad75c8e2bb6c2d43cae02bb3/dfe_schemas-0.2.33.tar.gz", hash = "sha256:10f971c8049b2a2c9536452ad0b8b202bf2699ab9061a31b28383660ecfaf6a1", size = 1304360, upload-time = "2026-11-27T13:05:41.089Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/f8/100fd71f6146835556fb52ed42555f3a87df76775544c75ce37226003931/dfe_schemas-0.2.33rc4-py3-none-any.whl", hash = "sha256:7cdeda47ebb1350d97261b67c96237cd25526b8ca52087af6897d9b501339284", size = 2823166, upload-time = "2026-11-27T00:18:52.76Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/dc/6e88362c2cceeceae4439bea762a66b6ba0e907e7b28361b381cef2fadad/dfe_schemas-0.2.33-py3-none-any.whl", hash = "sha256:43f05c0438cef23e9aa5f00e69671db262b6d3d0343a9afecbecd75345305bb6", size = 2826927, upload-time = "2026-11-27T13:05:39.878Z" },
 ]
 
 [[package]]
