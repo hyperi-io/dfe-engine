@@ -3,6 +3,26 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.94](https://github.com/hyperi-io/dfe-engine/compare/v1.22.93...v1.22.94) (2026-11-27)
+
+### What's Changed
+* fix(docs): point SHA refs at the rewritten history by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1286
+* fix(sources): hold a production+team deploy until review merges by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1289
+* fix(deps): raise the dfe-schemas floor to 0.2.33rc3 by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1287
+* fix(expr): drop @config, check against dfe-schemas by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1292
+* fix: stop listing catalogue framing and beats by @kazmosahebi in https://github.com/hyperi-io/dfe-engine/pull/1293
+* fix(hunts): fix on-demand rule runs and hunt executions by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1291
+* fix(docs): say what source:write reaches in the fetcher by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1294
+* fix(docs): link the threat model from the RBAC page by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1299
+* fix(rules): reject empty search filters with rule_empty_filter by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1296
+* fix(sigma): keep provider secrets under sigma/ by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1300
+* fix(sampling): cap logreducer clusters and anomaly rows by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1301
+* fix: security and reliability fixes for 2.2.4 GA by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1302
+* fix(orgs): cap org names at 64 characters by @kazmosahebi in https://github.com/hyperi-io/dfe-engine/pull/1298
+* fix(docs): refer to diagram labels and endpoints in captions by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1303
+* fix(synthetic): send credentials to all receiver names by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1304
+* fix(schema): read the inherited header after the schemas re-seed by @catinspace-au in https://github.com/hyperi-io/dfe-engine/pull/1305
+
 ## [1.22.93](https://github.com/hyperi-io/dfe-engine/compare/v1.22.92...v1.22.93) (2026-11-23)
 
 ### What's Changed
