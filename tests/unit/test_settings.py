@@ -1249,6 +1249,23 @@ class TestGitopsMode:
         assert pack.packs == 0
         assert pack.interval_seconds == 60.5
 
+    @pytest.mark.parametrize(("env", "seconds"), [(None, 60.0), ("15.5", 15.5)])
+    def test_converge_interval_defaults_and_comes_from_the_environment(
+        self, monkeypatch, env, seconds
+    ):
+        from dfe_engine.settings import GitopsSettings, _get_env_overrides
+
+        if env is not None:
+            monkeypatch.setenv("DFE_ENGINE_GITOPS_CONVERGE_INTERVAL_SECONDS", env)
+        overrides = _get_env_overrides().get("gitops", {})
+        assert GitopsSettings(**overrides).converge_interval_seconds == seconds
+
+    def test_converge_interval_refuses_zero(self):
+        from dfe_engine.settings import GitopsSettings
+
+        with pytest.raises(ValidationError):
+            GitopsSettings(converge_interval_seconds=0)
+
     def test_write_timeout_is_longer_than_the_read_bound(self):
         from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
 

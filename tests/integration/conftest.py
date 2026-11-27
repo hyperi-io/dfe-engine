@@ -1050,6 +1050,31 @@ def kafka_stack(
 
 
 @pytest.fixture
+def held_kafka_stack(
+    ch_client: Any,
+    ch_params: dict,
+    kafka_bootstrap: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Iterator[SimpleNamespace]:
+    """The ``kafka_stack`` engine API in production+team over a local deploy repo, so every operator write goes to a review branch."""
+    database, settings = _kafka_settings(
+        ch_params=ch_params, kafka_bootstrap=kafka_bootstrap, tmp_path=tmp_path
+    )
+    settings.gitops.enabled = True
+    settings.gitops.local_path = str(tmp_path / "deploy")
+    settings.gitops.mode = "team"
+    settings.gitops.push = False
+    yield from _engine_api(
+        ch_client=ch_client,
+        database=database,
+        monkeypatch=monkeypatch,
+        settings=settings,
+        tmp_path=tmp_path,
+    )
+
+
+@pytest.fixture
 def kafka_engine_restarts(
     ch_client: Any,
     ch_params: dict,
