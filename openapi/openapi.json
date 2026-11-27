@@ -41446,6 +41446,7 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 64,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
             "title": "Name",
             "description": "Unique org name (used as identifier)"
