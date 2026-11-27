@@ -40,12 +40,6 @@ def _inherited_header_type() -> str:
     return DEFAULT_HEADER_TYPE
 
 
-def _inherited_header_version() -> str:
-    from .source.models import inherited_header_version
-
-    return inherited_header_version()
-
-
 class ClickHouseCloudSettings(BaseModel):
     """ClickHouse Cloud service-lifecycle config (CONTROL PLANE, opt-in).
 
@@ -202,9 +196,10 @@ class ClickHouseSettings(BaseModel):
     # declares its own. 0 disables the default.
     default_ttl_days: int = Field(default=90, ge=0)
     # What an unauthored source header inherits. A deploy-repo override replaces
-    # these. The defaults are SourceHeader's, the version being the profile's ``current``.
+    # these. An empty version means the profile's ``current``, read where it is used,
+    # because startup re-seeds the schemas tree after these settings are built.
     default_header_type: str = Field(default_factory=_inherited_header_type)
-    default_header_version: str = Field(default_factory=_inherited_header_version)
+    default_header_version: str = Field(default="")
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
     resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
     interactive_budget_seconds: float = Field(

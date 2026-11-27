@@ -3,7 +3,8 @@
 from dfe_schemas import schemas_root
 from dfe_schemas.loader import read_yaml
 
-from dfe_engine.settings import ClickHouseSettings
+from dfe_engine.gitcrud.table_defaults import resolve
+from dfe_engine.settings import ClickHouseSettings, DFESettings
 from dfe_engine.source.models import DEFAULT_HEADER_TYPE, SourceHeader, inherited_header_version
 
 
@@ -12,7 +13,8 @@ def test_the_inherited_header_is_the_current_version_dfe_schemas_ships() -> None
     current = str(read_yaml(profile)["current"])
     assert inherited_header_version() == current
     assert SourceHeader().version == current
-    assert ClickHouseSettings().default_header_version == current
+    assert ClickHouseSettings().default_header_version == ""
+    assert resolve(None, DFESettings(env="test")).header_version == current
     assert ClickHouseSettings().default_header_type == DEFAULT_HEADER_TYPE
 
 
@@ -27,6 +29,6 @@ def test_a_new_current_version_reaches_every_default(tmp_path, monkeypatch) -> N
     try:
         assert inherited_header_version() == "9.9.9"
         assert SourceHeader().version == "9.9.9"
-        assert ClickHouseSettings().default_header_version == "9.9.9"
+        assert resolve(None, DFESettings(env="test")).header_version == "9.9.9"
     finally:
         inherited_header_version.cache_clear()
