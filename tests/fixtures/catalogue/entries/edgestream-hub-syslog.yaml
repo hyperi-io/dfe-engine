@@ -14,4 +14,3 @@ catalogue:
   package: edgestream_hub
   data_stream: syslog
   intakes: [receiver]
-  framing: body

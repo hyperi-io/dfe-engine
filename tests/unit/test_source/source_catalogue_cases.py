@@ -143,24 +143,20 @@ class LoadSourceCatalogueCase(TypedDict):
 
 LOAD_SOURCE_CATALOGUE_CASES: list[LoadSourceCatalogueCase] = [
     {
-        "id": "receiver_default_with_framing",
+        "id": "beats_and_receiver",
         "entry": "cisco-asa",
         "expected_block": {
-            "beats": {},
             "data_stream": "log",
-            "framing": "line",
             "intakes": ("beats", "receiver"),
             "package": "cisco_asa",
             "variants": ("filebeat.cisco_asa.default",),
         },
     },
     {
-        "id": "fetcher_default_with_a_beats_module",
+        "id": "beats_and_fetcher",
         "entry": "okta",
         "expected_block": {
-            "beats": {"module": "okta", "fileset": "system"},
             "data_stream": "system",
-            "framing": None,
             "intakes": ("beats", "fetcher"),
             "package": "okta",
             "variants": ("filebeat.okta.default",),
@@ -170,9 +166,7 @@ LOAD_SOURCE_CATALOGUE_CASES: list[LoadSourceCatalogueCase] = [
         "id": "receiver_alone_with_no_transform",
         "entry": "edgestream-hub-syslog",
         "expected_block": {
-            "beats": {},
             "data_stream": "syslog",
-            "framing": "body",
             "intakes": ("receiver",),
             "package": "edgestream_hub",
             "variants": (),
@@ -182,9 +176,7 @@ LOAD_SOURCE_CATALOGUE_CASES: list[LoadSourceCatalogueCase] = [
         "id": "two_variants_default_first",
         "entry": "coredns-log",
         "expected_block": {
-            "beats": {},
             "data_stream": "log",
-            "framing": None,
             "intakes": ("beats",),
             "package": "coredns",
             "variants": ("filebeat.coredns_log.default", "filebeat.coredns_log.json"),
@@ -194,9 +186,7 @@ LOAD_SOURCE_CATALOGUE_CASES: list[LoadSourceCatalogueCase] = [
         "id": "renamed_source_keeps_the_original_variant",
         "entry": "onepassword-audit-events",
         "expected_block": {
-            "beats": {},
             "data_stream": "audit_events",
-            "framing": None,
             "intakes": ("beats", "fetcher"),
             "package": "1password",
             "variants": ("filebeat.1password_audit_events.default",),
@@ -290,12 +280,6 @@ LOAD_SOURCE_CATALOGUE_SKIP_CASES: list[LoadSourceCatalogueSkipCase] = [
         "id": "no_package",
         "text": _document(changes={"catalogue.package": None}),
         "expected_reason": "its catalogue block is not valid: package: Field required",
-    },
-    {
-        "id": "beats_that_are_not_a_mapping",
-        "text": _document(changes={"catalogue.beats": "acme"}),
-        "expected_reason": "its catalogue block is not valid: beats: Input should be a valid "
-        "dictionary",
     },
     {
         "id": "a_fetcher_intake_without_a_fetcher_body",

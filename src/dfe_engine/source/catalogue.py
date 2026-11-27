@@ -94,8 +94,6 @@ class _CatalogueBlock(BaseModel):
     package: str
     data_stream: str
     intakes: list[CatalogueIntake] = Field(min_length=1)
-    framing: str | None = None
-    beats: dict[str, str] = Field(default_factory=dict)
     variants: list[str] = Field(default_factory=list)
 
 
@@ -117,12 +115,6 @@ class CatalogueEntry:
 
     intakes: tuple[CatalogueIntake, ...]
     """Every way the data can arrive, in the order the file lists them."""
-
-    framing: str | None
-    """Receiver intakes only: whether the pipeline wants the syslog line or the body."""
-
-    beats: dict[str, str]
-    """The Beats module and fileset carrying the same source, where one does."""
 
     variants: tuple[str, ...]
     """Every compiled transform variant for the source, the body's first."""
@@ -213,9 +205,7 @@ def _entry_from(*, path: Path, tag: str) -> CatalogueEntry:
     if catalogue.intakes == ["receiver"]:
         _require_shipper_match(match=request.match)
     return CatalogueEntry(
-        beats=catalogue.beats,
         data_stream=catalogue.data_stream,
-        framing=catalogue.framing,
         intakes=tuple(catalogue.intakes),
         name=path.stem,
         package=catalogue.package,
