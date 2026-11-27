@@ -396,7 +396,7 @@ flowchart LR
 
 A role write grants what its caller holds and nothing more. Creating a role, or changing what one grants, needs every permission it lists through the caller's system-scope grants, where a pattern covers another when it matches everything that one does (`config:*` covers `config:read`). An unscoped role reads every org once bound at system scope, so it needs those permissions through roles that themselves read every org. Handing a role to a group, an account or an API key follows the same rule at the group's scope, `role:write` adds nothing to it, and a role `roles.yaml` does not declare needs `*`.
 
-`source:write` reaches every credential the fetcher can. A fetcher source names its credential as a reference (`env:`, `file:`, `vault:`), and the fetcher resolves it with its own privileges and sends it to the host the source names. So grant `source:write` (`data_analyst`, `ingest_admin`) only to people trusted with the fetcher's credentials. dfe-infra's `docs/threat-model.md` records this as an accepted risk.
+`source:write` reaches every credential the fetcher can. A fetcher source names its credential as a reference (`env:`, `file:`, `vault:`), and the fetcher resolves it with its own privileges and sends it to the host the source names. So grant `source:write` (`data_analyst`, `ingest_admin`) only to people trusted with the fetcher's credentials. dfe-infra's [threat model](https://github.com/hyperi-io/dfe-infra/blob/main/docs/threat-model.md) records this as an accepted risk.
 
 A `scoped` role grants `...:read` patterns and `query:execute` and nothing else, as at system scope it passes every org-scope check. Anything else fails the roles file's load, and the roles API answers 422.
 
