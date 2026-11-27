@@ -761,52 +761,60 @@ class TestRulesRefuseUncompilable:
         self, client, admin_headers, sql, bounds
     ):
         # The hunt window owns time, so SQL left with no filter has nothing to detect with.
-        for path in ("/api/v1/rules/from-hyperdx", "/api/v1/rules-v2/from-hyperdx"):
-            for params in ({}, {"dry_run": "true"}):
-                resp = client.post(
-                    path,
-                    params=params,
-                    json={"raw_sql": sql, "saved_search_name": "time only"},
-                    headers=admin_headers,
-                )
-                if "v2" in path and params:
-                    continue
-                body = resp.json()
-                assert resp.status_code == 422, resp.text
-                assert body["code"] == "rule_empty_filter"
-                assert body["dropped_bounds"] == bounds
-                (message,) = [e["message"] for e in body["sql_errors"]]
-                assert message in body["detail"]
-                if bounds:
-                    assert "filters only on time" in message
-                    assert all(bound in message for bound in bounds)
-                else:
-                    assert message == "Rule has empty detection logic (WHERE clause)."
+        for path in (
+            "/api/v1/rules/from-hyperdx",
+            "/api/v1/rules/from-hyperdx/validate",
+            "/api/v1/rules-v2/from-hyperdx",
+        ):
+            resp = client.post(
+                path,
+                json={"raw_sql": sql, "saved_search_name": "time only"},
+                headers=admin_headers,
+            )
+            body = resp.json()
+            assert resp.status_code == 422, resp.text
+            assert body["code"] == "rule_empty_filter"
+            assert body["dropped_bounds"] == bounds
+            (message,) = [e["message"] for e in body["sql_errors"]]
+            assert message in body["detail"]
+            if bounds:
+                assert "filters only on time" in message
+                assert all(bound in message for bound in bounds)
+            else:
+                assert message == "Rule has empty detection logic (WHERE clause)."
         assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
-    def test_dry_run_answers_200_and_writes_nothing(self, client, admin_headers):
+    def test_validate_answers_200_and_writes_nothing(self, client, admin_headers):
         resp = client.post(
-            "/api/v1/rules/from-hyperdx",
-            params={"dry_run": "true"},
-            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Dry One"},
+            "/api/v1/rules/from-hyperdx/validate",
+            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Check One"},
             headers=admin_headers,
         )
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["id"] == "dry-one"
+        assert resp.json()["valid"] is True
         assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
         saved = client.post(
             "/api/v1/rules/from-hyperdx",
-            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Dry One"},
+            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Check One"},
             headers=admin_headers,
         )
         assert saved.status_code == 201
-        assert saved.json()["id"] == "dry-one"
+        assert saved.json()["id"] == "check-one"
 
-    def test_dry_run_keeps_the_other_refusal_codes(self, client, admin_headers):
+    def test_create_ignores_a_dry_run_query_and_saves(self, client, admin_headers):
+        # The create route takes no dry_run, so an old caller's flag can never skip the write.
         resp = client.post(
-            "/api/v1/rules/from-hyperdx",
-            params={"dry_run": "true"},
+            "/api/v1/rules/from-hyperdx?dry_run=true",
+            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Create One"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+
+    def test_validate_keeps_the_other_refusal_codes(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx/validate",
             json={"raw_sql": "SELECT * FROM events WHERE severity = 'high'"},
             headers=admin_headers,
         )

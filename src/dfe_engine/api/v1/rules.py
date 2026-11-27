@@ -382,6 +382,15 @@ class RuleFromHyperdxResponse(BaseModel):
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
 
 
+class RuleFromSearchCheck(BaseModel):
+    """A search that would make a rule."""
+
+    valid: Literal[True] = Field(default=True, description="Always true: a refusal is a 422")
+    warnings: list[str] = Field(
+        default_factory=list, description="What to look at before creating the rule"
+    )
+
+
 # -- Endpoints ------------------------------------------------
 
 
@@ -536,10 +545,6 @@ async def create_rule_from_hyperdx(
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
-    dry_run: Annotated[
-        bool,
-        Query(description="Run every check a save runs and answer 200, writing nothing"),
-    ] = False,
 ):
     """Create a hunt rule from the SQL a Search view renders to.
 
@@ -548,37 +553,63 @@ async def create_rule_from_hyperdx(
     A view whose SQL the hunt runner could not compile, or that matches every
     event, is refused with 422. RBAC: ``rule:write`` (data_analyst) --
     ``org_viewer`` has neither this grant nor the UI button.
-
-    With ``dry_run=true`` the same checks run and the same refusals answer, but a
-    rule that would save answers 200 and nothing is written, so a Search view can ask
-    before the user presses Create.
+    ``POST /rules/from-hyperdx/validate`` runs the same checks and writes nothing.
     """
     return await run_blocking(
         functools.partial(
-            _create_rule_from_sql,
-            body,
-            user,
-            settings,
-            registry,
-            request,
-            response,
-            hunts,
-            dry_run,
+            _create_rule_from_sql, body, user, settings, registry, request, response, hunts
         )
     )
 
 
-def _create_rule_from_sql(
+@router.post(
+    "/from-hyperdx/validate",
+    summary="Validate Rule From Search",
+    response_model=RuleFromSearchCheck,
+    responses=_REFUSED_RULE_RESPONSES,
+    dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
+)
+async def validate_rule_from_hyperdx(
     body: RuleFromHyperdxRequest,
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
     request: Request,
-    response: Response,
     hunts: OptionalHuntConfigReg,
-    dry_run: bool = False,
-) -> RuleFromHyperdxResponse:
-    """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
+):
+    """Check the SQL a Search view renders to as ``POST /rules/from-hyperdx`` would, writing nothing.
+
+    Runs every check a create runs and answers the same 422 refusals, including
+    ``rule_empty_filter``. A search that would save answers 200. Nothing is written and
+    no alert-volume preview runs, so a Search view can ask before the user presses Create.
+    An engine without this route answers 404, which is how a caller tells it is older.
+    """
+    check = functools.partial(
+        _check_search_rule, body, user, settings, registry, request, hunts, False
+    )
+    _, result = await run_blocking(check)
+    return RuleFromSearchCheck(
+        warnings=[*result.rule.warnings, *result.json_path_warnings],
+    )
+
+
+def _check_search_rule(
+    body: RuleFromHyperdxRequest,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+    request: Request,
+    hunts: OptionalHuntConfigReg,
+    measure_volume: bool,
+):
+    """Run the create pipeline on a search's SQL and refuse it as a create would.
+
+    Returns:
+        The rule id a create would take, and the pipeline's result.
+
+    Raises:
+        ProblemError: 422, as ``_refuse_uncompilable`` and ``_refuse_matches_everything`` raise.
+    """
     from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
     rule_id = _unique_rule_id(registry, body.saved_search_name)
@@ -592,22 +623,27 @@ def _create_rule_from_sql(
         user_sql=body.raw_sql,
         hunt_name=body.hunt_name,
         source=body.source,
-        measure_volume=not dry_run,
+        measure_volume=measure_volume,
     )
 
     fence = _preview_tenant_ids(request, user, hunts, rule_id, body.hunt_name)
     result = service.create_rule(svc_request, rule_id, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
-    if dry_run:
-        response.status_code = 200
-        return RuleFromHyperdxResponse(
-            id=rule_id,
-            display_name=result.rule.name,
-            sanitize_summary=result.sanitize_summary or {},
-            warnings=[*result.rule.warnings, *result.json_path_warnings],
-            sql_errors=[],
-        )
+    return rule_id, result
+
+
+def _create_rule_from_sql(
+    body: RuleFromHyperdxRequest,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+    request: Request,
+    response: Response,
+    hunts: OptionalHuntConfigReg,
+) -> RuleFromHyperdxResponse:
+    """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
+    rule_id, result = _check_search_rule(body, user, settings, registry, request, hunts, True)
     outcome = registry.save(result.rule, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", rule_id, "created", review_audit_detail(outcome))
