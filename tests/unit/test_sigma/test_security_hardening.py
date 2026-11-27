@@ -67,6 +67,27 @@ class TestProviderReachConfinement:
             )
         )
 
+    @pytest.mark.parametrize(
+        ("subdir", "refused"),
+        [("rules", False), ("", False), ("../etc", True), ("rules/../../x", True), ("/etc", True)],
+    )
+    def test_git_subdir_confined_inside_the_repo(self, tmp_path, subdir, refused):
+        from scalo.api import ProblemError
+
+        from dfe_engine.api.v1.sigma import _validate_provider_reach
+
+        cfg = ProviderConfig(
+            name="p",
+            kind=ProviderKind.GIT_REPO,
+            options={"url": "https://github.com/SigmaHQ/sigma", "subdir": subdir},
+        )
+        if refused:
+            with pytest.raises(ProblemError) as exc:
+                _validate_provider_reach(self._request(tmp_path), cfg)
+            assert exc.value.problem.code == "path_escape"
+        else:
+            _validate_provider_reach(self._request(tmp_path), cfg)
+
     def test_local_files_dir_escape_rejected(self, tmp_path):
         import pytest
         from scalo.api import ProblemError

@@ -131,9 +131,18 @@ class GitRepoProvider(SigmaProvider):
 
     def _scan(self, since: datetime | None) -> list[SigmaRuleDoc]:
         subdir = str(self.config.options.get("subdir", "")).strip().strip("/")
-        root = self._clone_path / subdir if subdir else self._clone_path
+        clone = self._clone_path.resolve()
+        root = (clone / subdir).resolve() if subdir else clone
         docs: list[SigmaRuleDoc] = []
         warnings: list[str] = []
+        if not root.is_relative_to(clone):
+            logger.warning(
+                "sigma git provider: rules subdir is outside the clone, nothing read",
+                provider=self.name,
+                subdir=subdir,
+            )
+            self.last_warnings = ["the rules subdir is outside the clone"]
+            return docs
         if not root.is_dir():
             logger.warning(
                 "sigma git provider: rules subdir missing", provider=self.name, subdir=subdir
@@ -141,14 +150,15 @@ class GitRepoProvider(SigmaProvider):
             self.last_warnings = warnings
             return docs
         for path in sorted(root.rglob("*.yml")):
-            if not path.is_file():
+            # A symlink in the repo can point anywhere on the engine's disk, so it is never followed.
+            if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(clone):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
             except OSError as exc:
                 warnings.append(f"read failed {path}: {exc}")
                 continue
-            source_ref = str(path.relative_to(self._clone_path))
+            source_ref = str(path.relative_to(clone))
             parsed, warns = parse_sigma_yaml(text, self.origin, source_ref)
             docs.extend(parsed)
             warnings.extend(f"{source_ref}: {w}" for w in warns)

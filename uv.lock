@@ -724,7 +724,7 @@ requires-dist = [
     { name = "httpx2", specifier = ">=2.13.1" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "logreducer", extras = ["enhanced"], specifier = ">=3.5.6" },
+    { name = "logreducer", extras = ["enhanced"], specifier = ">=3.5.7" },
     { name = "msal", specifier = ">=1.37.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "oauthlib", specifier = ">=4.0.1" },
@@ -740,7 +740,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["api", "cli", "expression", "http", "kafka", "metrics", "secrets-kubernetes"], specifier = ">=2.32.12,<3" },
+    { name = "scalo", extras = ["api", "cli", "expression", "http", "kafka", "metrics", "secrets-kubernetes"], specifier = ">=2.32.14,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -1287,7 +1287,7 @@ wheels = [
 
 [[package]]
 name = "logreducer"
-version = "3.5.6"
+version = "3.5.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -1295,9 +1295,9 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/83/72b922a3eb60d93e9fb4e05cbb5081b9c67043958562270f8e6cb0411b0b/logreducer-3.5.6.tar.gz", hash = "sha256:abdb702a3c01bceeea3339c3b57d9194101808aedc9234b54d6f071cbbcbce75", size = 62468, upload-time = "2026-11-01T20:08:47.905Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/18/6f/6220e2b38e8fd3e86490b60bea140c835e73ead0b8bde7edd41f634d1550/logreducer-3.5.7.tar.gz", hash = "sha256:cc8631ff5c6ee99f1e05f2058201e40d84a36ea2064c604f1c3e05536e491ea5", size = 66335, upload-time = "2026-11-27T10:21:24.764Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e7/67/772838fb774961568cd9eaa4b314178e0eae8be40e2f4696a222b9a1f960/logreducer-3.5.6-py3-none-any.whl", hash = "sha256:a5ccace4e73230e57f213e7d762c3e9980dca41096cf5b50286aada86394aa0f", size = 69858, upload-time = "2026-11-01T20:08:46.088Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/d1/bf3c917c5b442fe361379ae0444554e61a95b0c8ff9cd68dc8b81e24886c/logreducer-3.5.7-py3-none-any.whl", hash = "sha256:894157c5ed51746b93e4ac9fceb79f60e10db2827708e12abc917016e567f392", size = 72271, upload-time = "2026-11-27T10:21:23.529Z" },
 ]
 
 [package.optional-dependencies]
@@ -2393,7 +2393,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.32.12"
+version = "2.32.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2411,14 +2411,13 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/00/6c/2c007cd0be3a805fd746a754bfd14ea3f20bec7f45a2982730eb673148d2/scalo-2.32.12.tar.gz", hash = "sha256:74f07f886824c99f82643809abde33786f0003c17108b8004076cedbe69afa32", size = 563405, upload-time = "2026-11-26T10:51:23.213Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/6f/5a86570c65c009e1df40cc7323e6940fd8862ebb22c635e5538142e9f172/scalo-2.32.14.tar.gz", hash = "sha256:9140ecb5bb8af66ead761e6a491f6f2b7dd7161e4e5cfb3d545567a8405a1663", size = 568551, upload-time = "2026-11-27T09:39:52.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/6b/868d1e47ae9e5a4c545a2c9bc8ceb0e8f85422fe0f405a07785fb0efb6f3/scalo-2.32.12-py3-none-any.whl", hash = "sha256:7bbe417375092a97b5d2b274661fac726b87a4ac13d05393a9a3d1dd2c1fdb52", size = 657170, upload-time = "2026-11-26T10:51:18.834Z" },
+    { url = "https://files.pythonhosted.org/packages/02/35/5c99e84c762e822a6f188c2baee7d550268a292082b1e64cd27e720f9127/scalo-2.32.14-py3-none-any.whl", hash = "sha256:0725091cfe604edbaff124be026bc0ff20f274b1148272cc2db73ecbecb00eff", size = 662441, upload-time = "2026-11-27T09:39:50.995Z" },
 ]
 
 [package.optional-dependencies]
 api = [
-    { name = "cryptography" },
     { name = "fastapi" },
     { name = "pydantic" },
 ]

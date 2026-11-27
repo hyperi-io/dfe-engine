@@ -20,9 +20,8 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from dfe_engine.clickhouse.quoting import quote_identifier
+from dfe_engine.hunts.hunt_output import tenant_condition
 from dfe_engine.services.schema.json_promotion_service import JSON_COLUMN
-
-from .hunt_output import tenant_condition
 
 # Rows the path read looks at, so the read is bounded however busy the source is.
 PATH_SAMPLE_ROWS = 10_000

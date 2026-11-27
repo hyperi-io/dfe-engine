@@ -108,7 +108,7 @@ class HuntValidator:
                 "'global_target_table_name'", global_target_table_name
             )
 
-        # The runner reads a rule's 'source_table_name', else the hunt's 'global_source_table_name'.
+        # The runner reads a rule's 'source_table_name', then the rule's own table, else the hunt's 'global_source_table_name'.
         global_source_table_name = hunt_data.get("global_source_table_name")
         has_source_ref = any(r.get("source_table_name") for r in hunt_data.get("rules", []))
         if not has_source_ref:

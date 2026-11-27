@@ -151,15 +151,25 @@ class TestTheResultsTableTakesWhatTheRunnerInserts:
 
         assert resp.status_code == 201, resp.text
 
-    def test_an_update_is_checked_too(self, client, admin_headers, clickhouse):
+    @pytest.mark.parametrize(
+        ("enabled", "status"),
+        [(True, 422), (None, 422), (False, 200)],
+        ids=["enabled", "kept_enabled", "switched_off"],
+    )
+    def test_an_update_is_checked_unless_it_switches_the_hunt_off(
+        self, client, admin_headers, clickhouse, enabled, status
+    ):
         assert client.post(HUNTS, json=_hunt(), headers=admin_headers).status_code == 201
         clickhouse.tables = {}
         body = {k: v for k, v in _hunt().items() if k != "name"}
+        if enabled is not None:
+            body["enabled"] = enabled
 
         resp = client.put(f"{HUNTS}/windows_hunt", json=body, headers=admin_headers)
 
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["code"] == "invalid_target"
+        assert resp.status_code == status, resp.text
+        if status == 422:
+            assert resp.json()["code"] == "invalid_target"
 
 
 class TestEachRuleHasItsQueryChecked:

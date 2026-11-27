@@ -25,6 +25,7 @@ config:
     fontSize: 15px
     lineColor: "#64748B"
     primaryTextColor: "#0F172A"
+    nodeBorder: "#334155"
     clusterBorder: "#0072B2"
     edgeLabelBackground: "#FFFFFF"
   themeCSS: >-
@@ -44,6 +45,8 @@ config:
     span.edgeLabel{display:inline-block;background:#FFFFFF!important;color:#1E293B;border:1px solid #94A3B8;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:500}
     span.edgeLabel p{background:transparent!important}
     .label-icon{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+    .icon-shape path[stroke-width="0"][fill="none"]{fill:#FFFFFF;stroke:#FFFFFF;stroke-width:12px;stroke-linejoin:round}
+    .icon-shape p{background:transparent!important;color:#0F172A}
     .ingest .label-icon{color:#0E8A7D}
     .xform .label-icon{color:#7B4FB0}
     .load .label-icon{color:#0072B2}
@@ -116,4 +119,4 @@ Correlated columns must not draw independently (an sshd message under `appname: 
 
 ## Receiver auth
 
-A stream presents the engine's own ingest credential, `dfe-engine-synthetic-data`, owned by and binding the primary org on the HTTP listener, so its records land in that org. The engine mints it on the first stream once a primary org is named, and again when its token is gone or the primary org changes. It never turns the listener's auth on, so on a listener running `mode: none` its token is ignored and records land under the receiver's `default_org_id`, your org's first tenant id. The receiver reads a new token within 60 seconds, and a stream retries a 401 for 90 seconds after a mint. A request whose `headers` carry its own `Authorization` presents that instead. No org can create a credential with this id (409 `credential_id_taken`).
+A stream over https to the deployment's own receiver presents the engine's own ingest credential, `dfe-engine-synthetic-data`, owned by and binding the primary org on the HTTP listener, so its records land in that org. The own receiver is the host of `synthetic_data.autostart_receiver_url` or one listed in `synthetic_data.allowed_receiver_hosts`. A stream to any other URL, or over plain http, carries no engine credential, so a caller can't have the token sent to a host it picked. The engine mints it on the first such stream once a primary org is named, and again when its token is gone or the primary org changes. It never turns the listener's auth on, so on a listener running `mode: none` its token is ignored and records land under the receiver's `default_org_id`, your org's first tenant id. The receiver reads a new token within 60 seconds, and a stream retries a 401 for 90 seconds after a mint. A request whose `headers` carry its own `Authorization` presents that instead. No org can create a credential with this id (409 `credential_id_taken`).

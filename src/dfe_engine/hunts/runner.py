@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from scalo.logger import logger
 
 from dfe_engine.backoff import jittered
-from dfe_engine.clickhouse.errors import ErrorCategory, classify, parse_code
+from dfe_engine.clickhouse.errors import ErrorCategory, classify, parse_code, server_message
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
 from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.runner_metrics import HuntRunnerMetrics
@@ -382,7 +382,8 @@ class HuntRunner:
         record = getattr(self._coord, "record_run", None)
         if record is None:
             return
-        text = str(exc).strip() or type(exc).__name__
+        # The driver's text ends with the server's internal URL, which the executions list must not show.
+        text = server_message(exc) or type(exc).__name__
         try:
             record(
                 hunt_id,

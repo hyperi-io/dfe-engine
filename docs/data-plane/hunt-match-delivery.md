@@ -20,6 +20,8 @@ A person finds a match by searching the detection table in Observe, embedded in 
 
 A destination is a name and an [Apprise](https://github.com/caronc/apprise) URL, which covers Slack, email, PagerDuty, Teams and about 90 other services. The URL holds its credential, so the API masks it on every read.
 
+The hunt runner sends from its own pod, so a create or a URL change refuses a scheme Apprise has no service for (422 `unsupported_url_scheme`) and a host on a loopback, link-local or cloud metadata address (422 `host_blocked`). The webhook schemes (`json`, `form`, `xml` and `apprise`, each with its `s` form) have their host resolved for that check. Any other scheme's host is checked as written, because for most services it is part of the credential. A private network host is allowed.
+
 Create destinations through `POST /api/v1/alerts/destinations`, then `PUT` and `DELETE` on `/api/v1/alerts/destinations/{name}`. A name starts with a letter or digit and holds letters, digits, `.`, `_` and `-`, at most 128 characters.
 
 The engine keeps a destination in two places:

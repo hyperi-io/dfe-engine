@@ -21,12 +21,13 @@ from dfe_engine.source.registry import SourceNotFoundError
 
 
 def source_check(registry: Any) -> Callable[[str], bool]:
-    """A predicate for whether a label names a source in the registry."""
+    """A predicate for whether a label names a source in the registry that loads."""
 
     def is_source(label: str) -> bool:
         try:
             registry.get_source(label)
-        except SourceNotFoundError:
+        # A label no file can carry, or a stored doc that no longer validates, names no usable source.
+        except SourceNotFoundError, ValueError:
             return False
         return True
 

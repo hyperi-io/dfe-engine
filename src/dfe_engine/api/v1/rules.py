@@ -545,6 +545,7 @@ async def create_rule_from_hyperdx(
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
+    sources: OptionalSourceReg,
 ):
     """Create a hunt rule from the SQL a Search view renders to.
 
@@ -557,7 +558,7 @@ async def create_rule_from_hyperdx(
     """
     return await run_blocking(
         functools.partial(
-            _create_rule_from_sql, body, user, settings, registry, request, response, hunts
+            _create_rule_from_sql, body, user, settings, registry, request, response, hunts, sources
         )
     )
 
@@ -576,6 +577,7 @@ async def validate_rule_from_hyperdx(
     registry: RuleReg,
     request: Request,
     hunts: OptionalHuntConfigReg,
+    sources: OptionalSourceReg,
 ):
     """Check the SQL a Search view renders to as ``POST /rules/from-hyperdx`` would, writing nothing.
 
@@ -585,7 +587,7 @@ async def validate_rule_from_hyperdx(
     An engine without this route answers 404, which is how a caller tells it is older.
     """
     check = functools.partial(
-        _check_search_rule, body, user, settings, registry, request, hunts, False
+        _check_search_rule, body, user, settings, registry, request, hunts, sources, False
     )
     _, result = await run_blocking(check)
     return RuleFromSearchCheck(
@@ -600,9 +602,12 @@ def _check_search_rule(
     registry: RuleReg,
     request: Request,
     hunts: OptionalHuntConfigReg,
+    sources: Any,
     measure_volume: bool,
 ):
     """Run the create pipeline on a search's SQL and refuse it as a create would.
+
+    With *sources*, a ``source`` the body names must be registered and the SQL must read its table.
 
     Returns:
         The rule id a create would take, and the pipeline's result.
@@ -615,7 +620,7 @@ def _check_search_rule(
     rule_id = _unique_rule_id(registry, body.saved_search_name)
     display = body.saved_search_name or default_display_name(rule_id)
 
-    service = _rule_service(settings)
+    service = _rule_service(settings, sources)
     svc_request = SvcRequest(
         name=display,
         severity=body.severity,
@@ -641,9 +646,12 @@ def _create_rule_from_sql(
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
+    sources: Any,
 ) -> RuleFromHyperdxResponse:
     """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
-    rule_id, result = _check_search_rule(body, user, settings, registry, request, hunts, True)
+    rule_id, result = _check_search_rule(
+        body, user, settings, registry, request, hunts, sources, True
+    )
     outcome = registry.save(result.rule, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", rule_id, "created", review_audit_detail(outcome))
@@ -774,7 +782,9 @@ def update_rule(
     The replacement is written as SQL, a ``where_clause`` or a ``condition``, as on
     create, and a rule replaced with SQL or a WHERE no longer carries a condition. With
     no ``source`` in the body the stored one stands, read as the registered source its
-    table names when it names none. Only a source the body sets or changes must be registered.
+    table names when it names none. A source the body sets or changes must be registered,
+    and SQL on a registered source must read its table. A stored source no longer
+    registered is not checked, so the rule stays editable.
 
     A replacement the hunt runner could not compile is refused with 422 and the
     stored rule is left as it was. A production+team write is routed to a review
@@ -788,15 +798,16 @@ def update_rule(
 
     from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
 
-    # Only a source the request sets or changes must be registered, so a stored rule stays editable.
     changes_source = body.source is not None and body.source != existing.source
-    service = _rule_service(settings, sources if changes_source else None)
     effective_display = body.display_name if body.display_name is not None else existing.name
     effective_source = (
         body.source
         if body.source is not None
         else _resolved(existing.source, existing.source_table, sources)
     )
+    # A kept source still registered is checked as a new one, and one no longer registered is not, so the rule stays editable.
+    kept_registered = bool(effective_source) and source_check(sources)(effective_source or "")
+    service = _rule_service(settings, sources if (changes_source or kept_registered) else None)
     effective_hunt = body.hunt_name if body.hunt_name is not None else existing.hunt_name
     svc_request = SvcRequest(
         name=effective_display,

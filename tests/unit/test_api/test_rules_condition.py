@@ -193,7 +193,7 @@ class TestUpdateWithACondition:
 
     def test_sql_replaces_a_condition_and_drops_it(self, client, admin_headers, clickhouse):
         _created(client, admin_headers)
-        sql = "SELECT * FROM dfe.main WHERE severity = 'high'"
+        sql = "SELECT * FROM dfe.`windows-audit` WHERE severity = 'high'"
 
         resp = client.put(f"{RULES}/bob_attempts", json=_rule(user_sql=sql), headers=admin_headers)
 

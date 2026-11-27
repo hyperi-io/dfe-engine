@@ -9,8 +9,6 @@
 the fire wrote are counted, not returned.
 """
 
-from __future__ import annotations
-
 import pytest
 from scalo.resilience import ServiceUnavailable
 

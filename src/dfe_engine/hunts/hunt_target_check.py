@@ -14,9 +14,8 @@ save, so the save reads the live columns from ``system.columns`` and refuses the
 
 from typing import Any
 
+from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.schema.applier import live_columns
-
-from .hunt_output import HuntResultSchema
 
 DETECTION_TABLE = "detection"
 """The core table detections land in when a hunt names no other."""
