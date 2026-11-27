@@ -212,7 +212,8 @@ def read_hunt_executions(
 ) -> tuple[list[HuntExecutionRow], int]:
     """One page of a hunt's finished fires, and how many there are.
 
-    A run-now that has not executed is not a fire here. The page is newest fire first.
+    A run-now that has not executed is not a fire here. A ``requested`` row with an
+    error is a failed run-now, listed as ``failed``. The page is newest fire first.
 
     Args:
         ch: a ClickHouse client exposing ``query``.
