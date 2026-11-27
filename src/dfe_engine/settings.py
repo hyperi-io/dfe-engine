@@ -575,6 +575,15 @@ class HuntsSettings(BaseModel):
         default_factory=DetectionGuardSettings,
         description="Alert-volume preview on rule create and update",
     )
+    measure_fire_cost: bool = Field(
+        default=False,
+        description=(
+            "Run the detection guard's alert-volume preview after every hunt fire and "
+            "store it on the fire's execution row. Off, a fire records no estimate. It "
+            "costs one count per compiled rule inside the fire's lease, up to the guard's "
+            "timeout and row limits. DFE_ENGINE_HUNTS_MEASURE_FIRE_COST."
+        ),
+    )
     lookup_databases: list[str] = Field(
         default_factory=list,
         description=(

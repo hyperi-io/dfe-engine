@@ -55,6 +55,7 @@ from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 from dfe_engine.hunts.ch_coordinator import ChCoordinator
 from dfe_engine.hunts.checkpoint import predicate, read_from, window
 from dfe_engine.hunts.delivery import MatchNotifier
+from dfe_engine.hunts.execution_cost import measure_hunt_cost
 from dfe_engine.hunts.hunt_spec import HuntSpec, HuntStatement
 from dfe_engine.hunts.rule_compiler import MATCHED, NIL_UUID, SUMMARY, UNSEEN_TOKEN
 from dfe_engine.hunts.runner_metrics import HuntRunnerMetrics
@@ -63,6 +64,7 @@ from dfe_engine.settings import (
     SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS,
     SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
     WINDOW_OVERLAP_SECONDS,
+    DetectionGuardSettings,
 )
 
 WINDOW_TOKEN = "{window}"  # noqa: S105, RUF100 - a SQL template placeholder
@@ -151,6 +153,7 @@ class HuntWorker:
         max_deferral_seconds: int = SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
         commit_allowance_seconds: int = SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS,
         clock: Callable[[], float] = time.time,
+        guard: DetectionGuardSettings | None = None,
     ) -> None:
         self._ch = ch
         # Times a hold when the server's own clock could not be read with the horizon.
@@ -172,6 +175,29 @@ class HuntWorker:
         self._workload = workload
         # No manager wired records nothing, which is what the unit suite runs on.
         self._metrics = metrics or HuntRunnerMetrics()
+        # None leaves the fire's cost unmeasured. The runner passes the detection guard
+        # only with hunts.measure_fire_cost on, because the preview runs inside the lease.
+        self._guard = guard
+        # Fires whose execution row was written, so a later failure of the notifier
+        # is not recorded over the completed fire.
+        self._recorded: set[tuple[str, int]] = set()
+
+    def fire_recorded(self, hunt_id: str, fire: int) -> bool:
+        """Whether this worker already stored an execution row for the fire."""
+        return (hunt_id, fire) in self._recorded
+
+    def _execution_cost(self, spec: HuntSpec) -> tuple[int, str]:
+        """The fire's cost window and estimate JSON, or zeros when it is not measured."""
+        guard = self._guard
+        if guard is None or not hasattr(self._ch, "query"):
+            return 0, ""
+        try:
+            return measure_hunt_cost(self._ch, spec, guard)
+        except Exception as exc:
+            logger.warning(
+                "hunt cost estimate did not finish", hunt_id=spec.hunt_id, error=str(exc)
+            )
+            return guard.preview_window_minutes, ""
 
     def hold_for_safe_horizon(self, spec: HuntSpec, fire: int) -> bool:
         """Whether *fire* waits for the safe horizon this poll rather than running now.
@@ -448,7 +474,16 @@ class HuntWorker:
             short_of = complete if released[2] else released[1]
             self._settle_safe_horizon(spec.hunt_id, short_of, safe_from, dedupes=dedupes)
         self._coord.set_watermark(spec.hunt_id, end)
-        self._coord.record_run(spec.hunt_id, scheduled_start, written)
+        window_minutes, estimate = self._execution_cost(spec)
+        self._coord.record_run(
+            spec.hunt_id,
+            scheduled_start,
+            written,
+            duration_ms=(time.monotonic() - began) * 1000,
+            cost_window_minutes=window_minutes,
+            cost_estimate=estimate,
+        )
+        self._recorded.add((spec.hunt_id, scheduled_start))
         # The ONE line a fire leaves behind: without it a hunt that stops finding
         # anything is indistinguishable from a hunt that stopped running (#357).
         logger.info(

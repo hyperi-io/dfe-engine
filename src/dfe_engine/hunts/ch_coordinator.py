@@ -133,6 +133,40 @@ _STATE_COLUMNS = [
     "auto_disabled_reason",
 ]
 
+# What a finished fire stores, declared on hunt_run 1.1.0.
+_RUN_COLUMNS = [
+    "hunt_id",
+    "fire",
+    "status",
+    "rows_written",
+    "error",
+    "duration_ms",
+    "cost_window_minutes",
+    "cost_estimate",
+]
+_ERROR_LIMIT = 2000
+
+
+def pending_runs_sql(qdb: str) -> str:
+    """Each run-now still to serve, as ``hunt_id, fire``, bound on ``{now:Int64}``.
+
+    A request whose fire the watermark has passed is served, by that fire or a later
+    one, so it is not pending. The runner and the run status read the same rows.
+
+    Args:
+        qdb: The quoted data database.
+    """
+    return (
+        "SELECT r.hunt_id AS hunt_id, r.fire AS fire FROM ("  # noqa: S608 - quoted configured database, values bound
+        "SELECT hunt_id, fire FROM ("
+        "SELECT hunt_id, fire, argMax(status, updated) AS status "
+        f"FROM {qdb}.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
+        ") r LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
+        f"FROM {qdb}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
+        "WHERE r.fire <= {now:Int64} AND coalesce(w.wm, 0) < r.fire"
+    )
+
+
 # The runner's stop on a hunt is its own hunt_state row, keyed ``<hunt_id>#stopped``, so
 # the counter row's read-then-write never carries it and no overrun can overwrite it.
 STOP_MARK = "#stopped"
@@ -573,14 +607,46 @@ class ChCoordinator:
 
     # ---- runs (row count + operator run-now) --------------------------
 
-    def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
-        """Record what a completed fire wrote (replaces any request for that fire)."""
-        self._ch.insert(
-            "hunt_run",
-            [[hunt_id, fire, "completed", int(rows_written)]],
-            column_names=["hunt_id", "fire", "status", "rows_written"],
-            database=self._db,
-        )
+    def record_run(
+        self,
+        hunt_id: str,
+        fire: int,
+        rows_written: int,
+        *,
+        status: str = "completed",
+        error: str = "",
+        duration_ms: float = 0.0,
+        cost_window_minutes: int = 0,
+        cost_estimate: str = "",
+        run_now: bool = False,
+    ) -> None:
+        """Record a finished fire (replaces any request for that same fire).
+
+        ``completed`` is a fire whose statements committed. ``failed`` is one that
+        raised. A failed *run_now* fire keeps its ``requested`` status with the error
+        beside it, so the request stays pending until a fire succeeds.
+        """
+        if status not in ("completed", "failed"):
+            raise ValueError(f"a finished fire is completed or failed, not {status!r}")
+        error = error.strip()
+        if len(error) > _ERROR_LIMIT:
+            error = error[:_ERROR_LIMIT]
+        stored = status
+        if status == "failed" and run_now:
+            stored = "requested"
+            # The executions list tells a failed attempt from a queued one by its error.
+            error = error or "failed"
+        row = [
+            hunt_id,
+            fire,
+            stored,
+            int(rows_written),
+            error,
+            float(duration_ms),
+            int(cost_window_minutes),
+            cost_estimate,
+        ]
+        self._ch.insert("hunt_run", [row], column_names=_RUN_COLUMNS, database=self._db)
 
     def request_run(self, hunt_id: str, fire: int) -> None:
         """Mark a hunt due at *fire*, for the running runner to claim on its next poll.
@@ -603,16 +669,7 @@ class ChCoordinator:
         already served, so it is filtered here rather than re-run.
         """
         now = self.now() if now is None else now
-        rows = self._ch.query(
-            "SELECT r.hunt_id, r.fire FROM ("  # noqa: S608 - quoted configured database, values bound
-            "SELECT hunt_id, fire FROM ("
-            "SELECT hunt_id, fire, argMax(status, updated) AS status "
-            f"FROM {self._qdb}.hunt_run GROUP BY hunt_id, fire) WHERE status = 'requested'"
-            ") r LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm "
-            f"FROM {self._qdb}.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) "
-            "WHERE r.fire <= {now:Int64} AND coalesce(w.wm, 0) < r.fire",
-            parameters={"now": now},
-        ).result_rows
+        rows = self._ch.query(pending_runs_sql(self._qdb), parameters={"now": now}).result_rows
         return {str(row[0]): int(row[1]) for row in rows}
 
     # ---- heartbeat (runner liveness) ----------------------------------

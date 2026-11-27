@@ -393,6 +393,7 @@ def compile_hunt_queries(
                 },
                 source=(source_db, source_table),
                 target=(target_db, target_table),
+                where_clause=where,
             )
         )
     refused = Counter(str(entry["rule_name"]) for entry in entries)

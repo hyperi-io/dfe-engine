@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier
-from dfe_engine.hunts.ch_coordinator import STOP_MARK
+from dfe_engine.hunts.ch_coordinator import STOP_MARK, pending_runs_sql
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,10 +83,8 @@ def _query(database: str) -> str:
         "argMax(rows_written, updated) AS rows_written "
         f"FROM {db}.hunt_run GROUP BY hunt_id, fire"
         ") WHERE status = 'completed' GROUP BY hunt_id) r USING (hunt_id) "
-        "LEFT JOIN (SELECT hunt_id, 1 AS pending FROM ("
-        "SELECT hunt_id, fire, argMax(status, updated) AS status "
-        f"FROM {db}.hunt_run GROUP BY hunt_id, fire"
-        ") WHERE status = 'requested' GROUP BY hunt_id) q USING (hunt_id)"
+        f"LEFT JOIN (SELECT hunt_id, 1 AS pending FROM ({pending_runs_sql(db)}) "
+        "GROUP BY hunt_id) q USING (hunt_id)"
     )
 
 
@@ -118,12 +116,13 @@ def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> di
         ch: a ClickHouse client exposing ``query``.
         database: the data database the coordination tables live in.
         hunt_ids: the hunts to report on (the page's own list).
-        now: epoch seconds, used to decide whether a lease is still live.
+        now: epoch seconds, used to decide whether a lease is still live and a
+            run-now still due.
     """
     if not hunt_ids:
         return {}
     rows = ch.query(
-        _query(database), parameters={"ids": list(hunt_ids), "mark": STOP_MARK}
+        _query(database), parameters={"ids": list(hunt_ids), "mark": STOP_MARK, "now": now}
     ).result_rows
     status: dict[str, RunStatus] = {}
     for row in rows:
@@ -171,3 +170,78 @@ def clear_auto_disable(ch: Any, database: str, hunt_id: str) -> None:
         ],
         database=database,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class HuntExecutionRow:
+    """One finished hunt fire, newest facts after the replacing merge."""
+
+    fire: int
+    status: str
+    rows_returned: int
+    error: str
+    execution_time_ms: float
+    cost_window_minutes: int
+    cost_estimate: str
+
+
+def _execution_sql(database: str) -> str:
+    """Fires that ran, newest first.
+
+    A ``requested`` row with an error is a run-now whose attempt failed and that
+    stays queued for the next one, so it lists as failed.
+    """
+    db = quote_identifier(database)
+    return (
+        "SELECT fire, if(status = 'requested', 'failed', status) AS shown, rows_written, "  # noqa: S608 - quoted database, bound hunt id
+        "error, duration_ms, cost_window_minutes, cost_estimate FROM ("
+        "SELECT fire, argMax(status, updated) AS status, "
+        "argMax(rows_written, updated) AS rows_written, "
+        "argMax(error, updated) AS error, "
+        "argMax(duration_ms, updated) AS duration_ms, "
+        "argMax(cost_window_minutes, updated) AS cost_window_minutes, "
+        "argMax(cost_estimate, updated) AS cost_estimate "
+        f"FROM {db}.hunt_run WHERE hunt_id = {{hunt:String}} GROUP BY fire"
+        ") WHERE status != 'requested' OR error != '' ORDER BY fire DESC"
+    )
+
+
+def read_hunt_executions(
+    ch: Any, database: str, hunt_id: str, *, limit: int, offset: int
+) -> tuple[list[HuntExecutionRow], int]:
+    """One page of a hunt's finished fires, and how many there are.
+
+    A run-now that has not executed is not a fire here. A ``requested`` row with an
+    error is a failed run-now, listed as ``failed``. The page is newest fire first.
+
+    Args:
+        ch: a ClickHouse client exposing ``query``.
+        database: the data database the coordination tables live in.
+        hunt_id: the hunt whose fires to list.
+        limit: rows in this page.
+        offset: finished fires to skip.
+    """
+    sql = _execution_sql(database)
+    parameters = {"hunt": hunt_id}
+    total_rows = ch.query(
+        "SELECT count() FROM (" + sql + ") AS fires",  # noqa: S608 - the statement is built above
+        parameters=parameters,
+    ).result_rows
+    total = int(total_rows[0][0]) if total_rows else 0
+    rows = ch.query(
+        sql + " LIMIT {limit:UInt32} OFFSET {offset:UInt32}",
+        parameters={**parameters, "limit": limit, "offset": offset},
+    ).result_rows
+    executions = [
+        HuntExecutionRow(
+            fire=int(row[0]),
+            status=str(row[1]),
+            rows_returned=int(row[2]),
+            error=str(row[3] or ""),
+            execution_time_ms=float(row[4] or 0),
+            cost_window_minutes=int(row[5] or 0),
+            cost_estimate=str(row[6] or ""),
+        )
+        for row in rows
+    ]
+    return executions, total

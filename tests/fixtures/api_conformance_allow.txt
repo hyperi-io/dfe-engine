@@ -86,6 +86,7 @@ dry-run POST /api/v1/rules
 dry-run POST /api/v1/rules-v2
 dry-run POST /api/v1/rules-v2/from-hyperdx
 dry-run POST /api/v1/rules-v2/preview
+dry-run POST /api/v1/rules-v2/run
 dry-run POST /api/v1/rules-v2/validate
 dry-run POST /api/v1/rules/from-hyperdx
 dry-run POST /api/v1/rules/import
@@ -241,6 +242,7 @@ hierarchy GET /api/v1/helm/files/{name}/vars
 hierarchy GET /api/v1/hunts
 hierarchy GET /api/v1/hunts/status
 hierarchy GET /api/v1/hunts/{name}
+hierarchy GET /api/v1/hunts/{name}/executions
 hierarchy GET /api/v1/hyperdx/connection
 hierarchy GET /api/v1/hyperdx/sources
 hierarchy GET /api/v1/kafka/topics
@@ -339,6 +341,7 @@ hierarchy POST /api/v1/rules
 hierarchy POST /api/v1/rules-v2
 hierarchy POST /api/v1/rules-v2/from-hyperdx
 hierarchy POST /api/v1/rules-v2/preview
+hierarchy POST /api/v1/rules-v2/run
 hierarchy POST /api/v1/rules-v2/validate
 hierarchy POST /api/v1/rules/from-hyperdx
 hierarchy POST /api/v1/rules/import

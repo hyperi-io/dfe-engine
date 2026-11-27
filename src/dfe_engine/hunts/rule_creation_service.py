@@ -53,7 +53,7 @@ from dfe_engine.hunts.rule_rewriter import (
     strip_time_placeholder,
 )
 
-from ..clickhouse.errors import ErrorCategory, parse_code, wrap_ch_error
+from ..clickhouse.errors import ErrorCategory, parse_code, server_message, wrap_ch_error
 from ..clickhouse.quoting import plain_source_name, quote_identifier
 from ..schema.applier import SchemaApplyError, live_columns
 from ..settings import DetectionGuardSettings, HuntsSettings
@@ -395,7 +395,8 @@ def _failure_reason(
         return "it needed more memory than ClickHouse allows it"
     if error.category is ErrorCategory.CONNECTION:
         return "ClickHouse could not be reached"
-    detail = str(exc).strip().splitlines()[0] if error.user_safe and str(exc).strip() else ""
+    message = server_message(exc)
+    detail = message.splitlines()[0] if error.user_safe and message else ""
     return f"ClickHouse refused it ({detail})" if detail else "ClickHouse refused it"
 
 

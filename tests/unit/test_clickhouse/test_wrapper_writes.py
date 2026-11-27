@@ -71,7 +71,7 @@ def test_a_coordinator_over_the_api_client_records_a_completed_run(wrapper_over_
     ChCoordinator(client, database="dfe").record_run("visible_hunt", 42, 7)
     table, data, _kwargs = recorder.inserts[0]
     assert table == "hunt_run"
-    assert data == [["visible_hunt", 42, "completed", 7]]
+    assert data == [["visible_hunt", 42, "completed", 7, "", 0.0, 0, ""]]
 
 
 def test_an_insert_carries_the_attribution_tag(wrapper_over_recorder):
