@@ -189,12 +189,12 @@ class SyntheticDataService:
     def presents_credential(self, receiver_url: str) -> bool:
         """Whether a stream to *receiver_url* may carry the engine's ingest token.
 
-        Only over https to the deployment's own receiver: the host of
-        ``autostart_receiver_url`` or one of ``allowed_receiver_hosts``. Any other URL
+        Only to the deployment's own receiver, over http or https: the host of
+        ``autostart_receiver_url`` or one of ``allowed_receiver_hosts``. Any other host
         is the caller's choice, so its stream goes without the token.
         """
         target = urlsplit(receiver_url)
-        if (target.scheme != "https") or (not target.hostname):
+        if (target.scheme not in ("http", "https")) or (not target.hostname):
             return False
         own = self._allowed_hosts()
         autostart = urlsplit(self.settings.autostart_receiver_url).hostname
@@ -216,7 +216,7 @@ class SyntheticDataService:
         if not (self.presents_credential(req.receiver_url)):
             logger.warning(
                 "synthetic stream sent without the engine credential: the receiver is "
-                "not the deployment's own over https",
+                "not the deployment's own",
                 receiver_url=req.receiver_url,
             )
             return headers, 0.0

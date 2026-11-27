@@ -40,9 +40,12 @@ _OWN = "https://receiver.dfe.example/ingest"
         ({"autostart_receiver_url": _OWN}, _OWN, True),
         ({"autostart_receiver_url": _OWN}, "https://RECEIVER.dfe.example:8443/other", True),
         ({"allowed_receiver_hosts": " Receiver.Dfe.Example "}, _OWN, True),
-        ({"autostart_receiver_url": _OWN}, "http://receiver.dfe.example/ingest", False),
+        ({"autostart_receiver_url": _OWN}, "http://receiver.dfe.example/ingest", True),
         ({"autostart_receiver_url": "http://receiver.dfe.example/"}, _OWN, True),
+        ({"allowed_receiver_hosts": "dfe-receiver"}, "http://dfe-receiver:8080/ingest", True),
         ({"autostart_receiver_url": _OWN}, "https://attacker.example/ingest", False),
+        ({"autostart_receiver_url": _OWN}, "http://attacker.example/ingest", False),
+        ({"autostart_receiver_url": _OWN}, "ftp://receiver.dfe.example/ingest", False),
         ({"autostart_receiver_url": _OWN}, "https://receiver.dfe.example@attacker.example/", False),
         ({"autostart_receiver_url": _OWN}, "https://receiver.dfe.example.attacker.example/", False),
         ({}, _OWN, False),
@@ -55,7 +58,10 @@ _OWN = "https://receiver.dfe.example/ingest"
         "listed_host",
         "own_host_over_http",
         "http_autostart_names_the_host",
-        "foreign_host",
+        "listed_in_cluster_host_over_http",
+        "foreign_host_over_https",
+        "foreign_host_over_http",
+        "own_host_not_http",
         "userinfo_names_another_host",
         "suffix_of_another_host",
         "nothing_configured",
@@ -63,7 +69,7 @@ _OWN = "https://receiver.dfe.example/ingest"
         "no_host",
     ],
 )
-def test_the_credential_goes_only_to_the_own_receiver_over_https(settings, url, presents):
+def test_the_credential_goes_only_to_the_own_receiver(settings, url, presents):
     assert service(**settings).presents_credential(url) is presents
 
 
@@ -71,8 +77,14 @@ def test_the_credential_goes_only_to_the_own_receiver_over_https(settings, url, 
     ("url", "headers", "credential", "auth"),
     [
         (_OWN, None, True, {"Authorization": "Bearer segment-token"}),
-        ("http://receiver.dfe.example/ingest", None, True, {}),
+        (
+            "http://receiver.dfe.example/ingest",
+            None,
+            True,
+            {"Authorization": "Bearer segment-token"},
+        ),
         ("https://attacker.example/ingest", None, True, {}),
+        ("http://attacker.example/ingest", None, True, {}),
         (_OWN, {"authorization": "Bearer mine"}, True, {"authorization": "Bearer mine"}),
         (
             "https://attacker.example/",
@@ -85,7 +97,8 @@ def test_the_credential_goes_only_to_the_own_receiver_over_https(settings, url, 
     ids=[
         "own_https",
         "own_http",
-        "foreign",
+        "foreign_https",
+        "foreign_http",
         "caller_auth_stands",
         "caller_auth_anywhere",
         "no_credential",
@@ -172,11 +185,15 @@ class TestRunStandingStream:
             await task
 
     @pytest.mark.parametrize(
-        ("url", "minted"),
-        [(_OWN, True), ("http://receiver.dfe.example/ingest", False)],
-        ids=["own_https_receiver", "http_receiver_mints_nothing"],
+        ("own", "url", "minted"),
+        [
+            (_OWN, _OWN, True),
+            ("http://receiver.dfe.example/ingest", "http://receiver.dfe.example/ingest", True),
+            (_OWN, "http://attacker.example/ingest", False),
+        ],
+        ids=["own_https_receiver", "own_http_receiver", "foreign_receiver_mints_nothing"],
     )
-    async def test_each_segment_presents_the_credential(self, url, minted):
+    async def test_each_segment_presents_the_credential(self, own, url, minted):
         def mint() -> StreamCredential:
             mints.append(held)
             return held
@@ -188,7 +205,7 @@ class TestRunStandingStream:
         held = make_stream_credential(token="segment-token")
         mints: list[StreamCredential] = []
         presented: list[StreamCredential | None] = []
-        svc = service(autostart_receiver_url=url)
+        svc = service(autostart_receiver_url=own)
         svc.run_stream = fake_run_stream  # ty: ignore[invalid-assignment]  # the test replaces this service's stream segment
         request = StreamRequest(schema_ref="meta/syslog", receiver_url=url, count=1)
         with pytest.raises(asyncio.CancelledError):

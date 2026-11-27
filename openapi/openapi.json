@@ -19103,7 +19103,7 @@
           "synthetic-data"
         ],
         "summary": "Start Stream",
-        "description": "Start a stream task that posts generated events to an ingest URL.\n\nA stream over https to the deployment's own receiver (the host of\n``synthetic_data.autostart_receiver_url`` or one of ``allowed_receiver_hosts``)\npresents the engine's own ingest credential, minted for the primary org on the first\nsuch stream, unless the request's ``headers`` carry an ``Authorization``. Any other\nreceiver gets no engine credential.",
+        "description": "Start a stream task that posts generated events to an ingest URL.\n\nA stream to the deployment's own receiver (the host of\n``synthetic_data.autostart_receiver_url`` or one of ``allowed_receiver_hosts``, over\nhttp or https) presents the engine's own ingest credential, minted for the primary\norg on the first such stream, unless the request's ``headers`` carry an\n``Authorization``. Any other host gets no engine credential, whatever the scheme.",
         "operationId": "synthetic-data.stream",
         "requestBody": {
           "content": {

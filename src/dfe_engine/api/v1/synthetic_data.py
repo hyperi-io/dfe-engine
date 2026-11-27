@@ -143,11 +143,11 @@ async def start_stream(
 ) -> TaskOperation:
     """Start a stream task that posts generated events to an ingest URL.
 
-    A stream over https to the deployment's own receiver (the host of
-    ``synthetic_data.autostart_receiver_url`` or one of ``allowed_receiver_hosts``)
-    presents the engine's own ingest credential, minted for the primary org on the first
-    such stream, unless the request's ``headers`` carry an ``Authorization``. Any other
-    receiver gets no engine credential.
+    A stream to the deployment's own receiver (the host of
+    ``synthetic_data.autostart_receiver_url`` or one of ``allowed_receiver_hosts``, over
+    http or https) presents the engine's own ingest credential, minted for the primary
+    org on the first such stream, unless the request's ``headers`` carry an
+    ``Authorization``. Any other host gets no engine credential, whatever the scheme.
     """
     service = _service(request)
     try:

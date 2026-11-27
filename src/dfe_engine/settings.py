@@ -1098,7 +1098,7 @@ class SyntheticDataSettings(BaseModel):
         default="",
         description=(
             "Ingest URL the standing streams post to. Its host is the deployment's own "
-            "receiver, the one a stream over https presents the engine's ingest credential to"
+            "receiver, the one a stream presents the engine's ingest credential to"
         ),
     )
     autostart_rate_eps: float = Field(
@@ -1114,7 +1114,7 @@ class SyntheticDataSettings(BaseModel):
         default="",
         description=(
             "Comma-separated hostnames stream receiver URLs may target (empty = any http(s)). "
-            "A stream over https to one of them carries the engine's ingest credential"
+            "A stream to one of them carries the engine's ingest credential"
         ),
     )
 

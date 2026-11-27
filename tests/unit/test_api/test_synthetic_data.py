@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from dfe_engine.orgs.ingest_credentials import SYNTHETIC_DATA_CREDENTIAL
+from dfe_engine.orgs.ingest_tokens import credential_secret_path
 from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
 from dfe_engine.settings import SyntheticDataSettings
 from dfe_engine.synthetic_data.service import SyntheticDataService
@@ -202,18 +203,30 @@ class TestStream:
     @pytest.mark.parametrize(
         ("own", "sent", "expected"),
         [
-            ("", {}, ""),
-            ("127.0.0.1", {}, ""),
-            ("", {"Authorization": "Bearer mine"}, "Bearer mine"),
+            ({"allowed_receiver_hosts": "127.0.0.1"}, {}, "engine"),
+            ({"autostart_receiver_url": "http://127.0.0.1:1/ingest"}, {}, "engine"),
+            ({}, {}, ""),
+            ({"autostart_receiver_url": "http://receiver.dfe.example/ingest"}, {}, ""),
+            (
+                {"allowed_receiver_hosts": "127.0.0.1"},
+                {"Authorization": "Bearer mine"},
+                "Bearer mine",
+            ),
+            ({}, {"Authorization": "Bearer mine"}, "Bearer mine"),
         ],
-        ids=["foreign_receiver", "own_receiver_over_http", "caller_auth_stands"],
+        ids=[
+            "listed_receiver_over_http",
+            "autostart_host_over_http",
+            "nothing_configured",
+            "foreign_receiver_over_http",
+            "caller_auth_stands_on_own",
+            "caller_auth_stands_on_foreign",
+        ],
     )
     def test_receiver_auth(self, admin_headers, app, client, receiver, own, sent, expected):
         url, seen = receiver
         name_your_org(app=app)
-        app.state.synthetic_data = SyntheticDataService(
-            SyntheticDataSettings(allowed_receiver_hosts=own)
-        )
+        app.state.synthetic_data = SyntheticDataService(SyntheticDataSettings(**own))
         r = client.post(
             "/api/v1/synthetic-data/stream",
             json={
@@ -228,14 +241,19 @@ class TestStream:
             headers=admin_headers,
         )
         held = app.state.org_registry.ingest_credentials.get(SYNTHETIC_DATA_CREDENTIAL)
-        assert (r.json()["response"]["sent"], set(seen), held) == (2, {expected}, None)
+        if expected == "engine":
+            token = app.state.dfe_secrets.get_or_none(credential_secret_path(credential=held))
+            expected = f"Bearer {token}"
+        else:
+            assert held is None
+        assert (r.json()["response"]["sent"], set(seen)) == (2, {expected})
 
     @pytest.mark.parametrize(
         ("named", "minted"),
         [(True, True), (False, False)],
         ids=["engine_credential_minted", "no_primary_org"],
     )
-    def test_the_own_https_receiver_gets_the_engine_credential(
+    def test_the_own_https_receiver_mints_the_credential_once_an_org_is_named(
         self, admin_headers, app, client, named, minted
     ):
         if named:

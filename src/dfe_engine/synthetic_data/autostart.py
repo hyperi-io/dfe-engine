@@ -80,13 +80,6 @@ def start_autostart(
         )
         return []
 
-    if (credential is not None) and (
-        not (service.presents_credential(settings.autostart_receiver_url))
-    ):
-        logger.warning(
-            "synthetic autostart receiver is not https, so its streams carry no ingest credential",
-            receiver_url=settings.autostart_receiver_url,
-        )
     segment = min(_SEGMENT_SECONDS, settings.max_stream_seconds)
     tasks: list[asyncio.Task] = []
     for ref in refs:
