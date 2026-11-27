@@ -12,16 +12,16 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 10 | Folded into the operation **New** names |
 | unchanged | 44 | Same method and path |
 | frozen | 57 | Kept as it is |
-| decide | 140 | Not placed yet: see its question |
+| decide | 141 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 339 | |
+| total | 340 | |
 
 ## Questions
 
 | Question | Operations |
 |---|---|
 | [apps-depth](#apps-depth) | 22 |
-| [detection-rules](#detection-rules) | 18 |
+| [detection-rules](#detection-rules) | 19 |
 | [groups-scope](#groups-scope) | 11 |
 | [compute-helpers](#compute-helpers) | 8 |
 | [hunts-orgs](#hunts-orgs) | 8 |
@@ -354,6 +354,7 @@ Detection rules (hunt SQL and CEL): `rules` is kept for routing rules under `sou
 | `GET /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
 | `PUT /api/v1/rules-v2/{name}` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/from-hyperdx` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/rules/from-hyperdx/validate` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/import` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/preview` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/rules/validate` | - | - | - | - | decide | ui 2 |  |

@@ -45,7 +45,7 @@ from dfe_engine.api.deps import (
     held_tenant_ids,
     require_action,
 )
-from dfe_engine.api.errors import ErrorCode
+from dfe_engine.api.errors import ErrorCode, empty_filter_refusal
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import AuthorizationError
@@ -1561,8 +1561,13 @@ def _refuse_uncompilable(result) -> None:
     """Refuse, before anything is written, a rule the hunt runner cannot compile.
 
     Raises:
-        ProblemError: 422 ``invalid_sql``, every error in ``sql_errors``.
+        ProblemError: 422 ``rule_empty_filter`` when the SQL left no filter, with the time
+            bounds taken out in ``dropped_bounds``. Else 422 ``invalid_sql``, every error in
+            ``sql_errors``.
     """
+    empty = empty_filter_refusal(result)
+    if empty is not None:
+        raise empty
     sql_errors = _save_blockers(result)
     if not sql_errors:
         return

@@ -13034,7 +13034,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or a search left no filter once the time bounds the hunt window owns were taken out (code rule_empty_filter, the bounds taken out in dropped_bounds). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13174,7 +13174,7 @@
           "Rules"
         ],
         "summary": "Create Rule From Search",
-        "description": "Create a hunt rule from the SQL a Search view renders to.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile, or that matches every\nevent, is refused with 422. RBAC: ``rule:write`` (data_analyst) --\n``org_viewer`` has neither this grant nor the UI button.",
+        "description": "Create a hunt rule from the SQL a Search view renders to.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile, or that matches every\nevent, is refused with 422. RBAC: ``rule:write`` (data_analyst) --\n``org_viewer`` has neither this grant nor the UI button.\n``POST /rules/from-hyperdx/validate`` runs the same checks and writes nothing.",
         "operationId": "rules.from-hyperdx",
         "requestBody": {
           "content": {
@@ -13218,7 +13218,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or a search left no filter once the time bounds the hunt window owns were taken out (code rule_empty_filter, the bounds taken out in dropped_bounds). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13257,6 +13257,99 @@
             "positional": []
           },
           "action": "rule:write"
+        }
+      }
+    },
+    "/api/v1/rules/from-hyperdx/validate": {
+      "post": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Validate Rule From Search",
+        "description": "Check the SQL a Search view renders to as ``POST /rules/from-hyperdx`` would, writing nothing.\n\nRuns every check a create runs and answers the same 422 refusals, including\n``rule_empty_filter``. A search that would save answers 200. Nothing is written and\nno alert-volume preview runs, so a Search view can ask before the user presses Create.\nAn engine without this route answers 404, which is how a caller tells it is older.",
+        "operationId": "rules.from-hyperdx.validate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleFromHyperdxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleFromSearchCheck"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or a search left no filter once the time bounds the hunt window owns were taken out (code rule_empty_filter, the bounds taken out in dropped_bounds). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "rules",
+          "resource": "from-hyperdx",
+          "hierarchy": [
+            "rules",
+            "from-hyperdx"
+          ],
+          "verb": "validate",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "rule:validate"
         }
       }
     },
@@ -13596,7 +13689,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile. A ``source`` that is not a registered source is refused, and so is a ``where_clause`` that is empty, carries a {...} placeholder or a time bound, or holds more than a row filter (code invalid_sql, the errors in sql_errors). Or a search left no filter once the time bounds the hunt window owns were taken out (code rule_empty_filter, the bounds taken out in dropped_bounds). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -51500,6 +51593,28 @@
         ],
         "title": "RuleFromHyperdxResponse",
         "description": "The rule created from a Search query."
+      },
+      "RuleFromSearchCheck": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "const": true,
+            "title": "Valid",
+            "description": "Always true: a refusal is a 422",
+            "default": true
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "What to look at before creating the rule"
+          }
+        },
+        "type": "object",
+        "title": "RuleFromSearchCheck",
+        "description": "A search that would make a rule."
       },
       "RuleImportRequest": {
         "properties": {

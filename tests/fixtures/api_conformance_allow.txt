@@ -1,7 +1,7 @@
-# The engine API's convention violations, one `<rule> <METHOD> <path>` a line.
-# tests/unit/test_api/test_api_conformance.py fails on a violation missing here and on
-# an entry that no longer matches one, so delete each entry as its route conforms.
 # Entries name one violation exactly: a pattern would let a new route through.
+# The engine API's convention violations, one `<rule> <METHOD> <path>` a line.
+# an entry that no longer matches one, so delete each entry as its route conforms.
+# tests/unit/test_api/test_api_conformance.py fails on a violation missing here and on
 depth GET /api/v1/gitops/classes/{cls}/resources/{name}/vars
 dry-run DELETE /api/v1/alerts/destinations/{name}
 dry-run DELETE /api/v1/apps/{service}/{instance}
@@ -89,6 +89,7 @@ dry-run POST /api/v1/rules-v2/preview
 dry-run POST /api/v1/rules-v2/run
 dry-run POST /api/v1/rules-v2/validate
 dry-run POST /api/v1/rules/from-hyperdx
+dry-run POST /api/v1/rules/from-hyperdx/validate
 dry-run POST /api/v1/rules/import
 dry-run POST /api/v1/rules/preview
 dry-run POST /api/v1/rules/validate
@@ -344,6 +345,7 @@ hierarchy POST /api/v1/rules-v2/preview
 hierarchy POST /api/v1/rules-v2/run
 hierarchy POST /api/v1/rules-v2/validate
 hierarchy POST /api/v1/rules/from-hyperdx
+hierarchy POST /api/v1/rules/from-hyperdx/validate
 hierarchy POST /api/v1/rules/import
 hierarchy POST /api/v1/rules/preview
 hierarchy POST /api/v1/rules/validate

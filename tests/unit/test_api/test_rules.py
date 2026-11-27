@@ -23,6 +23,9 @@ _HYPERDX_RENDERED_SQL = (
 )
 
 
+_FILTERED_SQL = "SELECT * FROM default.events WHERE severity = 'high'"
+
+
 def _sample_create_payload(**overrides):
     payload = {
         "name": "test_rule",
@@ -726,19 +729,98 @@ class TestRulesRefuseUncompilable:
         assert "toString(_json.`user_name`) IN ('root')" in rule["where_clause"]
         assert rule["sql_errors"] == []
 
-    def test_search_with_no_filter_is_refused(self, client, admin_headers):
-        # The template's time condition stripped, what is left matches every row.
-        resp = client.post(
+    @pytest.mark.parametrize(
+        ("sql", "bounds"),
+        [
+            pytest.param(
+                "SELECT _timestamp,_json FROM dfe.main ORDER BY _timestamp DESC",
+                [],
+                id="no_filter_at_all",
+            ),
+            pytest.param(
+                "SELECT _timestamp,_json FROM dfe.main WHERE (_timestamp_load < now()) "
+                "ORDER BY _timestamp DESC LIMIT 200",
+                ["_timestamp_load < now()"],
+                id="constant_bound_on_load_time",
+            ),
+            pytest.param(
+                "SELECT _timestamp,_json FROM dfe.main WHERE "
+                "(_timestamp >= fromUnixTimestamp64Milli(1795000000000))",
+                ["_timestamp >= fromUnixTimestamp64Milli(1795000000000)"],
+                id="epoch_bound_on_event_time",
+            ),
+            pytest.param(
+                "SELECT _timestamp,_json FROM dfe.main WHERE (_timestamp_load < now()) "
+                "AND (_timestamp >= fromUnixTimestamp64Milli(1))",
+                ["_timestamp_load < now()", "_timestamp >= fromUnixTimestamp64Milli(1)"],
+                id="two_bounds",
+            ),
+        ],
+    )
+    def test_search_with_no_filter_left_is_refused_with_its_own_code(
+        self, client, admin_headers, sql, bounds
+    ):
+        # The hunt window owns time, so SQL left with no filter has nothing to detect with.
+        for path in (
             "/api/v1/rules/from-hyperdx",
-            json={"raw_sql": "SELECT _timestamp,_json FROM dfe.main ORDER BY _timestamp DESC"},
+            "/api/v1/rules/from-hyperdx/validate",
+            "/api/v1/rules-v2/from-hyperdx",
+        ):
+            resp = client.post(
+                path,
+                json={"raw_sql": sql, "saved_search_name": "time only"},
+                headers=admin_headers,
+            )
+            body = resp.json()
+            assert resp.status_code == 422, resp.text
+            assert body["code"] == "rule_empty_filter"
+            assert body["dropped_bounds"] == bounds
+            (message,) = [e["message"] for e in body["sql_errors"]]
+            assert message in body["detail"]
+            if bounds:
+                assert "filters only on time" in message
+                assert all(bound in message for bound in bounds)
+            else:
+                assert message == "Rule has empty detection logic (WHERE clause)."
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
+    def test_validate_answers_200_and_writes_nothing(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx/validate",
+            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Check One"},
             headers=admin_headers,
         )
 
-        sql_errors = _assert_refused(resp)
-        assert [e["message"] for e in sql_errors] == [
-            "Rule has empty detection logic (WHERE clause)."
-        ]
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["valid"] is True
         assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+        saved = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Check One"},
+            headers=admin_headers,
+        )
+        assert saved.status_code == 201
+        assert saved.json()["id"] == "check-one"
+
+    def test_create_ignores_a_dry_run_query_and_saves(self, client, admin_headers):
+        # The create route takes no dry_run, so an old caller's flag can never skip the write.
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx?dry_run=true",
+            json={"raw_sql": _FILTERED_SQL, "saved_search_name": "Create One"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 201, resp.text
+
+    def test_validate_keeps_the_other_refusal_codes(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx/validate",
+            json={"raw_sql": "SELECT * FROM events WHERE severity = 'high'"},
+            headers=admin_headers,
+        )
+
+        _assert_refused(resp)
+        assert "dropped_bounds" not in resp.json()
 
     def test_create_refuses_sql_that_does_not_parse(self, client, admin_headers):
         resp = client.post(
@@ -902,7 +984,10 @@ class TestRulesRefuseMatchEverything:
             headers=admin_headers,
         )
 
-        assert [e["message"] for e in _assert_refused(resp)] == [
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "rule_empty_filter"
+        assert resp.json()["dropped_bounds"] == []
+        assert [e["message"] for e in resp.json()["sql_errors"]] == [
             "Rule has empty detection logic (WHERE clause)."
         ]
 
