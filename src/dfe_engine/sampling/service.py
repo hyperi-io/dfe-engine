@@ -286,7 +286,13 @@ class Sampler:
 
         level = req.level or self._cfg.level
         lr_mode = "anomaly" if req.mode == SampleMode.ANOMALY else "hybrid"
-        reducer = LogReducer(level=level, mode=lr_mode, max_memory_gb=self._cfg.max_memory_gb)
+        reducer = LogReducer(
+            level=level,
+            mode=lr_mode,
+            max_memory_gb=self._cfg.max_memory_gb,
+            anomaly_max_rows=self._cfg.anomaly_max_rows,
+            max_clusters=self._cfg.max_clusters,
+        )
         source = self._build_reduce_source(req, ch, target, source_label, org_ids)
         reduced = reducer.reduce(source)
 
