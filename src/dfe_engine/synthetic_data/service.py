@@ -42,15 +42,56 @@ from dfe_engine.synthetic_data.schema_source import SchemaEventFactory, _provide
 from dfe_engine.synthetic_data.stream import HttpPostSink, stream_events
 
 if TYPE_CHECKING:
-    from dfe_engine.settings import SyntheticDataSettings
+    from dfe_engine.settings import DFESettings, SyntheticDataSettings
     from dfe_engine.synthetic_data.credential import StreamCredential
+
+
+RECEIVER_APP = "dfe-receiver"
+
+
+def own_receiver_hosts(settings: DFESettings) -> frozenset[str]:
+    """Every hostname this deployment's own receiver answers on.
+
+    The receiver's Service name comes from the app manifest, qualified by the
+    engine's namespace, plus its listener alias when the pools sit behind a mesh.
+    An unreadable manifest gives none, so streams fall back to the configured hosts.
+    """
+    from dfe_engine.appmgmt import catalogue
+
+    try:
+        app = catalogue.load_catalogue()[RECEIVER_APP]
+    except catalogue.CatalogueError, KeyError:
+        return frozenset()
+    name = catalogue.deployed_name(app, "")
+    hosts = {name}
+    namespace = settings.deployment.namespace
+    if namespace:
+        hosts |= {
+            f"{name}.{namespace}",
+            f"{name}.{namespace}.svc",
+            f"{name}.{namespace}.svc.cluster.local",
+        }
+    transport = settings.transport
+    if transport.mesh_enabled and transport.mesh_namespace and catalogue.MESH_HOST_PATTERN:
+        hosts.add(
+            catalogue.MESH_HOST_PATTERN.format(
+                **{
+                    catalogue.MESH_INSTANCE: name,
+                    catalogue.MESH_NAMESPACE: transport.mesh_namespace,
+                }
+            )
+        )
+    return frozenset(host.lower() for host in hosts)
 
 
 class SyntheticDataService:
     """Pack discovery + bounded generation against the configured ceilings."""
 
-    def __init__(self, settings: SyntheticDataSettings) -> None:
+    def __init__(
+        self, settings: SyntheticDataSettings, own_receivers: frozenset[str] = frozenset()
+    ) -> None:
         self.settings = settings
+        self._own_receivers = own_receivers
 
     # -- schema resolution -----------------------------------------
 
@@ -189,14 +230,15 @@ class SyntheticDataService:
     def presents_credential(self, receiver_url: str) -> bool:
         """Whether a stream to *receiver_url* may carry the engine's ingest token.
 
-        Only to the deployment's own receiver, over http or https: the host of
-        ``autostart_receiver_url`` or one of ``allowed_receiver_hosts``. Any other host
-        is the caller's choice, so its stream goes without the token.
+        Only to the deployment's own receiver, over http or https: a name it answers on
+        (:func:`own_receiver_hosts`), the host of ``autostart_receiver_url`` or one of
+        ``allowed_receiver_hosts``. Any other host is the caller's choice, so its
+        stream goes without the token.
         """
         target = urlsplit(receiver_url)
         if (target.scheme not in ("http", "https")) or (not target.hostname):
             return False
-        own = self._allowed_hosts()
+        own = self._allowed_hosts() | self._own_receivers
         autostart = urlsplit(self.settings.autostart_receiver_url).hostname
         if autostart:
             own.add(autostart)

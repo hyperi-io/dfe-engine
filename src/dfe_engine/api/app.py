@@ -657,9 +657,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Synthetic data service (synthetic reference streams, ceilings from settings)
     from dfe_engine.synthetic_data.autostart import start_autostart
     from dfe_engine.synthetic_data.credential import stream_credential
-    from dfe_engine.synthetic_data.service import SyntheticDataService
+    from dfe_engine.synthetic_data.service import SyntheticDataService, own_receiver_hosts
 
-    app.state.synthetic_data = SyntheticDataService(settings.synthetic_data)
+    app.state.synthetic_data = SyntheticDataService(
+        settings.synthetic_data, own_receivers=own_receiver_hosts(settings)
+    )
     # Standing demo streams - only when an operator configured autostart.
     app.state.synthetic_autostart = start_autostart(
         app.state.synthetic_data,
