@@ -88,7 +88,6 @@ dry-run POST /api/v1/rules-v2/from-hyperdx
 dry-run POST /api/v1/rules-v2/preview
 dry-run POST /api/v1/rules-v2/run
 dry-run POST /api/v1/rules-v2/validate
-dry-run POST /api/v1/rules/from-hyperdx
 dry-run POST /api/v1/rules/import
 dry-run POST /api/v1/rules/preview
 dry-run POST /api/v1/rules/validate

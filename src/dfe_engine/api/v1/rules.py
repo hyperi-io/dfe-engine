@@ -32,7 +32,7 @@ from dfe_engine.api.deps import (
     held_tenant_ids,
     require_action,
 )
-from dfe_engine.api.errors import ErrorCode
+from dfe_engine.api.errors import ErrorCode, empty_filter_refusal
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
@@ -70,6 +70,8 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
             "and so is a ``where_clause`` that is empty, carries a {...} placeholder or a "
             "time bound, or holds more than a row filter (code invalid_sql, the errors in "
             "sql_errors). "
+            "Or a search left no filter once the time bounds the hunt window owns were taken "
+            "out (code rule_empty_filter, the bounds taken out in dropped_bounds). "
             "Or the rule matches "
             "every event in its source (code rule_matches_everything, the source and "
             "detection WHERE in context)."
@@ -534,6 +536,10 @@ async def create_rule_from_hyperdx(
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
+    dry_run: Annotated[
+        bool,
+        Query(description="Run every check a save runs and answer 200, writing nothing"),
+    ] = False,
 ):
     """Create a hunt rule from the SQL a Search view renders to.
 
@@ -542,10 +548,22 @@ async def create_rule_from_hyperdx(
     A view whose SQL the hunt runner could not compile, or that matches every
     event, is refused with 422. RBAC: ``rule:write`` (data_analyst) --
     ``org_viewer`` has neither this grant nor the UI button.
+
+    With ``dry_run=true`` the same checks run and the same refusals answer, but a
+    rule that would save answers 200 and nothing is written, so a Search view can ask
+    before the user presses Create.
     """
     return await run_blocking(
         functools.partial(
-            _create_rule_from_sql, body, user, settings, registry, request, response, hunts
+            _create_rule_from_sql,
+            body,
+            user,
+            settings,
+            registry,
+            request,
+            response,
+            hunts,
+            dry_run,
         )
     )
 
@@ -558,6 +576,7 @@ def _create_rule_from_sql(
     request: Request,
     response: Response,
     hunts: OptionalHuntConfigReg,
+    dry_run: bool = False,
 ) -> RuleFromHyperdxResponse:
     """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
     from dfe_engine.hunts.rule_creation_service import RuleCreateRequest as SvcRequest
@@ -573,12 +592,22 @@ def _create_rule_from_sql(
         user_sql=body.raw_sql,
         hunt_name=body.hunt_name,
         source=body.source,
+        measure_volume=not dry_run,
     )
 
     fence = _preview_tenant_ids(request, user, hunts, rule_id, body.hunt_name)
     result = service.create_rule(svc_request, rule_id, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
+    if dry_run:
+        response.status_code = 200
+        return RuleFromHyperdxResponse(
+            id=rule_id,
+            display_name=result.rule.name,
+            sanitize_summary=result.sanitize_summary or {},
+            warnings=[*result.rule.warnings, *result.json_path_warnings],
+            sql_errors=[],
+        )
     outcome = registry.save(result.rule, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", rule_id, "created", review_audit_detail(outcome))
@@ -949,8 +978,13 @@ def _refuse_uncompilable(result) -> None:
     """Refuse, before anything is written, a rule the hunt runner cannot compile.
 
     Raises:
-        ProblemError: 422 ``invalid_sql``, every error in ``sql_errors``.
+        ProblemError: 422 ``rule_empty_filter`` when the SQL left no filter, with the time
+            bounds taken out in ``dropped_bounds``. Else 422 ``invalid_sql``, every error in
+            ``sql_errors``.
     """
+    empty = empty_filter_refusal(result)
+    if empty is not None:
+        raise empty
     sql_errors = _save_blockers(result)
     if not sql_errors:
         return

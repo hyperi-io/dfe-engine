@@ -45,6 +45,7 @@ class ErrorCode:
     PASSWORD_CHANGE_REQUIRED = "password_change_required"  # noqa: S105, RUF100 - an error code, not a password
     INVALID_SQL = "invalid_sql"
     RULE_MATCHES_EVERYTHING = "rule_matches_everything"
+    RULE_EMPTY_FILTER = "rule_empty_filter"
     IMPORT_REFUSED = "import_refused"
     INVALID_TARGET = "invalid_target"
     INTERNAL_ERROR = "internal_error"
@@ -52,6 +53,31 @@ class ErrorCode:
     SECRETS_UNAVAILABLE = "secrets_unavailable"
     UNRESOLVED_REFERENCE = "unresolved_reference"
     TOO_MANY_TASKS = "too_many_tasks"
+
+
+def empty_filter_refusal(result: Any) -> ProblemError | None:
+    """The 422 for SQL that left no filter, or None when the checked rule has one.
+
+    The hunt window owns time on every rule, so a search filtered only by time has
+    nothing left to detect with. ``dropped_bounds`` lists the time bounds taken out,
+    empty when the SQL carried no filter at all.
+    """
+    if not result.empty_filter:
+        return None
+    bounds = list(result.dropped_bounds)
+    message = (
+        f"The query filters only on time ({'; '.join(bounds)}). The hunt window already "
+        "bounds time for every rule, so this one would match every event."
+        if bounds
+        else "Rule has empty detection logic (WHERE clause)."
+    )
+    return ProblemError(
+        422,
+        f"Rule not saved: {message}",
+        code=ErrorCode.RULE_EMPTY_FILTER,
+        sql_errors=[{"message": message}],
+        dropped_bounds=bounds,
+    )
 
 
 SERVICE_UNAVAILABLE_MESSAGE = "Backing service is unreachable, retry shortly"
