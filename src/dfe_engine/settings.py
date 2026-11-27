@@ -29,7 +29,7 @@ from scalo.crypto import CryptoProfile
 from .names import MAX_NAME_LENGTH
 from .orgs.available_ids import DEFAULT_LIMIT as AVAILABLE_IDS_LIMIT
 from .orgs.available_ids import DEFAULT_TIMEOUT_SECONDS as AVAILABLE_IDS_TIMEOUT_SECONDS
-from .orgs.models import ORG_NAME_PATTERN, TenantId
+from .orgs.models import MAX_ORG_NAME_LENGTH, ORG_NAME_PATTERN, TenantId
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
@@ -2235,7 +2235,11 @@ class SecretsSettings(BaseModel):
 class SeedOrg(BaseModel):
     """One organisation created at startup when the registry does not already hold it."""
 
-    name: str = Field(description="Org name, the registry identifier", pattern=ORG_NAME_PATTERN)
+    name: str = Field(
+        description="Org name, the registry identifier",
+        max_length=MAX_ORG_NAME_LENGTH,
+        pattern=ORG_NAME_PATTERN,
+    )
     display_name: str = Field(default="", description="Human-readable label")
     org_ids: list[TenantId] = Field(
         default_factory=list,

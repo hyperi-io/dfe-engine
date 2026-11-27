@@ -20,6 +20,9 @@ from pydantic import BaseModel, Field, StringConstraints
 # The name is a filename stem, so it may not carry a path separator or start with a dot.
 ORG_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 
+# Leaves room under the 128-character group name for the org's role groups (`<org>-viewers`).
+MAX_ORG_NAME_LENGTH = 64
+
 # Only what breaks the tenant fence is refused: empty, a comma, a control char, edge space.
 TENANT_ID_PATTERN = r"^[^\s,\x00-\x1f\x7f](?:[^,\x00-\x1f\x7f]*[^\s,\x00-\x1f\x7f])?$"
 

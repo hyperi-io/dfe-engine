@@ -79,6 +79,7 @@ from dfe_engine.orgs.available_ids import OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 from dfe_engine.orgs.models import (
+    MAX_ORG_NAME_LENGTH,
     ORG_NAME_PATTERN,
     UNASSIGNED_ORG_ID,
     UNASSIGNED_REFUSAL,
@@ -106,7 +107,11 @@ router = APIRouter(prefix="/orgs", tags=["Organisations"], dependencies=[WRITE_T
 class CreateOrgRequest(BaseModel):
     """Body for creating an org."""
 
-    name: str = Field(description="Unique org name (used as identifier)", pattern=ORG_NAME_PATTERN)
+    name: str = Field(
+        description="Unique org name (used as identifier)",
+        max_length=MAX_ORG_NAME_LENGTH,
+        pattern=ORG_NAME_PATTERN,
+    )
     display_name: str = Field(default="", description="Human-readable label")
     org_ids: list[TenantId] = Field(
         default_factory=list,

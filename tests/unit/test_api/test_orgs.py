@@ -112,15 +112,28 @@ class TestCreateOrg:
         assert resp.status_code == 201
         assert resp.json()["org_ids"] == ["acme", "acme-sub"]
 
-    def test_create_org_path_traversal_name_rejected(self, client, admin_headers):
+    @pytest.mark.parametrize(
+        "name",
+        ["../../escape", "a" * 65],
+        ids=["path-traversal", "longer-than-64"],
+    )
+    def test_create_org_refuses_a_name_before_saving_it(self, client, admin_headers, name):
         resp = client.post(
             "/api/v1/orgs",
             headers=admin_headers,
-            json={"name": "../../escape"},
+            json={"name": name},
         )
         assert resp.status_code == 422
+        assert [e["field"] for e in resp.json()["errors"]] == ["name"]
         listed = client.get("/api/v1/orgs", headers=admin_headers).json()
         assert listed["items"] == []
+
+    def test_create_org_with_the_longest_name_gets_its_role_groups(self, client, admin_headers):
+        name = "a" * 64
+        resp = client.post("/api/v1/orgs", headers=admin_headers, json={"name": name})
+        assert resp.status_code == 201
+        groups = client.get("/api/v1/auth/groups", headers=admin_headers).json()["items"]
+        assert {f"{name}-admins", f"{name}-viewers"} <= {g["name"] for g in groups}
 
     def test_create_org_sets_timestamps(self, client, admin_headers):
         resp = client.post(
