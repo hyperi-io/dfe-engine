@@ -12,8 +12,6 @@ alpha carries the operator's schema and source. Beta carries only the
 pre-supplied schema dfe-schemas ships, as a fresh deployment does.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from tests.support.core_sources import LANDING_DEFINITION

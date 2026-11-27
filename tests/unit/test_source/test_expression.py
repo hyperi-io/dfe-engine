@@ -1,5 +1,8 @@
 """Tests for DFE Column Expression Validator + Builder."""
 
+import json
+from importlib.resources import files
+
 import pytest
 
 from dfe_engine.source.expression import (
@@ -47,6 +50,19 @@ class TestValidatorBasic:
     def test_leading_whitespace(self):
         result = ExpressionValidator.validate("  @source: timestamp")
         assert result.valid
+
+
+class TestDirectivesAgreeWithSchemas:
+    """Every engine directive must be in the dfe-schemas vocabulary (dfe-engine#464)."""
+
+    def test_every_engine_directive_is_listed_by_dfe_schemas(self):
+        # The installed package's file, read in place, never a copy in this repo.
+        text = files("dfe_schemas").joinpath("directives.json").read_text(encoding="utf-8")
+        vocabulary = json.loads(text)
+        listed = set(vocabulary["loader"]) | set(vocabulary["descriptive"])
+
+        unlisted = DIRECTIVES - listed
+        assert not unlisted, f"dfe-schemas directives.json does not list: {sorted(unlisted)}"
 
 
 # -- Validator: @source ------------------------------------------
@@ -145,21 +161,13 @@ class TestValidatorComputed:
         assert not result.valid
 
 
-# -- Validator: @config ------------------------------------------
+class TestRetiredConfigDirective:
+    """@config is retired -- nothing emits or reads it (dfe-engine#464)."""
 
-
-class TestValidatorConfig:
-    """Test @config directive validation."""
-
-    def test_config_path(self):
+    def test_config_is_rejected_as_an_unknown_directive(self):
         result = ExpressionValidator.validate("@config: routing.org_id_field")
-        assert result.valid
-        assert result.directive == "config"
-        assert result.config_path == "routing.org_id_field"
-
-    def test_empty_config(self):
-        result = ExpressionValidator.validate("@config: ")
         assert not result.valid
+        assert "Unknown directive '@config'" in result.errors[0]
 
 
 class TestRetiredCopyDirective:
