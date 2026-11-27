@@ -16,7 +16,7 @@ selected rules into DFE rules.
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -592,6 +592,24 @@ def _confine_provider_url(url: str, field: str) -> None:
         )
 
 
+_PROVIDER_SECRET_PREFIX = "sigma/"
+
+
+def _confine_secret_path(secret_path: str) -> None:
+    """Refuse a provider secret outside ``sigma/``, since the store also holds the engine's own keys.
+
+    Raises:
+        ProblemError: 422 ``secret_path_escape`` for any path outside the prefix.
+    """
+    parts = PurePosixPath(secret_path).parts
+    if not secret_path.startswith(_PROVIDER_SECRET_PREFIX) or ".." in parts or len(parts) < 2:
+        raise ProblemError(
+            422,
+            f"auth.secret_path must name a secret under {_PROVIDER_SECRET_PREFIX}",
+            code="secret_path_escape",
+        )
+
+
 def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
     """Confine a provider's reach at register and update time.
 
@@ -603,7 +621,11 @@ def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
     - a git_repo ``url`` and a valhalla ``base_url`` are confined by
       :func:`_confine_provider_url` (http(s), no loopback/link-local/metadata host,
       and the ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` allowlist when set).
+    - ``auth.secret_path`` must sit under ``sigma/``, so a provider cannot send
+      another secret, such as the JWT signing key, to the host it names.
     """
+    if config.auth.secret_path:
+        _confine_secret_path(config.auth.secret_path)
     if config.kind == ProviderKind.LOCAL_FILES:
         directory = str(config.options.get("directory", "")).strip()
         if directory:

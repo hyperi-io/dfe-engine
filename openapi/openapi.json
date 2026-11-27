@@ -49877,7 +49877,7 @@
           "secret_path": {
             "type": "string",
             "title": "Secret Path",
-            "description": "Path in the secret store holding the token or key",
+            "description": "Path under sigma/ in the secret store holding the token or key",
             "default": ""
           },
           "username": {

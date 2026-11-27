@@ -102,6 +102,40 @@ class TestProviderReachConfinement:
             _validate_provider_reach(self._request(tmp_path), cfg)
         assert exc.value.status == 422
 
+    @pytest.mark.parametrize(
+        ("secret_path", "refused"),
+        [
+            ("jwt/signing-key", True),
+            ("sigma/../jwt/signing-key", True),
+            ("sigma/", True),
+            ("sigma", True),
+            ("/sigma/github-token", True),
+            ("other/sigma/github-token", True),
+            ("sigma/github-token", False),
+            ("sigma/providers/sigmahq/token", False),
+            ("", False),
+        ],
+    )
+    def test_secret_path_confined_under_sigma(self, tmp_path, secret_path, refused):
+        from scalo.api import ProblemError
+
+        from dfe_engine.api.v1.sigma import _validate_provider_reach
+        from dfe_engine.sigma.providers.base import AuthKind, ProviderAuth
+
+        cfg = ProviderConfig(
+            name="p",
+            kind=ProviderKind.GIT_REPO,
+            options={"url": "https://github.com/SigmaHQ/sigma"},
+            auth=ProviderAuth(kind=AuthKind.GIT_TOKEN, secret_path=secret_path),
+        )
+        if refused:
+            with pytest.raises(ProblemError) as exc:
+                _validate_provider_reach(self._request(tmp_path), cfg)
+            assert exc.value.status == 422
+            assert exc.value.problem.code == "secret_path_escape"
+        else:
+            _validate_provider_reach(self._request(tmp_path), cfg)
+
     def test_git_host_on_allowlist_ok(self, tmp_path, monkeypatch):
         from dfe_engine.api.v1.sigma import _validate_provider_reach
 
