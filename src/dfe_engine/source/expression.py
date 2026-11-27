@@ -3,9 +3,9 @@
 Parses and validates the ``expr`` field on SchemaColumn definitions. dfe-loader
 acts on six directives (``DIRECTIVE_NAMES`` in its ``src/column_meta/mod.rs``):
 ``@skip``, ``@default``, ``@source``, ``@renamed``, ``@computed`` and ``@coerce``.
-This validator accepts ``@source`` and ``@computed``, plus two descriptive
-labels, ``@generated`` and ``@config``, which the loader drops as unknown
-directives because what they describe comes from elsewhere.
+This validator accepts ``@source`` and ``@computed``, plus the descriptive label
+``@generated``, which the loader drops as an unknown directive because what it
+describes comes from elsewhere.
 
 Directives:
     @source: field              Extract from source data field
@@ -13,7 +13,6 @@ Directives:
     @source: first(a/b/c)       First match from multiple candidate fields
     @computed: expr             Computed from other fields during data prep
     @generated: expr            Descriptive: the column's DEFAULT clause fills it
-    @config: path               Descriptive: the mapping is configurable at runtime
 
 Usage:
     from dfe_engine.source.expression import ExpressionValidator, ExpressionBuilder
@@ -40,7 +39,7 @@ from dataclasses import dataclass, field
 # Directive names
 # ---------------------------------------------------------------------------
 
-DIRECTIVES = frozenset({"source", "computed", "generated", "config"})
+DIRECTIVES = frozenset({"source", "computed", "generated"})
 
 # ---------------------------------------------------------------------------
 # Regex patterns
@@ -86,9 +85,6 @@ class ExprValidationResult:
 
     # Generated/computed
     expression: str | None = None
-
-    # Config
-    config_path: str | None = None
 
     @property
     def field(self) -> str | None:
@@ -217,20 +213,10 @@ def _validate_computed(body: str, result: ExprValidationResult) -> None:
     result.expression = body
 
 
-def _validate_config(body: str, result: ExprValidationResult) -> None:
-    """Validate @config directive body."""
-    if not body:
-        result.valid = False
-        result.errors.append("@config path is empty")
-        return
-    result.config_path = body
-
-
 _VALIDATORS = {
     "source": _validate_source,
     "computed": _validate_computed,
     "generated": _validate_generated,
-    "config": _validate_config,
 }
 
 

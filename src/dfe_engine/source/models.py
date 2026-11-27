@@ -187,7 +187,7 @@ class SchemaColumn(BaseModel):
     )
     expr: str | None = Field(
         default=None,
-        description="DFE directive (@source, @generated, @captured, @computed, @config)",
+        description="DFE directive (@source, @computed, @generated)",
     )
     comment: str | None = Field(
         default=None,
