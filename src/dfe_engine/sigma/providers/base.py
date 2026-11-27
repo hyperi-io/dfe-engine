@@ -55,7 +55,7 @@ class ProviderAuth(BaseModel):
 
     kind: AuthKind = AuthKind.NONE
     secret_path: str = Field(
-        default="", description="Path in the secret store holding the token or key"
+        default="", description="Path under sigma/ in the secret store holding the token or key"
     )
     username: str = Field(default="", description="Git username for token auth (HTTPS)")
 
