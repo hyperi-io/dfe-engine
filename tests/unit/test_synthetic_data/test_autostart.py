@@ -11,11 +11,11 @@ import asyncio
 import pytest
 
 from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
-from dfe_engine.settings import SyntheticDataSettings
+from dfe_engine.settings import DFESettings, SyntheticDataSettings
 from dfe_engine.synthetic_data.autostart import run_standing_stream, start_autostart
 from dfe_engine.synthetic_data.credential import StreamCredential
 from dfe_engine.synthetic_data.models import StreamRequest
-from dfe_engine.synthetic_data.service import SyntheticDataService
+from dfe_engine.synthetic_data.service import SyntheticDataService, own_receiver_hosts
 from tests.unit.test_synthetic_data.factories import make_stream_credential
 
 _SCHEMAS_ROOT = _resolve_package_schemas_root()
@@ -71,6 +71,57 @@ _OWN = "https://receiver.dfe.example/ingest"
 )
 def test_the_credential_goes_only_to_the_own_receiver(settings, url, presents):
     assert service(**settings).presents_credential(url) is presents
+
+
+_IN_CLUSTER = {
+    "dfe-receiver",
+    "dfe-receiver.dfe",
+    "dfe-receiver.dfe.svc",
+    "dfe-receiver.dfe.svc.cluster.local",
+}
+
+
+@pytest.mark.parametrize(
+    ("deployment", "transport", "hosts"),
+    [
+        ({}, {}, {"dfe-receiver"}),
+        ({"namespace": "dfe"}, {}, _IN_CLUSTER),
+        (
+            {"namespace": "dfe"},
+            {"mesh_enabled": True, "mesh_namespace": "mesh"},
+            _IN_CLUSTER | {"dfe-receiver-mesh.mesh.svc.cluster.local"},
+        ),
+    ],
+    ids=["docker_service_name", "kubernetes_namespace", "mesh_listener_alias"],
+)
+def test_the_own_receiver_hosts_come_from_the_manifest(deployment, transport, hosts):
+    settings = DFESettings(env="dev", deployment=deployment, transport=transport)
+    assert own_receiver_hosts(settings) == hosts
+
+
+@pytest.mark.parametrize(
+    ("url", "presents"),
+    [
+        ("http://dfe-receiver:8080/ingest", True),
+        ("http://dfe-receiver.dfe.svc.cluster.local:8080/ingest", True),
+        ("https://DFE-RECEIVER.dfe/ingest", True),
+        ("http://dfe-receiver.attacker.example:8080/ingest", False),
+        ("http://attacker.example/ingest", False),
+    ],
+    ids=[
+        "short_name",
+        "fqdn",
+        "namespace_form_any_case",
+        "own_name_under_another_domain",
+        "foreign",
+    ],
+)
+def test_the_derived_receiver_hosts_get_the_credential(url, presents):
+    settings = DFESettings(env="dev", deployment={"namespace": "dfe"})
+    synthetic = SyntheticDataService(
+        SyntheticDataSettings(), own_receivers=own_receiver_hosts(settings)
+    )
+    assert synthetic.presents_credential(url) is presents
 
 
 @pytest.mark.parametrize(
