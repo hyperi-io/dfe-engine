@@ -740,6 +740,40 @@ class TestRulesRefuseUncompilable:
         ]
         assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
+    @pytest.mark.parametrize(
+        ("where", "bound"),
+        [
+            ("_timestamp_load < now()", "_timestamp_load < now()"),
+            (
+                "_timestamp >= fromUnixTimestamp64Milli(1795000000000)",
+                "_timestamp >= fromUnixTimestamp64Milli(1795000000000)",
+            ),
+        ],
+        ids=["constant_bound_on_load_time", "epoch_bound_on_event_time"],
+    )
+    def test_search_filtering_only_on_time_is_refused_and_says_so(
+        self, client, admin_headers, where, bound
+    ):
+        # The hunt window owns time, so a search whose only filter is a time bound has
+        # no detection logic left. The refusal names the bound, not "empty WHERE".
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={
+                "raw_sql": (
+                    f"SELECT _timestamp,_json FROM dfe.main WHERE ({where}) "
+                    "ORDER BY _timestamp DESC LIMIT 200"
+                ),
+                "saved_search_name": "time only",
+            },
+            headers=admin_headers,
+        )
+
+        sql_errors = _assert_refused(resp)
+        assert len(sql_errors) == 1
+        assert "filters only on time" in sql_errors[0]["message"]
+        assert bound in sql_errors[0]["message"]
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
+
     def test_create_refuses_sql_that_does_not_parse(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules",

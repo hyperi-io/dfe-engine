@@ -333,6 +333,7 @@ _ESCAPE_FIX = (
     "A rule matches rows of its own source table; compare against a list of values, "
     "not another table."
 )
+_TIME_ONLY_FIX = "Add a filter on the events' own fields, such as a field value or a message match."
 _CEL_FIX = (
     "Check the expression's syntax and that it calls only functions the hunt profile "
     "allows. To divide two fields, wrap an operand in double() or int()."
@@ -542,6 +543,8 @@ class RuleCreationService:
         # transpiled CEL filter reaches without passing through the SQL check above.
         if not sql_errors:
             sql_errors = self.condition_errors(rule.where_clause)
+        if not sql_errors and request.user_sql and not rule.where_clause.strip():
+            sql_errors = self._time_only_errors(strip_time_placeholder(request.user_sql))
 
         # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
@@ -831,6 +834,25 @@ class RuleCreationService:
         if parsed.where_clause != where:
             raise RuleConditionError("reading the compiled condition as a rule changed it")
         return sql
+
+    def _time_only_errors(self, sql: str) -> list[SqlValidationError]:
+        """Why SQL left with no filter is refused, when time bounds were all it filtered on.
+
+        Empty when the SQL had no filter at all, which the rule's own check reports.
+        """
+        bounds = self._rewriter.parse_user_sql(sql).stripped_time_bounds
+        if not bounds:
+            return []
+        return [
+            SqlValidationError(
+                message=(
+                    f"The query filters only on time ({'; '.join(bounds)}). The hunt "
+                    "window already bounds time for every rule, so this one would match "
+                    "every event."
+                ),
+                suggestion=_TIME_ONLY_FIX,
+            )
+        ]
 
     def _time_bounds(self, target: str, where: str) -> list[str]:
         """The time bounds a rule read takes out of ``where`` on ``target``."""
