@@ -27,6 +27,7 @@ from dfe_engine.source.models import (
     SourceWriteRequest,
     apply_source_write_update,
     draft_build_version_to_invalidate,
+    inherited_header_version,
     next_major_source_version,
     source_from_write,
     source_version_bump_required,
@@ -158,7 +159,7 @@ class TestSourceHeader:
     def test_defaults(self):
         h = SourceHeader()
         assert h.type == "timeseries"
-        assert h.version == "1.0.3"
+        assert h.version == inherited_header_version()
 
         custom = SourceHeader(type="minimal", version="2.0.0")
         assert (custom.type, custom.version) == ("minimal", "2.0.0")

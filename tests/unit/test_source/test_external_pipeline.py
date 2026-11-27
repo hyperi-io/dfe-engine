@@ -356,7 +356,7 @@ def test_the_fields_a_pipeline_can_set_are_the_default_headers_source_columns():
 
     assert list(fields) == ["_timestamp", "_timestamp_received", "_org_id", "_source", "_tags"]
     assert fields["_timestamp"] == (
-        "the loader reads timestamp, and when it is not there it takes the load time"
+        "the loader reads timestamp, then @timestamp, then _timestamp, "
+        "and when none is there it takes the load time"
     )
-    assert "@timestamp" not in fields["_timestamp"]
     assert fields["_tags"].startswith("the loader reads _tags, then tags")
