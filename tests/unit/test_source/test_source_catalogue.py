@@ -62,9 +62,7 @@ WELL_FORMED_ENTRY = CATALOGUE_FIXTURES / "entries" / "cisco-asa.yaml"
 def _block(*, entry: sc.CatalogueEntry) -> dict[str, Any]:
     """The catalogue-block fields an entry was read with."""
     return {
-        "beats": entry.beats,
         "data_stream": entry.data_stream,
-        "framing": entry.framing,
         "intakes": entry.intakes,
         "package": entry.package,
         "variants": entry.variants,

@@ -5,9 +5,9 @@ source: cisco-asa
 display_name: cisco_asa.log
 description: The log data stream of the Elastic cisco_asa integration.
 match:
-  field: _source
+  field: data_stream.dataset
   operator: equals
-  value: cisco-asa
+  value: cisco_asa.log
 schema:
   meta_schema: meta/elastic/ecs
   derived_schema: derived/cisco_asa/log
@@ -19,6 +19,5 @@ catalogue:
   package: cisco_asa
   data_stream: log
   intakes: [beats, receiver]
-  framing: line
   variants:
     - filebeat.cisco_asa.default

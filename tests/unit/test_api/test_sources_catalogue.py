@@ -93,8 +93,6 @@ class TestListCatalogue:
             "dataset": "okta.system",
             "intakes": ["beats", "fetcher"],
             "default_intake": "fetcher",
-            "framing": None,
-            "beats": {"module": "okta", "fileset": "system"},
             "has_schema": True,
             "engine": "elastic",
             "variant": "filebeat.okta.default",

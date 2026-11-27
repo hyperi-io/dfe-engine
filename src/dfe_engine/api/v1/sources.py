@@ -830,14 +830,6 @@ class CatalogueEntryObject(BaseModel):
         description="The intake a create takes when it names none: the first of fetcher, "
         "beats and receiver the entry lists"
     )
-    framing: str | None = Field(
-        default=None,
-        description="Receiver intakes only: whether the pipeline wants the syslog line or the body",
-    )
-    beats: dict[str, str] = Field(
-        default_factory=dict,
-        description="Beats module and fileset carrying the same source, when one does",
-    )
     has_schema: bool = Field(
         description="Whether the entry binds a table schema. A fetcher intake without one is "
         "refused on create (422), because a fetcher on its own topic needs one"
@@ -3887,14 +3879,12 @@ def _to_catalogue_object(
     return CatalogueEntryObject(
         availability=available.state,
         availability_reason=available.reason,
-        beats=dict(entry.beats),
         data_stream=entry.data_stream,
         dataset=entry.dataset,
         default_intake=entry.default_intake,
         description=entry.request.description,
         display_name=entry.request.display_name,
         engine=transform.engine if transform else None,
-        framing=entry.framing,
         has_schema=entry.request.schema_config is not None,
         intakes=sorted(entry.intakes),
         name=entry.name,

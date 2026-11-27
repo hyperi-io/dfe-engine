@@ -39474,26 +39474,6 @@
             "title": "Default Intake",
             "description": "The intake a create takes when it names none: the first of fetcher, beats and receiver the entry lists"
           },
-          "framing": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Framing",
-            "description": "Receiver intakes only: whether the pipeline wants the syslog line or the body"
-          },
-          "beats": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Beats",
-            "description": "Beats module and fileset carrying the same source, when one does"
-          },
           "has_schema": {
             "type": "boolean",
             "title": "Has Schema",

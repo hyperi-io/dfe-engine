@@ -18,8 +18,5 @@ catalogue:
   package: okta
   data_stream: system
   intakes: [beats, fetcher]
-  beats:
-    module: okta
-    fileset: system
   variants:
     - filebeat.okta.default
