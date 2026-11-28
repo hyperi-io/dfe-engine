@@ -33,6 +33,8 @@ from dfe_schemas.manifest import Manifest, ManifestError, ManifestObject, load_m
 from dfe_schemas.render import RenderedObject, Renderer
 from scalo.logger import logger
 
+from dfe_engine.schema_cache import reseed_clears
+
 if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
 
@@ -111,6 +113,7 @@ def overlay_root() -> Path | None:
     return path if path.is_dir() else None
 
 
+@reseed_clears
 @lru_cache(maxsize=8)
 def _manifest(root: Path) -> Manifest:
     """The checked manifest for one tree, read once per root.
@@ -418,6 +421,7 @@ def object_names(*object_ids: str, data_database: str = "dfe") -> dict[str, str]
     return {object_id: names[object_id] for object_id in object_ids}
 
 
+@reseed_clears
 @lru_cache(maxsize=8)
 def _all_object_names(root: Path, data_database: str) -> dict[str, str]:
     """Every manifest id to its object's name, rendered once per tree.

@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Literal
 
 from dfe_engine.kafka.topics import TopicAdmin, consumer_group_backlog
 from dfe_engine.schema.schema_loader import SchemaLoader
+from dfe_engine.schema_cache import reseed_clears
 from dfe_engine.source.models import (
     DEFAULT_HEADER_TYPE,
     Source,
@@ -116,6 +117,7 @@ def reads_from_expr(field: str, expr: str) -> str | None:
     return text
 
 
+@reseed_clears
 @functools.cache
 def header_fields(
     header_type: str = DEFAULT_HEADER_TYPE, header_version: str | None = None

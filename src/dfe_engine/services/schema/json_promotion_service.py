@@ -31,6 +31,7 @@ from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 from dfe_engine.orgs.tenant_scope import org_condition
 from dfe_engine.schema.applier import table_exists
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
+from dfe_engine.schema_cache import reseed_clears
 from dfe_engine.source.expression import ExpressionBuilder, ExpressionValidator
 from dfe_engine.source.models import PROMOTED_FIELD_TYPE, SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
@@ -220,6 +221,7 @@ def _ch_family(ch_type: str) -> str:
     return bare
 
 
+@reseed_clears
 @functools.cache
 def _primitive_by_ch_family() -> dict[str, str]:
     """Each ClickHouse type the registry maps a primitive to, and the primitive it maps to.
