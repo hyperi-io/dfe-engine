@@ -12,11 +12,14 @@ A re-seed rewrites that tree in place, so a read made before it is the old
 version's. Each such cache registers here, and the re-seed clears them all.
 """
 
+from functools import _CacheInfo
 from typing import Protocol
 
 
 class _Cached(Protocol):
     def cache_clear(self) -> None: ...
+
+    def cache_info(self) -> _CacheInfo: ...
 
 
 _registered: list[_Cached] = []
