@@ -41,6 +41,7 @@ from dfe_engine.clickhouse.function_guard import (
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.masking import CREDENTIAL_MAP, credential_name, words
 from dfe_engine.orgs.models import ORG_NAME_PATTERN, TENANT_ID_PATTERN
+from dfe_engine.schema_cache import reseed_clears
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 from dfe_engine.source.type_registry import (
     LOWCARDINALITY_ATTRIBUTE,
@@ -131,6 +132,7 @@ def state_from_enabled(enabled: bool) -> SourceState:
     return "active" if enabled else "disabled"
 
 
+@reseed_clears
 @cache
 def engine_registry() -> EngineRegistry:
     """The permitted-engine registry, loaded on first use rather than at import."""
@@ -335,6 +337,7 @@ class SchemaColumn(BaseModel):
 DEFAULT_HEADER_TYPE = "timeseries"
 
 
+@reseed_clears
 @cache
 def inherited_header_version() -> str:
     """The version of the default header an unauthored source inherits.
@@ -1024,6 +1027,7 @@ A source can have NO origin, and then it is None. That is the catch-all table th
 FetcherTopic = Literal["own", "main"]
 
 
+@reseed_clears
 @lru_cache(maxsize=1)
 def _topic_policy():
     """The declared Kafka naming rule, read from dfe-schemas.

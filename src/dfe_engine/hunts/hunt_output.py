@@ -33,6 +33,8 @@ from functools import cache
 
 from scalo.logger import logger
 
+from dfe_engine.schema_cache import reseed_clears
+
 from ..clickhouse.quoting import quote_identifier, quote_literal
 from ..orgs.available_ids import ORG_ID_COLUMN
 from ..schema.schema_loader import SchemaLoader, hunt_schema_path
@@ -75,6 +77,7 @@ class HuntDetectionColumn:
 _COPIED_FROM_SOURCE = {"matched_uuid": "_uuid"}
 
 
+@reseed_clears
 @cache
 def hunt_detection_columns() -> tuple[HuntDetectionColumn, ...]:
     """The hunt-specific columns appended after the common header, as dfe-schemas declares them.

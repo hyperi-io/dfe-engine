@@ -81,6 +81,7 @@ class TestEnsureStorage:
         self, monkeypatch, config_dir, schemas_dir, seed_dir
     ):
         # An upgraded pod reads its header version before startup re-seeds the tree.
+        from dfe_engine.schema_cache import registered
         from dfe_engine.source.models import DEFAULT_HEADER_TYPE, inherited_header_version
 
         def profile(root: Path, current: str) -> None:
@@ -97,6 +98,7 @@ class TestEnsureStorage:
         try:
             assert inherited_header_version() == "1.0.3"
             ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
+            assert [c for c in registered() if c.cache_info().currsize] == []
             assert inherited_header_version() == "1.0.4"
         finally:
             inherited_header_version.cache_clear()
@@ -143,3 +145,47 @@ class TestEnsureStorage:
         ensure_storage(settings=settings)
         assert config_dir.is_dir()
         assert settings.schemas.schemas_dir == ""
+
+
+# functools caches that read nothing from the configured schema tree.
+_NOT_TREE_CACHES = {
+    "dfe_engine.appmgmt.operations._named_queries": "reads a file inside the package",
+    "dfe_engine.auth.accounts._dummy_hash": "a password hash, no file",
+    "dfe_engine.auth.oidc.adapters.entra._confidential_client": "MSAL clients",
+    "dfe_engine.governance.actions._warn_stored_credential": "a warn-once guard",
+    "dfe_engine.governance.ch.models.catalogue": "reads the pinned dfe-schemas wheel",
+    "dfe_engine.governance.policies._prefix_matcher": "a compiled regex",
+}
+
+
+def _module_caches() -> dict[str, object]:
+    """Every module-level functools cache defined in the engine, by qualified name."""
+    import importlib
+    import pkgutil
+
+    import dfe_engine
+
+    found: dict[str, object] = {}
+    for info in pkgutil.walk_packages(dfe_engine.__path__, "dfe_engine."):
+        module = importlib.import_module(info.name)
+        for name, value in vars(module).items():
+            if not (hasattr(value, "cache_clear") and hasattr(value, "__wrapped__")):
+                continue
+            if getattr(value, "__module__", None) == info.name:
+                found[f"{info.name}.{name}"] = value
+    return found
+
+
+def test_every_module_cache_is_registered_or_named_as_not_reading_the_tree():
+    from dfe_engine.schema_cache import registered
+
+    caches = _module_caches()
+    tracked = {id(c) for c in registered()}
+    unaccounted = sorted(
+        name for name, c in caches.items() if id(c) not in tracked and name not in _NOT_TREE_CACHES
+    )
+    assert unaccounted == [], (
+        "a re-seed leaves these caches holding the old schema tree: decorate each with "
+        "@reseed_clears, or add it to _NOT_TREE_CACHES with the reason it reads no tree"
+    )
+    assert sorted(set(_NOT_TREE_CACHES) - set(caches)) == []

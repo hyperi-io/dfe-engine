@@ -25,6 +25,7 @@ from dfe_schemas.render import TableDDL
 from dfe_schemas.render import TableSpec as CreateSpec
 from scalo.logger import logger
 
+from dfe_engine.schema_cache import reseed_clears
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import InvalidUseCaseError, TypeRegistry
 
@@ -174,6 +175,7 @@ class TableSpec:
     config: DDLConfig
 
 
+@reseed_clears
 @functools.cache
 def _tables_at(root: Path, platform: Platform) -> TableDDL:
     return TableDDL.load(platform=platform, root=root)

@@ -21,6 +21,7 @@ from scalo.logger import logger
 
 from dfe_engine import __version__
 from dfe_engine.schema.schema_loader import DEFAULT_SCHEMAS_SEED_DIR, SEED_DIR_ENV_VAR
+from dfe_engine.schema_cache import clear_schema_caches
 from dfe_engine.settings import DFESettings
 
 DEFAULT_CONFIG_DIR = "/app/config"
@@ -89,10 +90,8 @@ def ensure_storage(*, settings: DFESettings) -> None:
 
     _copy_seed(schemas_dir=schemas_dir, seed_dir=seed_dir)
     marker.write_text(f"{stamp}\n")
-    # A header version read before this seed came from the old tree.
-    from dfe_engine.source.models import inherited_header_version
-
-    inherited_header_version.cache_clear()
+    # Anything read before this seed came from the old tree.
+    clear_schema_caches()
     if seeded_by:
         logger.info(f"Re-seeded schemas over a tree seeded by {seeded_by!r}; now {stamp!r}")
         return
