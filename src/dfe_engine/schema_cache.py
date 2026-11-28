@@ -19,7 +19,7 @@ from typing import Protocol
 class _Cached(Protocol):
     def cache_clear(self) -> None: ...
 
-    def cache_info(self) -> _CacheInfo: ...
+    def cache_info(self) -> _CacheInfo: ...  # noqa: V105
 
 
 _registered: list[_Cached] = []
