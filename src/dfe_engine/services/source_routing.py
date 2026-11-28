@@ -799,8 +799,10 @@ def compile_loader_routing(
     emitting it for every ACTIVE source keeps the two in step without the
     compile having to know which ones diverge.
 
-    Dormant and disabled sources are left out: their schema stays
-    pre-positioned but they have no live loader path.
+    Dormant sources are listed too: their table is deployed, and a parent
+    source's transform still writes their rows. A loader that is sent
+    ``table_schemas`` routes only to listed tables, so leaving one out sends its
+    rows to the default table. Disabled sources are left out.
 
     ``default_org_id`` is the tenant a record naming no org takes, the same value
     the receiver and fetcher are compiled with, so a record no first hop stamped
@@ -842,7 +844,7 @@ def compile_loader_routing(
     schema_versions: dict[str, str] = {}
     table_schemas: dict[str, list[LoaderTableColumn]] = {}
     external: list[LoaderExternalTopic] = []
-    for source in registry.get_all_sources(states=("active",)):
+    for source in registry.get_all_sources(states=("active", "dormant")):
         source_to_table[source.source] = source.table_name
         if source.deployed_version is not None:
             schema_versions[source.table_name] = _loader_schema_version(
@@ -851,6 +853,8 @@ def compile_loader_routing(
             columns = _loader_table_columns(source, source.deployed_version, builder)
             if columns:
                 table_schemas[source.table_name] = columns
+        if source.state != "active":
+            continue
         entry = _external_topic(source, tenancy)
         if entry is not None:
             external.append(entry)

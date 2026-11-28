@@ -528,6 +528,7 @@ class TestCompileLoaderRouting:
                 "syslog": "syslog",
                 "crowdstrike-edr": "crowdstrike-edr",
                 "present-src": "present-src",
+                "dormant-src": "dormant-src",
             },
         }
 
@@ -541,13 +542,12 @@ class TestCompileLoaderRouting:
 
     def test_source_to_table_populated(self, registry):
         config = compile_loader_routing(registry)
-        # All ACTIVE sources should appear
         assert "filebeat" in config.source_to_table
         assert "syslog" in config.source_to_table
         assert "crowdstrike-edr" in config.source_to_table
-        # Disabled + dormant excluded
+        # A dormant source keeps its table, and a parent's transform still writes its rows.
+        assert config.source_to_table["dormant-src"] == "dormant-src"
         assert "disabled-src" not in config.source_to_table
-        assert "dormant-src" not in config.source_to_table
 
     def test_custom_db(self, registry):
         config = compile_loader_routing(registry, db="prod")
