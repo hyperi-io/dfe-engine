@@ -110,7 +110,7 @@ with no lookup at all:
 
 1. The loader reads `_source` from the payload
 2. `_source` is the target table: `{default_db}.{_source}`
-3. `source_to_table` maps every ACTIVE source to its table
+3. `source_to_table` maps every active and dormant source to its table. A dormant source's rows still arrive through a parent source's transform, and a loader sent `table_schemas` routes only to the tables these blocks list, sending anything else to `main`
 4. The table's columns come from ClickHouse `system.columns`, which the engine created from the source definition ([schema-sync.md](schema-sync.md))
 5. `table_schema_versions` maps each deployed source's table to `<deployed version>+<meta-schema version>+<derived-schema version>`, so a deploy that adds columns changes the block and the loader re-reads that table. The last two parts are the versions the table was built from: the source's pin, else the schema's `current`, so a new version changes the string for a source that pins none. A part is left out when the source has no such schema
 6. `table_schemas` lists each deployed source's table columns as its DDL created them: `name` and `type`, plus `default_kind` (`MATERIALIZED`, `ALIAS` or `DEFAULT`) and `comment` where the column has one. The engine builds them from the same schema files as the DDL, with no ClickHouse read, so the loader takes a newly deployed table's first records without waiting on `system.columns`. ClickHouse's own read still replaces them
@@ -120,7 +120,7 @@ with no lookup at all:
 routing:
   default_db: dfe                 # Database (or per-org via org_routes)
   default_org_id: acme-prod       # Tenant for a record with no _org_id
-  source_to_table: {}             # Every ACTIVE source: its table
+  source_to_table: {}             # Every active and dormant source: its table
   table_schema_versions: {}       # Each deployed source's table: <deployed version>+<meta version>+<derived version>
   table_schemas: {}               # Each deployed source's table: [{name, type, default_kind, comment}]
 ```
